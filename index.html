@@ -291,9 +291,9 @@ const MATERIALS = [
 
 const PROJECTS_SEED = [
   { id: 'RR', code: 'RR-03', name: '5800 Federal',          gc: 'Cowgirl Demo',        address: '5800 Federal Blvd, Denver, CO',   startDate: '2026-05-02', status: 'active',    material: ['EX'] },
-  { id: 'WP', code: 'WP-24', name: 'Winter Park - TEST',    gc: 'Lake Trail Homes',    address: '4421 Birch Rd, Winter Park, CO',  startDate: '2026-04-12', status: 'active',    material: ['CF','TS'] },
-  { id: 'GW', code: 'GW-12', name: 'GW Apartments - TEST',  gc: 'Avere Construction',  address: '88 Greenway Blvd, Boulder, CO',   startDate: '2026-03-01', status: 'completed', material: ['CR','EX'] },
-  { id: 'AS', code: 'AS-09', name: 'Aurora Square - TEST',  gc: 'Heritage Builders',   address: '7700 E Iliff Ave, Aurora, CO',    startDate: '2026-08-01', status: 'upcoming',  material: ['CF','CR'] },
+  { id: 'WP', code: 'WP-24', name: 'Winter Park',    gc: 'Lake Trail Homes',    address: '4421 Birch Rd, Winter Park, CO',  startDate: '2026-04-12', status: 'active',    material: ['CF','TS'] },
+  { id: 'GW', code: 'GW-12', name: 'GW Apartments',  gc: 'Avere Construction',  address: '88 Greenway Blvd, Boulder, CO',   startDate: '2026-03-01', status: 'completed', material: ['CR','EX'] },
+  { id: 'AS', code: 'AS-09', name: 'Aurora Square',  gc: 'Heritage Builders',   address: '7700 E Iliff Ave, Aurora, CO',    startDate: '2026-08-01', status: 'upcoming',  material: ['CF','CR'] },
 ];
 
 const OPERATORS_SEED = [
@@ -2001,7 +2001,7 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate }) {
     navigate('/driver');
   };
 
-  const canSubmit = cy && parseFloat(cy) > 0 && photo;
+  const canSubmit = cy && parseFloat(cy) > 0;
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
@@ -2070,18 +2070,29 @@ function AdminShell({ db, setDb, navigate, hash }) {
   );
 }
 
-function OperatorRedirect({ db, navigate }) {
-  useEffect(() => {
-    const firstOp = db.operators[0];
-    if (firstOp && firstOp.projectIds && firstOp.projectIds[0]) {
-      navigate(`/admin/p/${firstOp.projectIds[0]}/o/${firstOp.id}`);
-    } else {
-      navigate('/');
-    }
-  }, []);
-  return <div style={{ padding: 32, textAlign: 'center', fontFamily: F.body, color: C.inkDim }}>Loading operator view…</div>;
+function OperatorShell({ db, setDb, navigate }) {
+  const [opId, setOpId] = React.useState('op-001');
+  const op = db.operators.find(o => o.id === opId);
+  const projectId = op?.projectIds?.[0];
+  const project = db.projects.find(p => p.id === projectId);
+  const trucks = db.trucks.filter(t => t.projectId === projectId && t.operatorId === opId);
+  const hours = db.hours.filter(h => h.projectId === projectId);
+  const loads = db.loads.filter(l => l.projectId === projectId);
+  return (
+    <div>
+      <Topbar navigate={navigate} role="Operator" current={project ? project.name : 'No project'} />
+      <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid ${C.border}` }}>
+        <select value={opId} onChange={e => setOpId(e.target.value)} style={{ background: 'transparent', border: 'none', color: C.inkDim, fontFamily: F.body, fontSize: 12, cursor: 'pointer' }}>
+          {db.operators.map(o => <option key={o.id} value={o.id} style={{ background: C.surface }}>Demo: {o.name}</option>)}
+        </select>
+        <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', color: C.inkDim, fontFamily: F.body, fontSize: 12, cursor: 'pointer' }}>Switch role</button>
+      </div>
+      {project
+        ? <OperatorOverview project={project} trucks={trucks} hours={hours} loads={loads} db={db} navigate={navigate} setDb={setDb} />
+        : <div style={{ padding: 32, color: C.inkDim, fontFamily: F.body }}>No project assigned.</div>}
+    </div>
+  );
 }
-
 function App() {
   const [hash, navigate] = useHash();
   const [db, setDb] = useState({
@@ -2099,7 +2110,7 @@ function App() {
     <div>
       {route === '' && <Landing navigate={navigate} />}
       {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-      {route === 'operator' && <OperatorRedirect db={db} navigate={navigate} />}
+      {route === 'operator' && <OperatorShell db={db} setDb={setDb} navigate={navigate} />}
       {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
     </div>
   );
