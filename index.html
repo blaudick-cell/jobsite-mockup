@@ -924,7 +924,6 @@ function AdminProject({ projectId, db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: 6 }}>
-            <Label color={C.accent}><EditableText value={project.code} onSave={(v) => updateProject({ code: v })} mono /></Label>
             <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>started <EditableText value={project.startDate} onSave={(v) => updateProject({ startDate: v })} mono placeholder="YYYY-MM-DD" /></span>
           </div>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>
@@ -1037,7 +1036,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
         <Avatar name={operator.name} size={56} color={C.accent} />
         <div style={{ flex: 1 }}>
-          <Label color={C.accent}>Operator on {project.code}</Label>
+          <Label color={C.accent}>Operator on {project.name}</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
             <EditableText value={operator.name} onSave={(v) => updateOperator({ name: v })} />
           </h1>
@@ -1897,7 +1896,7 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
         <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>{truckType.label} · {truckType.cap} · {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
           <Label style={{ marginBottom: 4 }}>On project</Label>
-          <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>{project.code} · {project.name}</div>
+          <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>{project.name}</div>
           <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{project.address}</div>
         </div>
       </div>
