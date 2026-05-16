@@ -1064,7 +1064,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Driver</Th><Th>Status</Th><Th align="right">Total hours</Th><Th align="right">Total loads</Th><Th align="right">Total revenue</Th><Th></Th></tr>
+            <tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Driver</Th><Th>Status</Th><Th align="right">Total hours</Th><Th align="right">Total loads</Th><Th align="right">Total revenue</Th><Th></Th><Th></Th></tr>
           </thead>
           <tbody>
             {trucks.map(t => {
@@ -1084,6 +1084,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
                   <Td align="right" mono>{fmtHours(truckHours)}</Td>
                   <Td align="right" mono>{truckLoadsAll.filter(l => l.status === 'approved').length}{truckLoadsAll.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: 4 }}>+{truckLoadsAll.filter(l => l.status === 'pending').length}p</span>}</Td>
                   <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(revenue)}</Td>
+                  <Td align="right">{driver ? <button onClick={(e) => { e.stopPropagation(); navigate(`/driver/${driver.id}`); }} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '4px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase' }}>Widget {'↗'}</button> : <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td align="right" dim>{'>'}</Td>
                 </Tr>
               );
@@ -1091,7 +1092,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={9} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this project</td>
+              <td colSpan={10} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this project</td>
             </tr>
           </tbody>
         </table>
