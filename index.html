@@ -2039,6 +2039,18 @@ function AdminShell({ db, setDb, navigate, hash }) {
   );
 }
 
+function OperatorRedirect({ db, navigate }) {
+  useEffect(() => {
+    const firstOp = db.operators[0];
+    if (firstOp && firstOp.projectIds && firstOp.projectIds[0]) {
+      navigate(`/admin/p/${firstOp.projectIds[0]}/o/${firstOp.id}`);
+    } else {
+      navigate('/');
+    }
+  }, []);
+  return <div style={{ padding: 32, textAlign: 'center', fontFamily: F.body, color: C.inkDim }}>Loading operator view…</div>;
+}
+
 function App() {
   const [hash, navigate] = useHash();
   const [db, setDb] = useState({
@@ -2056,15 +2068,7 @@ function App() {
     <div>
       {route === '' && <Landing navigate={navigate} />}
       {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-      {route === 'operator' && (() => {
-        // Auto-route operator into unified operator view at first available op + first project
-        const firstOp = db.operators[0];
-        const firstProj = firstOp ? firstOp.projectIds[0] : null;
-        useEffect(() => {
-          if (firstOp && firstProj) navigate(`/admin/p/${firstProj}/o/${firstOp.id}`);
-        }, []);
-        return <div style={{padding: 32, textAlign: 'center', fontFamily: '"Inter", sans-serif', color: '#9a9a9a'}}>Loading operator view…</div>;
-      })()}
+      {route === 'operator' && <OperatorRedirect db={db} navigate={navigate} />}
       {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
     </div>
   );
