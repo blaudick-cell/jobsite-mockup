@@ -1276,71 +1276,6 @@ function NotFound({ navigate }) {
 // =====================================================================
 // OPERATOR
 // =====================================================================
-function OperatorEntry({ db, navigate }) {
-  const [opId, setOpId] = useState(db.operators[0].id);
-  const operator = db.operators.find(o => o.id === opId);
-  const operatorProjects = operator.projectIds.map(pid => db.projects.find(p => p.id === pid)).filter(Boolean);
-
-  return (
-    <div>
-      <Topbar navigate={navigate} role="Operator" current="Pick a project to enter" />
-      <div style={{ padding: S[6], maxWidth: 880, margin: '0 auto' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', flexWrap: 'wrap', gap: S[3], marginBottom: S[5] }}>
-          <div>
-            <Label color={C.accent} style={{ marginBottom: 6 }}>Sign in as</Label>
-            <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>
-              {operator.name}
-            </h1>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>{operator.phone} · {operator.email}</div>
-          </div>
-          <select value={opId} onChange={e => setOpId(e.target.value)}
-            style={{ background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 16px', borderRadius: R.pill, fontFamily: F.body, fontSize: 14, fontWeight: 600 }}>
-            {db.operators.map(o => <option key={o.id} value={o.id}>Switch to: {o.name}</option>)}
-          </select>
-        </div>
-
-        <Label style={{ marginBottom: S[3] }}>Your projects ({operatorProjects.length})</Label>
-        {operatorProjects.length === 0 ? (
-          <Card><div style={{ textAlign: 'center', color: C.inkDim, padding: S[5] }}>You're not assigned to any projects yet. Ask an admin to add you.</div></Card>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: S[3] }}>
-            {operatorProjects.map(p => {
-              const myTrucks = db.trucks.filter(t => t.projectId === p.id && t.operatorId === opId);
-              const myTruckIds = new Set(myTrucks.map(t => t.id));
-              const myHours = db.hours.filter(h => myTruckIds.has(h.truckId));
-              const myLoads = db.loads.filter(l => myTruckIds.has(l.truckId));
-              const myPending = myLoads.filter(l => l.status === 'pending').length + myHours.filter(h => h.status === 'pending').length;
-              const totalH = myHours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-              const totalRev = myHours.reduce((s, h) => { const t = myTrucks.find(x => x.id === h.truckId); return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0); }, 0);
-              return (
-                <button key={p.id} onClick={() => navigate(`/admin/p/${p.id}/o/${opId}`)}
-                  style={{ textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg, padding: S[5], cursor: 'pointer', color: C.ink, position: 'relative' }}
-                  onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
-                  onMouseLeave={e => e.currentTarget.style.background = C.surface}>
-                  {myPending > 0 && (
-                    <div style={{ position: 'absolute', top: 12, right: 12 }}>
-                      <Pill color={C.warn} soft={C.warnSoft}>{myPending} pending</Pill>
-                    </div>
-                  )}
-                  <Label color={C.accent} style={{ marginBottom: 6 }}>{p.code}</Label>
-                  <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, letterSpacing: -0.6, marginBottom: 6 }}>{p.name}</div>
-                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[4] }}>{p.gc} · {p.address}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2] }}>
-                    <div><Label style={{ marginBottom: 4 }}>Trucks</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700 }}>{myTrucks.length}</div></div>
-                    <div><Label style={{ marginBottom: 4 }}>Hours</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700 }}>{fmtHours(totalH)}</div></div>
-                    <div><Label style={{ marginBottom: 4 }}>Revenue</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtMoney(totalRev)}</div></div>
-                  </div>
-                  <div style={{ marginTop: S[3], fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>Open {'→'}</div>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function OperatorOverview({ project, trucks, hours, loads, db, navigate, setDb }) {
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const totalRevenue = hours.reduce((s, h) => {
@@ -2121,7 +2056,15 @@ function App() {
     <div>
       {route === '' && <Landing navigate={navigate} />}
       {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-      {route === 'operator' && <OperatorEntry db={db} navigate={navigate} />}
+      {route === 'operator' && (() => {
+        // Auto-route operator into unified operator view at first available op + first project
+        const firstOp = db.operators[0];
+        const firstProj = firstOp ? firstOp.projectIds[0] : null;
+        useEffect(() => {
+          if (firstOp && firstProj) navigate(`/admin/p/${firstProj}/o/${firstOp.id}`);
+        }, []);
+        return <div style={{padding: 32, textAlign: 'center', fontFamily: '"Inter", sans-serif', color: '#9a9a9a'}}>Loading operator view…</div>;
+      })()}
       {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
     </div>
   );
