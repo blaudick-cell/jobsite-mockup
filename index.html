@@ -1260,6 +1260,38 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
           </Card>
         </div>
 
+        {/* Driver mobile widget link */}
+        <div style={{ marginTop: S[6] }}>
+          <Label style={{ marginBottom: S[3] }}>Driver mobile widget</Label>
+          {driver ? (
+            <Card>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
+                  <Avatar name={driver.name} size={44} color={C.accent} />
+                  <div>
+                    <Label style={{ marginBottom: 4 }}>What {driver.name.split(' ').pop()} sees</Label>
+                    <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink }}>
+                      Driver phone widget · #{truck.plate}
+                    </div>
+                    <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>
+                      Clock in/out, log loads, see today's earnings
+                    </div>
+                  </div>
+                </div>
+                <Btn size="md" onClick={() => navigate(`/driver/${driver.id}`)}>
+                  Open widget {'→'}
+                </Btn>
+              </div>
+            </Card>
+          ) : (
+            <Card>
+              <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, textAlign: 'center', padding: S[3] }}>
+                No driver assigned to this truck yet. Assign one above to open their mobile widget.
+              </div>
+            </Card>
+          )}
+        </div>
+
       </div>
     </div>
   );
