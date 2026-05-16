@@ -794,7 +794,6 @@ function AdminProjects({ db, setDb, navigate }) {
   const renderRow = (p, dim) => (
     <Tr key={p.id} onClick={() => navigate(`/admin/p/${p.id}`)}
       style={dim ? { opacity: 0.6 } : {}}>
-      <Td mono><span style={{ color: C.accent }}><EditableText value={p.code} onSave={(v) => updateProject(p.id, { code: v })} mono /></span></Td>
       <Td>
         <div style={{ fontWeight: 600 }}><EditableText value={p.name} onSave={(v) => updateProject(p.id, { name: v })} /></div>
         <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}><EditableText value={p.address} onSave={(v) => updateProject(p.id, { address: v })} /></div>
@@ -814,7 +813,7 @@ function AdminProjects({ db, setDb, navigate }) {
   const head = (
     <thead>
       <tr>
-        <Th>Code</Th><Th>Project</Th><Th>GC</Th><Th>Status</Th>
+        <Th>Project</Th><Th>GC</Th><Th>Status</Th>
         <Th align="right">Operators</Th>
         <Th align="right">Trucks active</Th>
         <Th align="right">Total loads</Th>
