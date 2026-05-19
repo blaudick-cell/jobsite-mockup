@@ -1,0 +1,24 @@
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+# Node / build (defensive — project has no build step today)
+node_modules/
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Claude Code worktrees (git-internal, but defensive)
+.claude/worktrees/
+.claude/launch.json
