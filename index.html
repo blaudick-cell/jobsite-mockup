@@ -31,7 +31,7 @@
     button { font-family: inherit; }
 
 
-    /* === Tier 2: tables → cards on mobile, bottom nav === */
+    /* === Tier 2: tables → cards on mobile === */
     @media (max-width: 700px) {
       /* Tables become vertical card stacks */
       body table, body thead, body tbody, body tr, body td {
@@ -97,48 +97,6 @@
       [style*="border-radius: 16px"] { border-radius: 12px !important; }
       /* Cards inside cards (KPIs) take full width */
       [style*="background: rgb(20, 20, 20)"] { width: 100% !important; box-sizing: border-box !important; }
-
-      /* Hide top operator tab strip on mobile */
-      .tabs-strip { display: none !important; }
-      /* Add safe area at bottom for bottom nav */
-      body { padding-bottom: 72px !important; }
-    }
-
-    /* Bottom nav for operator role on mobile */
-    .bottom-nav { display: none; }
-    @media (max-width: 700px) {
-      .bottom-nav {
-        display: flex !important;
-        position: fixed;
-        bottom: 0; left: 0; right: 0;
-        background: rgba(20, 20, 20, 0.96);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border-top: 1px solid #1f1f1f;
-        z-index: 100;
-        padding: 6px 4px calc(8px + env(safe-area-inset-bottom)) 4px;
-        justify-content: space-around;
-        gap: 2px;
-      }
-      .bottom-nav button {
-        flex: 1; background: transparent; border: 0; cursor: pointer;
-        padding: 8px 4px; font-family: inherit; font-size: 10px; font-weight: 600;
-        color: #9a9a9a; display: flex; flex-direction: column;
-        align-items: center; justify-content: center; gap: 4px; min-height: 48px;
-        letter-spacing: 0.4px; text-transform: uppercase;
-        position: relative;
-      }
-      .bottom-nav button.active { color: #B3E635; }
-      .bottom-nav button.active::before {
-        content: ''; position: absolute; top: 0; left: 25%; right: 25%;
-        height: 2px; background: #B3E635; border-radius: 0 0 2px 2px;
-      }
-      .bottom-nav .nav-badge {
-        position: absolute; top: 4px; right: 12px;
-        background: #FF6B47; color: #000; font-size: 9px; font-weight: 700;
-        border-radius: 999px; padding: 1px 5px; min-width: 14px; text-align: center;
-        font-family: "JetBrains Mono", monospace;
-      }
     }
 
     /* === Tier 1 mobile responsive === */
@@ -183,13 +141,6 @@
         padding: 8px 12px !important;
       }
       .topbar > div { gap: 12px !important; }
-      /* Tab strip horizontally scrolls */
-      .tabs-strip {
-        overflow-x: auto !important;
-        flex-wrap: nowrap !important;
-        -webkit-overflow-scrolling: touch;
-      }
-      .tabs-strip > button { flex-shrink: 0 !important; }
       /* Driver phone frame fills the actual phone */
       .phone-frame-outer {
         padding: 0 !important;
@@ -210,6 +161,75 @@
         min-height: 100vh !important;
       }
       .phone-frame-outer .phone-notch { display: none !important; }
+    }
+
+    /* === Mobile responsiveness pass — 2026-05 === */
+    /* Tap-target floor: inputs/selects/textareas inside the shells must be at least 44px tall under 700px. */
+    @media (max-width: 700px) {
+      input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
+      select,
+      textarea {
+        min-height: 44px !important;
+        padding: 12px 14px !important;
+        box-sizing: border-box !important;
+      }
+      /* Btn size="sm" (height:32) and size="xs" (height:26) → bump to 44px on mobile.
+         The Btn component renders inline height in the style attribute; match it. */
+      button[style*="height: 32px"],
+      button[style*="height: 26px"] {
+        min-height: 44px !important;
+        height: auto !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
+      }
+    }
+
+    /* DriverShell mini-KPI grids should stay 3-col on phone, not collapse via the global 1fr rule.
+       More specific than [style*="display: grid"]. Matches the explicit 3-col templates used in
+       DriverTruckDetail and DriverMultiTruckHome. */
+    @media (max-width: 600px) {
+      [style*="grid-template-columns: 1fr 1fr 1fr"],
+      [style*="gridTemplateColumns: 1fr 1fr 1fr"] {
+        grid-template-columns: 1fr 1fr 1fr !important;
+        gap: 8px !important;
+      }
+    }
+
+    /* OperatorLogLoadForm row: 90px / 1fr / 1fr / 100px / auto.
+       Default grid override collapses it to 1-col on ≤600 (still acceptable — inputs stack).
+       At 700px window we keep the grid but reflow it so it doesn't horizontally squeeze. */
+    @media (max-width: 900px) and (min-width: 601px) {
+      [style*="90px 1fr 1fr 100px auto"] {
+        grid-template-columns: 1fr 1fr !important;
+        gap: 12px !important;
+      }
+    }
+
+    /* DriverLogLoad photo placeholder: on very narrow phones, switch from fixed 140px height
+       to aspect-ratio so the icon+labels never feel cramped at 320–360px viewports. */
+    @media (max-width: 600px) {
+      button[style*="height: 140px"][style*="dashed"] {
+        height: auto !important;
+        aspect-ratio: 16 / 10 !important;
+        min-height: 120px !important;
+      }
+    }
+
+    /* Topbar at very narrow widths (≤500px): hide the breadcrumb/current text,
+       keep brand + role pill + Switch button visible. The role Pill is the first
+       <span> child; the breadcrumb is the second <span> sibling. Hide only the
+       second one. */
+    @media (max-width: 500px) {
+      .topbar > div:first-child > div > span:nth-child(2) {
+        display: none !important;
+      }
+    }
+
+    /* Horizontal-scroll safety net for unbroken IDs / emails / long plate strings.
+       Use `overflow-x: clip` (not `hidden`) so we don't create a scroll containing block,
+       which would break the sticky Topbar in iOS Safari and older Chromium. */
+    @media (max-width: 600px) {
+      html, body { overflow-x: clip; }
     }
     @media print {
       html, body { background: #fff !important; color: #000 !important; }
