@@ -147,7 +147,8 @@
         padding: 0 !important;
         background: #0A0A0A !important;
       }
-      .phone-frame-outer > .brand-frame-chrome {
+      .phone-frame-outer > .brand-frame-chrome,
+      .phone-frame-outer > .phone-frame-caption {
         display: none !important;
       }
       .phone-frame-outer > .phone-bezel {
@@ -359,6 +360,9 @@ const TRUCKS_SEED = [
   { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'AS', operatorId: 'op-005', driverId: 'dr-008' },
   { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'Cordillera Hauling',   projectId: 'CH', operatorId: 'op-009', driverId: 'dr-013' },
   { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Front Range Logistics', projectId: 'CH', operatorId: 'op-010', driverId: 'dr-014' },
+  { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
+  { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
+  { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
 ];
 
 const DRIVERS_SEED = [
@@ -1089,12 +1093,23 @@ function AdminProject({ projectId, db, setDb, navigate }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: 6 }}>
             <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>started <EditableText value={project.startDate} onSave={(v) => updateProject({ startDate: v })} mono placeholder="YYYY-MM-DD" /></span>
           </div>
-          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>
-            <EditableText value={project.name} onSave={(v) => updateProject({ name: v })} />
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+            <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>
+              <EditableText value={project.name} onSave={(v) => updateProject({ name: v })} />
+            </h1>
+            <StatusPill status={project.status || 'active'} />
+          </div>
           <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
             <EditableText value={project.gc} onSave={(v) => updateProject({ gc: v })} /> · <EditableText value={project.address} onSave={(v) => updateProject({ address: v })} />
           </div>
+          {project.material && project.material.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2], marginTop: S[3] }}>
+              {project.material.map(mc => {
+                const m = MATERIALS.find(x => x.code === mc);
+                return <Pill key={mc}>{m ? m.label : mc}</Pill>;
+              })}
+            </div>
+          )}
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -2245,6 +2260,7 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
 function Phone({ children }) {
   return (
     <div className="phone-frame-outer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: S[5], minHeight: '100vh', background: C.bgDeep }}>
+      <div className="phone-frame-caption" style={{ fontSize: 12, color: C.inkDim, marginBottom: S[3], textAlign: 'center', fontFamily: F.body }}>Driver view — what a field user sees in the field.</div>
       <div className="brand-frame-chrome" style={{ marginBottom: S[3] }}><Brand size="sm" /></div>
       <div className="phone-bezel" style={{ width: 360, minHeight: 760, background: '#000', borderRadius: 48, padding: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
         <div className="phone-screen" style={{ width: '100%', height: '100%', minHeight: 740, background: C.bg, borderRadius: 40, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -2848,6 +2864,8 @@ function AdminNewProject({ db, setDb, navigate }) {
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
 
+  useEffect(() => { window.scrollTo(0, 0); }, [step]);
+
   const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 14px', borderRadius: R.sm, fontFamily: F.body, fontSize: 15, width: '100%', boxSizing: 'border-box' };
 
   const deriveCode = (name) => {
@@ -2959,12 +2977,16 @@ function AdminNewProject({ db, setDb, navigate }) {
             <Label>Step 1 — Project basics</Label>
             <div>
               <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Project name</div>
-              <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="5800 Federal" style={inputStyle} autoFocus />
+              <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="e.g., West Side Phase 2" style={inputStyle} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
               <div>
                 <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Code (2–4 chars)</div>
-                <input value={effectiveCode} onChange={e => { setCodeTouched(true); setBasics(b => ({ ...b, code: e.target.value })); }} placeholder="RR" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={4} />
+                <input value={effectiveCode} onChange={e => {
+                  const v = e.target.value;
+                  setCodeTouched(v.length > 0);
+                  setBasics(b => ({ ...b, code: v }));
+                }} placeholder="e.g., WSP" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={4} />
                 {codeDuplicate && (
                   <div style={{ fontFamily: F.body, fontSize: 12, color: C.warn, marginTop: 6 }}>
                     Code "{effectiveCode}" is already used by "{duplicateOwner.name}".
@@ -2988,11 +3010,11 @@ function AdminNewProject({ db, setDb, navigate }) {
             </div>
             <div>
               <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>General contractor</div>
-              <input value={basics.gc} onChange={e => setBasics(b => ({ ...b, gc: e.target.value }))} placeholder="Cowgirl Demo" style={inputStyle} />
+              <input value={basics.gc} onChange={e => setBasics(b => ({ ...b, gc: e.target.value }))} placeholder="e.g., Acme Contractors" style={inputStyle} />
             </div>
             <div>
               <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Address</div>
-              <input value={basics.address} onChange={e => setBasics(b => ({ ...b, address: e.target.value }))} placeholder="5800 Federal Blvd, Denver, CO" style={inputStyle} />
+              <input value={basics.address} onChange={e => setBasics(b => ({ ...b, address: e.target.value }))} placeholder="e.g., 1234 Main St, Denver CO" style={inputStyle} />
             </div>
             <div>
               <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[2] }}>Materials (pick one or more)</div>
@@ -3227,11 +3249,13 @@ function AdminReports({ db, navigate }) {
     };
   });
 
+  const statusOrder = { active: 0, upcoming: 1, completed: 2 };
   const sortedRows = [...projectRows].sort((a, b) => {
     const va = a[sort.key];
     const vb = b[sort.key];
     let cmp;
-    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    if (sort.key === 'status') cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+    else if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
     else cmp = String(va).localeCompare(String(vb));
     return sort.dir === 'asc' ? cmp : -cmp;
   });
@@ -3353,7 +3377,7 @@ function AdminReports({ db, navigate }) {
           <Stat
             label="Hours today"
             value={fmtHours(hoursToday)}
-            sub={`yesterday ${fmtHours(hoursYesterday)}`}
+            sub={`yesterday total ${fmtHours(hoursYesterday)}h`}
           />
         </Card>
       </div>
@@ -3553,22 +3577,11 @@ function OperatorShell({ db, setDb, navigate, hash }) {
   );
 }
 const DB_STORAGE_KEY = 'jse_db_v1';
+const DB_SCHEMA_VERSION = 2;
 const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
 
 function App() {
   const [hash, navigate] = useHash();
-  // Derive document.title from the current hash so the browser tab reflects context.
-  useEffect(() => {
-    const h = hash || '/';
-    let title = 'Jobsite Exchange';
-    if (h === '/' || h === '') title = 'Jobsite Exchange';
-    else if (h.startsWith('/admin/reports')) title = 'JSE — Reports';
-    else if (h.startsWith('/admin/new')) title = 'JSE — New Project';
-    else if (h.startsWith('/admin')) title = 'JSE — Admin';
-    else if (h.startsWith('/operator')) title = 'JSE — Operator';
-    else if (h.startsWith('/driver')) title = 'JSE — Driver';
-    document.title = title;
-  }, [hash]);
   const [db, setDb] = useState(() => {
     const seed = {
       projects: PROJECTS_SEED,
@@ -3579,6 +3592,7 @@ function App() {
       loads: LOADS_SEED,
       invoices: INVOICES_SEED,
       rates: RATES_INIT,
+      schemaVersion: DB_SCHEMA_VERSION,
     };
     try {
       const raw = window.localStorage.getItem(DB_STORAGE_KEY);
@@ -3586,7 +3600,21 @@ function App() {
       const parsed = JSON.parse(raw);
       if (!parsed || typeof parsed !== 'object') return seed;
       const valid = DB_REQUIRED_KEYS.every(k => k in parsed);
-      return valid ? parsed : seed;
+      if (!valid) return seed;
+      if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
+      if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
+      // Schema migration: backfill missing date fields on loads/hours, bump version, persist.
+      const migrated = {
+        ...parsed,
+        loads: Array.isArray(parsed.loads)
+          ? parsed.loads.map(l => l && l.date == null ? { ...l, date: 'yesterday' } : l)
+          : parsed.loads,
+        hours: Array.isArray(parsed.hours)
+          ? parsed.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
+          : parsed.hours,
+        schemaVersion: DB_SCHEMA_VERSION,
+      };
+      return migrated;
     } catch (e) {
       return seed;
     }
@@ -3598,6 +3626,44 @@ function App() {
       // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
+  // Derive document.title from the current hash so the browser tab reflects context.
+  useEffect(() => {
+    const h = hash || '/';
+    const parts = h.split('/').filter(Boolean);
+    let title = 'Jobsite Exchange';
+    if (h === '/' || h === '') title = 'Jobsite Exchange';
+    else if (h.startsWith('/admin/reports')) title = 'JSE — Reports';
+    else if (h.startsWith('/admin/new')) title = 'JSE — New Project';
+    else if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) {
+      const proj = db && db.projects ? db.projects.find(p => p.id === parts[2]) : null;
+      if (proj && parts[3] === 'o' && parts[4]) {
+        const op = db.operators.find(o => o.id === parts[4]);
+        title = op ? `JSE — Admin — ${proj.name} / ${op.name}` : `JSE — Admin — ${proj.name}`;
+      } else {
+        title = proj ? `JSE — Admin — ${proj.name}` : 'JSE — Admin';
+      }
+    }
+    else if (h.startsWith('/admin')) title = 'JSE — Admin';
+    else if (parts[0] === 'operator' && parts[1] === 'o' && parts[2]) {
+      const op = db && db.operators ? db.operators.find(o => o.id === parts[2]) : null;
+      if (op && parts[3] === 'p' && parts[4]) {
+        const proj = db.projects.find(p => p.id === parts[4]);
+        title = proj ? `JSE — Operator — ${op.name} / ${proj.name}` : `JSE — Operator — ${op.name}`;
+      } else {
+        title = op ? `JSE — Operator — ${op.name}` : 'JSE — Operator';
+      }
+    }
+    else if (h.startsWith('/operator')) title = 'JSE — Operator';
+    else if (parts[0] === 'driver' && parts[1] === 'log') {
+      title = 'JSE — Driver — Log load';
+    }
+    else if (parts[0] === 'driver' && parts[1] === 'truck' && parts[2]) {
+      const tr = db && db.trucks ? db.trucks.find(t => t.id === parts[2]) : null;
+      title = tr ? `JSE — Driver — Truck #${tr.plate}` : 'JSE — Driver';
+    }
+    else if (h.startsWith('/driver')) title = 'JSE — Driver';
+    document.title = title;
+  }, [hash, db]);
   const route = (hash || '/').split('/')[1] || '';
   return (
     <div>
