@@ -836,13 +836,7 @@ function Landing({ navigate }) {
 // ADMIN
 // =====================================================================
 function AdminProjects({ db, setDb, navigate }) {
-  const [showAdd, setShowAdd] = useState(false);
   const updateProject = (id, patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === id ? { ...p, ...patch } : p) }));
-  const addProject = (form) => {
-    const id = form.code.replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase() || 'NEW' + Math.floor(Math.random()*99);
-    setDb(prev => ({ ...prev, projects: [...prev.projects, { id, ...form, material: ['CF'] }] }));
-    setShowAdd(false);
-  };
   const projects = db.projects.map(p => {
     const ops = db.operators.filter(o => o.projectIds.includes(p.id));
     const trucks = db.trucks.filter(t => t.projectId === p.id);
@@ -918,6 +912,7 @@ function AdminProjects({ db, setDb, navigate }) {
         </div>
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="secondary" size="sm">Export CSV</Btn>
+          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/new')}>+ New project</Btn>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -939,7 +934,7 @@ function AdminProjects({ db, setDb, navigate }) {
           <tbody>
             {active.map(p => renderRow(p, false))}
             {active.length === 0 && <tr><td colSpan={11} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No active projects.</td></tr>}
-            <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
+            <tr onClick={() => navigate('/admin/new')} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
               <td colSpan={11} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new project</td>
@@ -947,7 +942,6 @@ function AdminProjects({ db, setDb, navigate }) {
           </tbody>
         </table>
       </Card>
-      {showAdd && <AddProjectForm onAdd={addProject} onCancel={() => setShowAdd(false)} />}
 
       {/* Upcoming section */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
@@ -2741,6 +2735,341 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
   );
 }
 
+function AdminNewProject({ db, setDb, navigate }) {
+  const [step, setStep] = useState(1);
+  const [basics, setBasics] = useState({ name: '', code: '', gc: '', address: '', startDate: '', status: 'active', materials: [] });
+  const [operatorIds, setOperatorIds] = useState([]);
+  const [trucks, setTrucks] = useState([]);
+  const [onlyUnassigned, setOnlyUnassigned] = useState(false);
+  const [codeTouched, setCodeTouched] = useState(false);
+
+  const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 14px', borderRadius: R.sm, fontFamily: F.body, fontSize: 15, width: '100%', boxSizing: 'border-box' };
+
+  const deriveCode = (name) => {
+    const words = (name || '').trim().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return '';
+    if (words.length === 1) return words[0].replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase();
+    return words.map(w => w[0]).join('').replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase();
+  };
+  const effectiveCode = codeTouched ? basics.code.toUpperCase() : deriveCode(basics.name);
+
+  const existingIds = new Set(db.projects.map(p => p.id));
+  const codeDuplicate = effectiveCode && existingIds.has(effectiveCode);
+  const duplicateOwner = codeDuplicate ? db.projects.find(p => p.id === effectiveCode) : null;
+  const codeValid = effectiveCode.length >= 2 && effectiveCode.length <= 4 && !codeDuplicate;
+
+  const basicsValid = !!basics.name.trim() && codeValid && !!basics.gc.trim() && !!basics.address.trim() && !!basics.startDate && basics.materials.length > 0;
+  const operatorsValid = operatorIds.length > 0;
+  const trucksValid = trucks.every(t => t.operatorId && operatorIds.includes(t.operatorId));
+
+  const toggleMaterial = (mcode) => setBasics(b => ({ ...b, materials: b.materials.includes(mcode) ? b.materials.filter(x => x !== mcode) : [...b.materials, mcode] }));
+  const toggleOperator = (opId) => {
+    const wasSelected = operatorIds.includes(opId);
+    setOperatorIds(prev => wasSelected ? prev.filter(x => x !== opId) : [...prev, opId]);
+    if (wasSelected) setTrucks(prev => prev.map(t => t.operatorId === opId ? { ...t, operatorId: '' } : t));
+  };
+  const toggleTruck = (truckId, defaultOpId) => {
+    setTrucks(prev => {
+      const exists = prev.find(t => t.truckId === truckId);
+      if (exists) return prev.filter(t => t.truckId !== truckId);
+      return [...prev, { truckId, operatorId: defaultOpId || '' }];
+    });
+  };
+  const setTruckOperator = (truckId, opId) => setTrucks(prev => prev.map(t => t.truckId === truckId ? { ...t, operatorId: opId } : t));
+
+  const cancel = () => navigate('/admin');
+  const back = () => setStep(s => Math.max(1, s - 1));
+  const next = () => setStep(s => Math.min(4, s + 1));
+
+  const submit = () => {
+    const id = effectiveCode;
+    const newProject = {
+      id,
+      code: id + '-' + String(db.projects.length + 1).padStart(2, '0'),
+      name: basics.name.trim(),
+      gc: basics.gc.trim(),
+      address: basics.address.trim(),
+      startDate: basics.startDate,
+      status: basics.status,
+      material: basics.materials,
+    };
+    setDb(prev => ({
+      ...prev,
+      projects: [...prev.projects, newProject],
+      operators: prev.operators.map(o => operatorIds.includes(o.id) ? { ...o, projectIds: [...o.projectIds, id] } : o),
+      trucks: prev.trucks.map(t => {
+        const sel = trucks.find(x => x.truckId === t.id);
+        return sel ? { ...t, projectId: id, operatorId: sel.operatorId } : t;
+      }),
+    }));
+    navigate('/admin/p/' + id);
+  };
+
+  const StepDot = ({ n, label }) => {
+    const active = step === n;
+    const done = step > n;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flex: 1, minWidth: 0 }}>
+        <div style={{
+          width: 28, height: 28, borderRadius: '50%',
+          background: active ? C.accent : (done ? C.accentSoft : C.surfaceHi),
+          color: active ? C.bg : (done ? C.accent : C.inkDim),
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontFamily: F.mono, fontSize: 12, fontWeight: 700, flexShrink: 0,
+          border: active ? 'none' : `1px solid ${C.ruleHi}`,
+        }}>{n}</div>
+        <div style={{ fontFamily: F.mono, fontSize: 11, color: active ? C.ink : C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+      </div>
+    );
+  };
+
+  const Chip = ({ active, onClick, children, warn }) => (
+    <button onClick={onClick} style={{
+      background: active ? C.accent : 'transparent',
+      color: active ? C.bg : (warn ? C.warn : C.ink),
+      border: `1px solid ${active ? C.accent : (warn ? C.warn : C.ruleHi)}`,
+      borderRadius: R.pill, padding: '8px 14px', fontFamily: F.body, fontSize: 13, fontWeight: 600,
+      cursor: 'pointer',
+    }}>{children}</button>
+  );
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 880, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Projects', to: '/admin' }, { label: 'New project' }]} navigate={navigate} />
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>New project</Label>
+        <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>Create a new project</h1>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[5], flexWrap: 'wrap' }}>
+        <StepDot n={1} label="Basics" />
+        <StepDot n={2} label="Operators" />
+        <StepDot n={3} label="Trucks" />
+        <StepDot n={4} label="Review" />
+      </div>
+
+      <Card>
+        {step === 1 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+            <Label>Step 1 — Project basics</Label>
+            <div>
+              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Project name</div>
+              <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="5800 Federal" style={inputStyle} autoFocus />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+              <div>
+                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Code (2–4 chars)</div>
+                <input value={effectiveCode} onChange={e => { setCodeTouched(true); setBasics(b => ({ ...b, code: e.target.value })); }} placeholder="RR" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={4} />
+                {codeDuplicate && (
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.warn, marginTop: 6 }}>
+                    Code "{effectiveCode}" is already used by "{duplicateOwner.name}".
+                  </div>
+                )}
+                {!codeDuplicate && effectiveCode && effectiveCode.length < 2 && (
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.warn, marginTop: 6 }}>Code must be at least 2 characters.</div>
+                )}
+              </div>
+              <div>
+                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Start date</div>
+                <input type="date" value={basics.startDate} onChange={e => setBasics(b => ({ ...b, startDate: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Status</div>
+                <select value={basics.status} onChange={e => setBasics(b => ({ ...b, status: e.target.value }))} style={inputStyle}>
+                  <option value="active">Active</option>
+                  <option value="upcoming">Upcoming</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>General contractor</div>
+              <input value={basics.gc} onChange={e => setBasics(b => ({ ...b, gc: e.target.value }))} placeholder="Cowgirl Demo" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Address</div>
+              <input value={basics.address} onChange={e => setBasics(b => ({ ...b, address: e.target.value }))} placeholder="5800 Federal Blvd, Denver, CO" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[2] }}>Materials (pick one or more)</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
+                {MATERIALS.map(m => (
+                  <Chip key={m.code} active={basics.materials.includes(m.code)} onClick={() => toggleMaterial(m.code)}>{m.label}</Chip>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 2 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+            <Label>Step 2 — Assign operators</Label>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Pick the operators who will run this project. You'll assign trucks to them in the next step.</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+              {db.operators.map(op => {
+                const selected = operatorIds.includes(op.id);
+                const trucksManaged = db.trucks.filter(t => t.operatorId === op.id).length;
+                return (
+                  <div key={op.id} onClick={() => toggleOperator(op.id)} style={{
+                    display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
+                    background: selected ? C.accentSoft : C.surfaceHi,
+                    border: `1px solid ${selected ? C.accent : C.ruleHi}`,
+                    borderRadius: R.md, cursor: 'pointer', flexWrap: 'wrap',
+                  }}>
+                    <div style={{
+                      width: 22, height: 22, borderRadius: 6,
+                      background: selected ? C.accent : 'transparent',
+                      border: `2px solid ${selected ? C.accent : C.ruleHi}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: C.bg, fontFamily: F.display, fontSize: 14, fontWeight: 700, flexShrink: 0,
+                    }}>{selected ? '✓' : ''}</div>
+                    <Avatar name={op.name} color={C.accent} />
+                    <div style={{ flex: 1, minWidth: 140 }}>
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
+                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
+                    </div>
+                    <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>
+                      {op.projectIds.length} {op.projectIds.length === 1 ? 'project' : 'projects'} · {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{operatorIds.length} selected</div>
+          </div>
+        )}
+
+        {step === 3 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+            <Label>Step 3 — Assign trucks</Label>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the operators you selected.</div>
+            <div>
+              <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+              {db.trucks.filter(t => onlyUnassigned ? !t.projectId : true).map(t => {
+                const sel = trucks.find(x => x.truckId === t.id);
+                const selected = !!sel;
+                const currentProj = t.projectId ? db.projects.find(p => p.id === t.projectId) : null;
+                const currentOp = t.operatorId ? db.operators.find(o => o.id === t.operatorId) : null;
+                const reassign = !!t.projectId;
+                const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
+                return (
+                  <div key={t.id} style={{
+                    display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
+                    background: selected ? C.accentSoft : C.surfaceHi,
+                    border: `1px solid ${selected ? C.accent : C.ruleHi}`,
+                    borderRadius: R.md, flexWrap: 'wrap',
+                  }}>
+                    <div onClick={() => toggleTruck(t.id)} style={{
+                      width: 22, height: 22, borderRadius: 6,
+                      background: selected ? C.accent : 'transparent',
+                      border: `2px solid ${selected ? C.accent : C.ruleHi}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: C.bg, fontFamily: F.display, fontSize: 14, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
+                    }}>{selected ? '✓' : ''}</div>
+                    <div onClick={() => toggleTruck(t.id)} style={{ flex: 1, minWidth: 180, cursor: 'pointer' }}>
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
+                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>
+                        {t.hauler} · {currentProj ? `On ${currentProj.name}${currentOp ? ' / ' + currentOp.name : ''}` : 'Unassigned'}
+                      </div>
+                    </div>
+                    {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
+                    {selected && (
+                      <select value={sel.operatorId} onChange={e => setTruckOperator(t.id, e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '8px 10px', fontSize: 13 }}>
+                        <option value="">Pick operator…</option>
+                        {operatorIds.map(opId => {
+                          const op = db.operators.find(o => o.id === opId);
+                          return op ? <option key={opId} value={opId}>{op.name}</option> : null;
+                        })}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>
+              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick an operator for each' : ''}
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+            <Label>Step 4 — Review</Label>
+            <div>
+              <Label style={{ marginBottom: S[2] }}>Basics</Label>
+              <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Name</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.name}</div></div>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Code</div><div style={{ fontFamily: F.mono, color: C.ink }}>{effectiveCode}</div></div>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>GC</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.gc}</div></div>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Address</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.address}</div></div>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Start date</div><div style={{ fontFamily: F.mono, color: C.ink }}>{basics.startDate}</div></div>
+                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Status</div><div style={{ fontFamily: F.body, color: C.ink, textTransform: 'capitalize' }}>{basics.status}</div></div>
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Materials</div>
+                  <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+                    {basics.materials.map(mc => { const m = MATERIALS.find(x => x.code === mc); return <Pill key={mc}>{m ? m.label : mc}</Pill>; })}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div>
+              <Label style={{ marginBottom: S[2] }}>Operators ({operatorIds.length})</Label>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                {operatorIds.map(opId => {
+                  const op = db.operators.find(o => o.id === opId);
+                  return op ? (
+                    <div key={opId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>
+                      <Avatar name={op.name} color={C.accent} />
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
+                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{op.phone}</div>
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            </div>
+            <div>
+              <Label style={{ marginBottom: S[2] }}>Trucks ({trucks.length})</Label>
+              {trucks.length === 0 ? (
+                <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No trucks assigned yet — you can add them later.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                  {trucks.map(sel => {
+                    const t = db.trucks.find(x => x.id === sel.truckId);
+                    const op = db.operators.find(o => o.id === sel.operatorId);
+                    const typeLabel = t ? ((TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type) : '?';
+                    return t ? (
+                      <div key={sel.truckId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3], flexWrap: 'wrap' }}>
+                        <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
+                        <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{t.hauler}</div>
+                        <div style={{ flex: 1 }} />
+                        <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>→ {op ? op.name : 'No operator'}</div>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
+        <Btn variant="ghost" onClick={cancel}>Cancel</Btn>
+        <div style={{ display: 'flex', gap: S[2] }}>
+          <Btn variant="secondary" onClick={back} disabled={step === 1}>Back</Btn>
+          {step < 4 && (
+            <Btn variant="primary" onClick={next} disabled={(step === 1 && !basicsValid) || (step === 2 && !operatorsValid) || (step === 3 && !trucksValid)}>Next</Btn>
+          )}
+          {step === 4 && (
+            <Btn variant="primary" size="lg" onClick={submit} disabled={!basicsValid || !operatorsValid || !trucksValid}>Create project</Btn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   const resetDemoData = () => {
@@ -2753,6 +3082,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
     <div>
       <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={resetBtn} />
       {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
+      {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} operatorId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
