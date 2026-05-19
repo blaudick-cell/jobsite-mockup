@@ -2059,9 +2059,15 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate }) {
 
 function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
+  const resetDemoData = () => {
+    if (!window.confirm('Reset all demo data? This will reload the page.')) return;
+    try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) {}
+    window.location.reload();
+  };
+  const resetBtn = <Btn variant="danger" size="sm" onClick={resetDemoData}>Reset demo data</Btn>;
   return (
     <div>
-      <Topbar navigate={navigate} role="Admin" current="Admin - all projects" />
+      <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={resetBtn} />
       {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
@@ -2093,18 +2099,40 @@ function OperatorShell({ db, setDb, navigate }) {
     </div>
   );
 }
+const DB_STORAGE_KEY = 'jse_db_v1';
+const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
+
 function App() {
   const [hash, navigate] = useHash();
-  const [db, setDb] = useState({
-    projects: PROJECTS_SEED,
-    operators: OPERATORS_SEED,
-    trucks: TRUCKS_SEED,
-    drivers: DRIVERS_SEED,
-    hours: HOURS_SEED,
-    loads: LOADS_SEED,
-    invoices: INVOICES_SEED,
-    rates: RATES_INIT,
+  const [db, setDb] = useState(() => {
+    const seed = {
+      projects: PROJECTS_SEED,
+      operators: OPERATORS_SEED,
+      trucks: TRUCKS_SEED,
+      drivers: DRIVERS_SEED,
+      hours: HOURS_SEED,
+      loads: LOADS_SEED,
+      invoices: INVOICES_SEED,
+      rates: RATES_INIT,
+    };
+    try {
+      const raw = window.localStorage.getItem(DB_STORAGE_KEY);
+      if (!raw) return seed;
+      const parsed = JSON.parse(raw);
+      if (!parsed || typeof parsed !== 'object') return seed;
+      const valid = DB_REQUIRED_KEYS.every(k => k in parsed);
+      return valid ? parsed : seed;
+    } catch (e) {
+      return seed;
+    }
   });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(db));
+    } catch (e) {
+      // localStorage unavailable / quota exceeded — silently no-op
+    }
+  }, [db]);
   const route = (hash || '/').split('/')[1] || '';
   return (
     <div>
