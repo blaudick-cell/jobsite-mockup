@@ -103,7 +103,7 @@
     @media (max-width: 900px) {
       [style*="padding: 32px"] { padding: 16px !important; }
       [style*="padding: 24px"] { padding: 14px !important; }
-      h1 { font-size: 26px !important; }
+      h1 { font-size: 32px !important; line-height: 1.15 !important; }
       /* 4-col KPI grids → 2-col on tablet */
       [style*="repeat(4, 1fr)"] {
         grid-template-columns: repeat(2, 1fr) !important;
@@ -120,7 +120,7 @@
     @media (max-width: 600px) {
       [style*="padding: 32px"] { padding: 12px !important; }
       [style*="padding: 24px"] { padding: 10px !important; }
-      h1 { font-size: 22px !important; line-height: 1.15 !important; letter-spacing: -0.6px !important; }
+      h1 { font-size: 26px !important; line-height: 1.15 !important; letter-spacing: -0.6px !important; }
       /* All multi-col grids → single column on phone */
       [style*="display: grid"] {
         grid-template-columns: 1fr !important;
@@ -283,6 +283,18 @@ const F = {
 };
 const R = { sm: 8, md: 12, lg: 16, pill: 999 };
 const S = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 48, 8: 64 };
+
+// Typography tokens — opt-in for new code. Existing 240+ inline call sites left alone
+// so this refactor stays surgical. Use these for new components / landing / EmptyState.
+const T = {
+  h1:      { fontFamily: F.display, fontSize: 44, fontWeight: 700, lineHeight: 1.1, letterSpacing: -1 },
+  h2:      { fontFamily: F.display, fontSize: 28, fontWeight: 700, lineHeight: 1.2, letterSpacing: -0.5 },
+  h3:      { fontFamily: F.display, fontSize: 20, fontWeight: 600, lineHeight: 1.3 },
+  body:    { fontFamily: F.body, fontSize: 14, lineHeight: 1.5 },
+  bodyLg:  { fontFamily: F.body, fontSize: 16, lineHeight: 1.5 },
+  caption: { fontFamily: F.body, fontSize: 12, lineHeight: 1.4, color: C.inkDim },
+  mono:    { fontFamily: F.mono, fontSize: 12, lineHeight: 1.4 },
+};
 
 // =====================================================================
 // Seed data
@@ -590,10 +602,15 @@ function Pill({ children, color = C.accent, soft = C.accentSoft, style = {} }) {
 
 function StatusPill({ status }) {
   const map = {
-    open:     { color: C.accent, soft: C.accentSoft, label: 'Active' },
-    pending:  { color: C.warn,   soft: C.warnSoft,   label: 'Pending' },
-    approved: { color: C.ok,     soft: C.okSoft,     label: 'Approved' },
-    closed:   { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Closed' },
+    open:      { color: C.accent, soft: C.accentSoft, label: 'Active' },
+    active:    { color: C.accent, soft: C.accentSoft, label: 'Active' },
+    pending:   { color: C.warn,   soft: C.warnSoft,   label: 'Pending' },
+    approved:  { color: C.ok,     soft: C.okSoft,     label: 'Approved' },
+    closed:    { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Closed' },
+    upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
+    completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
+    inservice: { color: C.ok,     soft: C.okSoft,     label: 'In service' },
+    idle:      { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Idle' },
   };
   const v = map[status] || map.closed;
   return <Pill color={v.color} soft={v.soft}>{v.label}</Pill>;
@@ -626,11 +643,15 @@ function Avatar({ name, size = 28, color }) {
 }
 
 function EmptyState({ icon, title, body, action }) {
+  // icon may be a string (legacy unicode glyph) OR a React element (e.g. <TruckIcon size={36} />)
+  const iconNode = typeof icon === 'string'
+    ? <div style={{ fontSize: 36, marginBottom: S[3], color: C.inkFaint }}>{icon}</div>
+    : icon ? <div style={{ color: C.inkFaint, marginBottom: S[3], display: 'inline-flex' }}>{icon}</div> : null;
   return (
     <div style={{ padding: S[6], textAlign: 'center', background: C.surface, borderRadius: R.lg }}>
-      <div style={{ fontSize: 36, marginBottom: S[3] }}>{icon}</div>
-      <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 600, color: C.ink, marginBottom: 6 }}>{title}</div>
-      <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginBottom: action ? S[4] : 0 }}>{body}</div>
+      {iconNode}
+      <div style={{ ...T.h3, fontSize: 18, color: C.ink, marginBottom: 6 }}>{title}</div>
+      <div style={{ ...T.body, fontSize: 13, color: C.inkDim, marginBottom: action ? S[4] : 0 }}>{body}</div>
       {action}
     </div>
   );
@@ -651,7 +672,7 @@ function Td({ children, align = 'left', mono, dim, style = {} }) {
   }}>{children}</td>;
 }
 function Tr({ children, onClick, style = {} }) {
-  return <tr onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default', ...style }}
+  return <tr onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default', transition: onClick ? 'background 120ms ease' : undefined, ...style }}
     onMouseEnter={e => onClick && (e.currentTarget.style.background = C.surfaceHi)}
     onMouseLeave={e => onClick && (e.currentTarget.style.background = 'transparent')}
   >{children}</tr>;
@@ -777,14 +798,69 @@ function Topbar({ navigate, role, current, right }) {
 }
 
 // =====================================================================
+// Icons — small reusable inline SVG set. Single-color, currentColor stroke
+// so they inherit from parent text color. Match HexLogo's thin-line weight.
+// =====================================================================
+function AdminIcon({ size = 28 }) {
+  // Hex outline + inner grid — "org structure / dashboard"
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 2.5 L24 8 L24 20 L14 25.5 L4 20 L4 8 Z" />
+      <path d="M14 10 L14 18 M10 12 L18 12 M10 16 L18 16" />
+    </svg>
+  );
+}
+function OperatorIcon({ size = 28 }) {
+  // Clipboard with rows — "oversight / roster"
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="6" y="5" width="16" height="20" rx="2" />
+      <path d="M10 5 V3.5 H18 V5" />
+      <path d="M10 11 H18 M10 15 H18 M10 19 H15" />
+    </svg>
+  );
+}
+function DriverIcon({ size = 28 }) {
+  // Steering wheel — "vehicle / behind the wheel"
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="14" cy="14" r="10" />
+      <circle cx="14" cy="14" r="2.5" />
+      <path d="M14 11.5 V4.5 M11.7 16 L6 21 M16.3 16 L22 21" />
+    </svg>
+  );
+}
+function TruckIcon({ size = 28 }) {
+  // Side-view dump truck silhouette
+  return (
+    <svg width={size} height={size} viewBox="0 0 32 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2 8 L16 8 L16 20 L2 20 Z" />
+      <path d="M16 11 L24 11 L29 16 L29 20 L16 20" />
+      <circle cx="8" cy="22" r="2.5" />
+      <circle cx="24" cy="22" r="2.5" />
+    </svg>
+  );
+}
+function ProjectIcon({ size = 28 }) {
+  // Site marker pin with building outline
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 25 C14 25 22 17.5 22 11.5 A8 8 0 0 0 6 11.5 C6 17.5 14 25 14 25 Z" />
+      <rect x="10" y="8" width="8" height="7" />
+      <path d="M12 15 V11 M16 15 V11 M14 8 V6" />
+    </svg>
+  );
+}
+
+// =====================================================================
 // LANDING
 // =====================================================================
 
 function Landing({ navigate }) {
   const cards = [
-    { role: 'Admin',    to: '/admin',    blurb: 'See every project, operator, and truck. Manage projects, assign operators, set billing rates.', icon: '◆' },
-    { role: 'Operator', to: '/operator', blurb: 'Manage your project: roster trucks, assign drivers, approve loads and hours.', icon: '◇' },
-    { role: 'Driver',   to: '/driver',   blurb: 'Clock in on your assigned truck and log loads as you haul.', icon: '◌' },
+    { role: 'Admin',    to: '/admin',    blurb: 'Create projects, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
+    { role: 'Operator', to: '/operator', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: OperatorIcon },
+    { role: 'Driver',   to: '/driver',   blurb: 'Clock in, log loads, and see your assignments at a glance.',                  Icon: DriverIcon },
   ];
   return (
     <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -794,43 +870,48 @@ function Landing({ navigate }) {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[6] }}>
         <div style={{ maxWidth: 1120, width: '100%' }}>
           <Label color={C.accent}>Prototype</Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 44, fontWeight: 700, letterSpacing: -1.4, margin: '8px 0 12px', color: C.ink }}>
-            Pick a role to enter the dashboard
+          <h1 style={{ ...T.h1, fontSize: 56, letterSpacing: -1.6, margin: '10px 0 12px', color: C.ink }}>
+            Jobsite<span style={{ color: C.accent }}>Exchange</span>
           </h1>
-          <p style={{ fontFamily: F.body, fontSize: 15, color: C.inkDim, maxWidth: 640, marginBottom: S[6] }}>
-            Each role sees only what they need. Admin sees the whole org. Operators see their projects.
-            Drivers see only the truck they're pre-assigned to.
+          <p style={{ ...T.bodyLg, fontSize: 18, color: C.inkDim, maxWidth: 640, marginBottom: S[7] }}>
+            Coordinate operators, drivers, and projects in real time.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[4] }}>
-            {cards.map(c => (
-              <button key={c.role} onClick={() => navigate(c.to)} style={{
-                textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
-                padding: S[5], cursor: 'pointer', color: C.ink,
-              }}
-                onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
-                onMouseLeave={e => { e.currentTarget.style.background = C.surface; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[4] }}>
-                  <Pill color={C.accent} soft={C.accentSoft}>{c.role}</Pill>
-                  <span style={{ color: C.accent, fontSize: 22 }}>{c.icon}</span>
-                </div>
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, letterSpacing: -0.6, marginBottom: 6 }}>
-                  Enter as {c.role}
-                </div>
-                <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, lineHeight: 1.5 }}>{c.blurb}</div>
-                <div style={{ marginTop: S[4], fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>
-                  {'→'} #{c.to}
-                </div>
-              </button>
-            ))}
+            {cards.map(c => {
+              const Icon = c.Icon;
+              return (
+                <button key={c.role} onClick={() => navigate(c.to)} style={{
+                  textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
+                  padding: S[5], cursor: 'pointer', color: C.ink,
+                  transition: 'background 120ms ease, transform 120ms ease',
+                }}
+                  onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = C.surface; e.currentTarget.style.transform = 'translateY(0)'; }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[4] }}>
+                    <Pill color={C.accent} soft={C.accentSoft}>{c.role}</Pill>
+                    <span style={{ color: C.accent, display: 'inline-flex' }}><Icon size={28} /></span>
+                  </div>
+                  <div style={{ ...T.h3, fontSize: 22, fontWeight: 700, letterSpacing: -0.6, marginBottom: 6 }}>
+                    Enter as {c.role}
+                  </div>
+                  <div style={{ ...T.body, fontSize: 13, color: C.inkDim }}>{c.blurb}</div>
+                  <div style={{ marginTop: S[4], fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>
+                    {'→'} #{c.to}
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <div style={{ marginTop: S[6], padding: S[4], background: C.surface, borderRadius: R.md }}>
-            <Label style={{ marginBottom: 6 }}>How permission works</Label>
-            <ul style={{ margin: 0, paddingLeft: 18, fontFamily: F.body, fontSize: 13, color: C.inkDim, lineHeight: 1.7 }}>
-              <li><strong style={{ color: C.ink }}>Admin</strong> {'—'} sees all projects, operators, trucks, drivers. Manages projects, operators, and billing rates.</li>
-              <li><strong style={{ color: C.ink }}>Operator</strong> {'—'} sees only the projects they're assigned to. Adds/removes trucks, assigns drivers to trucks, approves loads and hours.</li>
-              <li><strong style={{ color: C.ink }}>Driver</strong> {'—'} sees only the one truck pre-assigned to them. Clocks in/out and logs loads.</li>
-            </ul>
+          <div style={{
+            marginTop: S[5], padding: `${S[3]}px ${S[4]}px`,
+            background: C.surface, borderRadius: R.md, border: `1px solid ${C.rule}`,
+            display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap',
+          }}>
+            <Pill color={C.info} soft={C.infoSoft}>Demo mode</Pill>
+            <span style={{ ...T.body, fontSize: 13, color: C.inkDim }}>
+              All data lives in your browser. Hit Reset on the Admin shell to start over.
+            </span>
           </div>
         </div>
       </div>
@@ -1324,7 +1405,11 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
               </thead>
               <tbody>
                 {truckLoads.length === 0 && (
-                  <tr><td colSpan="6" style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No loads logged yet today.</td></tr>
+                  <tr><td colSpan="6" style={{ padding: S[6], textAlign: 'center' }}>
+                    <div style={{ color: C.inkFaint, marginBottom: S[2], display: 'inline-flex' }}><TruckIcon size={28} /></div>
+                    <div style={{ ...T.h3, fontSize: 15, color: C.ink, marginBottom: 4 }}>No loads logged yet today</div>
+                    <div style={{ ...T.body, fontSize: 12, color: C.inkDim }}>Loads logged by the driver will appear here.</div>
+                  </td></tr>
                 )}
                 {truckLoads.map(l => (
                   <Tr key={l.id}>
@@ -1484,7 +1569,11 @@ function OperatorHome({ operatorId, db, navigate }) {
 
       <div style={{ marginBottom: S[3] }}><Label>Your projects</Label></div>
       {projects.length === 0 ? (
-        <Card><div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, textAlign: 'center', padding: S[3] }}>No projects assigned to this operator yet.</div></Card>
+        <EmptyState
+          icon={<ProjectIcon size={40} />}
+          title="You haven't been assigned to any projects."
+          body="Contact your admin to be added to a project."
+        />
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: S[3] }}>
           {projects.map(p => {
@@ -1508,7 +1597,7 @@ function OperatorHome({ operatorId, db, navigate }) {
                     <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 4 }}>{p.gc}</div>
                     <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkFaint, marginTop: 2 }}>{p.address}</div>
                   </div>
-                  <StatusPill status={p.status === 'completed' ? 'closed' : (p.status === 'upcoming' ? 'pending' : 'open')} />
+                  <StatusPill status={p.status || 'active'} />
                 </div>
                 <div style={{ display: 'flex', gap: S[4], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
                   <div><Label style={{ marginBottom: 4 }}>Trucks</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pTrucks.length}</div></div>
@@ -1551,7 +1640,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>{project.name}</h1>
           <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>{project.gc} · {project.address}</div>
         </div>
-        <StatusPill status={project.status === 'completed' ? 'closed' : (project.status === 'upcoming' ? 'pending' : 'open')} />
+        <StatusPill status={project.status || 'active'} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -1666,7 +1755,10 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
           </thead>
           <tbody>
             {truckLoads.length === 0 && (
-              <tr><td colSpan={5} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No loads yet today.</td></tr>
+              <tr><td colSpan={5} style={{ padding: S[5], textAlign: 'center' }}>
+                <div style={{ color: C.inkFaint, marginBottom: S[2], display: 'inline-flex' }}><TruckIcon size={24} /></div>
+                <div style={{ ...T.body, fontSize: 13, color: C.inkDim }}>No loads yet today.</div>
+              </td></tr>
             )}
             {truckLoads.map(l => {
               const m = MATERIALS.find(mm => mm.code === l.material);
@@ -2205,10 +2297,12 @@ function DriverShell({ db, setDb, navigate, hash }) {
 
 function DriverNoTruck({ driver }) {
   return (
-    <div style={{ flex: 1, padding: S[5], display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-      <div style={{ fontSize: 40, marginBottom: S[3] }}>TRUCK</div>
-      <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, marginBottom: 6 }}>No truck assigned</div>
-      <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, lineHeight: 1.5 }}>Hi {driver.name}. Your operator hasn't assigned a truck to you yet. Once they do, it'll show up here.</div>
+    <div style={{ flex: 1, padding: S[4], display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+      <EmptyState
+        icon={<TruckIcon size={44} />}
+        title="No truck assigned yet"
+        body={`Hi ${driver.name.split(' ')[0]}. Your dispatcher hasn't put you on a truck for today's shift. It'll show up here once they do.`}
+      />
     </div>
   );
 }
@@ -2554,7 +2648,7 @@ function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
               <div style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, letterSpacing: -0.6, color: C.accent }}>#{truck.plate}</div>
               {isOpen && !isPaused && <StatusPill status="open" />}
               {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
-              {!isOpen && <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Idle</Pill>}
+              {!isOpen && <StatusPill status="idle" />}
             </div>
             <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} · {truck.hauler}</div>
             <div style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[3] }}>
@@ -2676,7 +2770,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
           <Label>Truck</Label>
           {isOpen && !isPaused && <StatusPill status="open" />}
           {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
-          {!isOpen && <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Idle</Pill>}
+          {!isOpen && <StatusPill status="idle" />}
         </div>
         <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
         <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} · {truckType ? truckType.cap : ''} · {truck.hauler}</div>
@@ -2718,7 +2812,11 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
       <div style={{ marginTop: S[3] }}>
         <Label style={{ marginBottom: S[2] }}>Today's loads on #{truck.plate}</Label>
         {todayLoads.length === 0 ? (
-          <div style={{ padding: S[4], background: C.surface, borderRadius: R.md, fontFamily: F.body, fontSize: 12, color: C.inkDim, textAlign: 'center' }}>No loads logged on this truck yet today.</div>
+          <EmptyState
+            icon={<TruckIcon size={32} />}
+            title="No loads logged yet"
+            body="Use the + Log load button above to log your first load on this truck."
+          />
         ) : (
           todayLoads.slice().reverse().map(l => {
             const m = MATERIALS.find(m => m.code === l.material);
@@ -3191,7 +3289,7 @@ function AdminReports({ db, navigate }) {
       loadsToday: ldsToday,
       driverName: driver ? driver.name : '—',
       projectName: project ? project.name : '—',
-      status: inService ? 'In service' : 'Idle',
+      status: inService ? 'inservice' : 'idle',
     };
   }).sort((a, b) => b.loadsToday - a.loadsToday || String(a.plate).localeCompare(String(b.plate)));
 
@@ -3201,7 +3299,7 @@ function AdminReports({ db, navigate }) {
       <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
         <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
         <EmptyState
-          icon="◆"
+          icon={<ProjectIcon size={40} />}
           title="No projects yet"
           body="Create one to start generating activity reports."
           action={<Btn variant="primary" onClick={() => navigate('/admin/new')}>+ New project</Btn>}
@@ -3386,10 +3484,7 @@ function AdminReports({ db, navigate }) {
                   <div style={{ fontFamily: F.body, fontSize: 13, color: C.ink }}>{t.driverName}</div>
                   <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>{t.projectName}</div>
                 </div>
-                <Pill
-                  color={t.status === 'In service' ? C.ok : C.inkDim}
-                  soft={t.status === 'In service' ? C.okSoft : 'rgba(255,255,255,0.06)'}
-                >{t.status}</Pill>
+                <StatusPill status={t.status} />
                 <div style={{ textAlign: 'right', minWidth: 64 }}>
                   <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{t.loadsToday}</div>
                   <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>loads today</div>
@@ -3461,6 +3556,18 @@ const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours',
 
 function App() {
   const [hash, navigate] = useHash();
+  // Derive document.title from the current hash so the browser tab reflects context.
+  useEffect(() => {
+    const h = hash || '/';
+    let title = 'Jobsite Exchange';
+    if (h === '/' || h === '') title = 'Jobsite Exchange';
+    else if (h.startsWith('/admin/reports')) title = 'JSE — Reports';
+    else if (h.startsWith('/admin/new')) title = 'JSE — New Project';
+    else if (h.startsWith('/admin')) title = 'JSE — Admin';
+    else if (h.startsWith('/operator')) title = 'JSE — Operator';
+    else if (h.startsWith('/driver')) title = 'JSE — Driver';
+    document.title = title;
+  }, [hash]);
   const [db, setDb] = useState(() => {
     const seed = {
       projects: PROJECTS_SEED,
