@@ -383,26 +383,32 @@ const INVOICES_SEED = [
 
 const HOURS_SEED = [
   // Yesterday's submitted shifts (drivers start fresh today; click Clock In to test live timer)
-  { id: 'hr-1',  driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-2',  driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:35', clockOut: '15:00', breakMin: 30, status: 'closed' },
-  { id: 'hr-3',  driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:15', clockOut: '15:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-4',  driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', clockIn: '06:00', clockOut: '14:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-5',  driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '07:00', clockOut: '15:00', breakMin: 30, status: 'closed' },
-  { id: 'hr-6',  driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '06:45', clockOut: '15:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-7',  driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', clockIn: '07:10', clockOut: '15:40', breakMin: 30, status: 'pending' },
-  { id: 'hr-8',  driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:45', clockOut: '15:00', breakMin: 30, status: 'closed' },
-  { id: 'hr-9',  driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:55', clockOut: '14:55', breakMin: 30, status: 'closed' },
-  { id: 'hr-10', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:25', clockOut: '15:00', breakMin: 30, status: 'closed' },
-  { id: 'hr-11', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-12', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:20', clockOut: '14:45', breakMin: 30, status: 'closed' },
-  { id: 'hr-13', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed' },
-  { id: 'hr-14', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed' },
-  { id: 'hr-15', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '06:50', clockOut: '14:50', breakMin: 30, status: 'closed' },
-  { id: 'hr-16', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '07:00', clockOut: '15:15', breakMin: 30, status: 'closed' },
-  { id: 'hr-17', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:30', clockOut: '14:30', breakMin: 30, status: 'closed' },
-  { id: 'hr-18', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed' },
-  { id: 'hr-19', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed' },
-  { id: 'hr-20', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '06:55', clockOut: '15:25', breakMin: 30, status: 'pending' },
+  { id: 'hr-1',  driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-2',  driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:35', clockOut: '15:00', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-3',  driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:15', clockOut: '15:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-4',  driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', clockIn: '06:00', clockOut: '14:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-5',  driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '07:00', clockOut: '15:00', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-6',  driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '06:45', clockOut: '15:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-7',  driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', clockIn: '07:10', clockOut: '15:40', breakMin: 30, status: 'pending', date: 'yesterday' },
+  { id: 'hr-8',  driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:45', clockOut: '15:00', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-9',  driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:55', clockOut: '14:55', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-10', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:25', clockOut: '15:00', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-11', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-12', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:20', clockOut: '14:45', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-13', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-14', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-15', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '06:50', clockOut: '14:50', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-16', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '07:00', clockOut: '15:15', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-17', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:30', clockOut: '14:30', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-18', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-19', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: 'yesterday' },
+  { id: 'hr-20', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '06:55', clockOut: '15:25', breakMin: 30, status: 'pending', date: 'yesterday' },
+
+  // Today's already-clocked-out short hauls (early-morning runs that wrapped before NOW)
+  { id: 'hr-21', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', clockIn: '05:30', clockOut: '09:15', breakMin: 15, status: 'closed',  date: 'today' },
+  { id: 'hr-22', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '05:45', clockOut: '10:00', breakMin: 15, status: 'closed',  date: 'today' },
+  { id: 'hr-23', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:00', clockOut: '10:30', breakMin: 30, status: 'pending', date: 'today' },
+  { id: 'hr-24', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '05:50', clockOut: '10:45', breakMin: 30, status: 'closed',  date: 'today' },
 ];
 
 const LOADS_SEED = [
@@ -2268,7 +2274,7 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
           id: 'hr-' + Math.random().toString(36).substring(2, 7),
           driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
           clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open',
+          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: 'today',
         },
       ],
     }));
@@ -2635,7 +2641,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
           id: 'hr-' + Math.random().toString(36).substring(2, 7),
           driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
           clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open',
+          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: 'today',
         },
       ],
     }));
@@ -3070,6 +3076,333 @@ function AdminNewProject({ db, setDb, navigate }) {
   );
 }
 
+function AdminReports({ db, navigate }) {
+  const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
+
+  // ----- KPIs -----
+  const activeProjects = db.projects.filter(p => p.status === 'active');
+  const openShifts = db.hours.filter(h => h.status === 'open');
+  const onShiftNow = openShifts.length;
+  const distinctOperatorsOnShift = new Set(
+    openShifts.map(h => {
+      const t = db.trucks.find(t => t.id === h.truckId);
+      return t ? t.operatorId : null;
+    }).filter(Boolean)
+  ).size;
+
+  const loadsToday = db.loads.filter(l => l.date === 'today');
+  const loadsYesterday = db.loads.filter(l => l.date === 'yesterday');
+  const todayCount = loadsToday.length;
+  const yesterdayCount = loadsYesterday.length;
+  let deltaPct = null;
+  let deltaDir = null;
+  if (yesterdayCount > 0) {
+    const diff = todayCount - yesterdayCount;
+    deltaPct = Math.round(Math.abs(diff / yesterdayCount) * 100);
+    deltaDir = diff >= 0 ? 'up' : 'down';
+  }
+
+  const hoursToday = db.hours
+    .filter(h => h.date === 'today')
+    .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  const hoursYesterday = db.hours
+    .filter(h => h.date === 'yesterday')
+    .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+
+  // ----- Project status rows -----
+  const projectRows = db.projects.map(p => {
+    const ops = db.operators.filter(o => o.projectIds.includes(p.id));
+    const trucks = db.trucks.filter(t => t.projectId === p.id);
+    const pLoadsToday = db.loads.filter(l => l.projectId === p.id && l.date === 'today');
+    const pLoadsYesterday = db.loads.filter(l => l.projectId === p.id && l.date === 'yesterday').length;
+    const lastTime = pLoadsToday.reduce((latest, l) => (!latest || l.time > latest) ? l.time : latest, null);
+    return {
+      id: p.id,
+      name: p.name,
+      status: p.status || 'active',
+      operators: ops.length,
+      trucks: trucks.length,
+      loadsToday: pLoadsToday.length,
+      loadsYesterday: pLoadsYesterday,
+      lastTime: lastTime || '—',
+    };
+  });
+
+  const sortedRows = [...projectRows].sort((a, b) => {
+    const va = a[sort.key];
+    const vb = b[sort.key];
+    let cmp;
+    if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
+    else cmp = String(va).localeCompare(String(vb));
+    return sort.dir === 'asc' ? cmp : -cmp;
+  });
+
+  const setSortKey = (k) => {
+    setSort(s => s.key === k ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'asc' });
+  };
+
+  // Custom sortable header (Th doesn't accept onClick/style props)
+  const SortTh = ({ label, k, align = 'left' }) => {
+    const active = sort.key === k;
+    const arrow = active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    return (
+      <th onClick={() => setSortKey(k)} style={{
+        textAlign: align, padding: '10px 14px', borderBottom: `1px solid ${C.rule}`,
+        fontFamily: F.mono, fontSize: 10, fontWeight: 600,
+        color: active ? C.accent : C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase',
+        whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
+      }}>{label}{arrow}</th>
+    );
+  };
+
+  const statusColor = {
+    active:    { color: C.accent, soft: C.accentSoft, label: 'Active' },
+    upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
+    completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
+  };
+
+  // ----- Operator productivity -----
+  const operatorRows = db.operators.map(op => {
+    const opTrucks = db.trucks.filter(t => t.operatorId === op.id);
+    const opTruckIds = new Set(opTrucks.map(t => t.id));
+    const ldsToday = db.loads.filter(l => l.date === 'today' && opTruckIds.has(l.truckId)).length;
+    const hrsToday = db.hours
+      .filter(h => h.date === 'today' && opTruckIds.has(h.truckId))
+      .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+    const activeProjs = op.projectIds.filter(pid => {
+      const p = db.projects.find(p => p.id === pid);
+      return p && p.status === 'active';
+    }).length;
+    return { id: op.id, name: op.name, loadsToday: ldsToday, hoursToday: hrsToday, activeProjects: activeProjs };
+  })
+    .sort((a, b) => b.loadsToday - a.loadsToday || b.hoursToday - a.hoursToday)
+    .slice(0, 10);
+
+  // ----- Truck utilization -----
+  const truckRows = db.trucks.map(t => {
+    const ldsToday = db.loads.filter(l => l.date === 'today' && l.truckId === t.id).length;
+    const driver = db.drivers.find(d => d.id === t.driverId);
+    const project = db.projects.find(p => p.id === t.projectId);
+    const inService = db.hours.some(h => h.truckId === t.id && h.status === 'open');
+    return {
+      id: t.id,
+      plate: t.plate,
+      type: t.type,
+      loadsToday: ldsToday,
+      driverName: driver ? driver.name : '—',
+      projectName: project ? project.name : '—',
+      status: inService ? 'In service' : 'Idle',
+    };
+  }).sort((a, b) => b.loadsToday - a.loadsToday || String(a.plate).localeCompare(String(b.plate)));
+
+  // ----- Top-level empty state: no projects -----
+  if (db.projects.length === 0) {
+    return (
+      <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+        <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
+        <EmptyState
+          icon="◆"
+          title="No projects yet"
+          body="Create one to start generating activity reports."
+          action={<Btn variant="primary" onClick={() => navigate('/admin/new')}>+ New project</Btn>}
+        />
+      </div>
+    );
+  }
+
+  const deltaColor = deltaDir === 'down' ? C.warn : C.ok;
+  const deltaArrow = deltaDir === 'up' ? '▲' : '▼';
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
+
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
+        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
+        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Today vs yesterday across projects, operators, and trucks. Numbers update live as drivers log hours and loads.</div>
+      </div>
+
+      {/* A. Headline KPI row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[4] }}>
+        <Card padding={S[4]}>
+          <Stat
+            label="Active projects"
+            value={activeProjects.length}
+            sub={`total ${db.projects.length}`}
+          />
+        </Card>
+        <Card padding={S[4]}>
+          <Stat
+            label="On shift now"
+            value={onShiftNow}
+            sub={`${distinctOperatorsOnShift} operator${distinctOperatorsOnShift === 1 ? '' : 's'}`}
+          />
+        </Card>
+        <Card padding={S[4]}>
+          <Stat
+            label="Loads today"
+            value={todayCount}
+            sub={
+              yesterdayCount === 0
+                ? 'no yesterday data'
+                : `${deltaArrow} ${deltaPct}% vs yesterday (${yesterdayCount})`
+            }
+          />
+        </Card>
+        <Card padding={S[4]}>
+          <Stat
+            label="Hours today"
+            value={fmtHours(hoursToday)}
+            sub={`yesterday ${fmtHours(hoursYesterday)}`}
+          />
+        </Card>
+      </div>
+
+      {/* B. Daily activity summary */}
+      <Card padding={S[4]} style={{ marginBottom: S[6] }}>
+        <Label style={{ marginBottom: 6 }}>Daily activity</Label>
+        {todayCount === 0 ? (
+          <div style={{ fontFamily: F.body, fontSize: 14, color: C.inkDim }}>No loads logged today yet.</div>
+        ) : yesterdayCount === 0 ? (
+          <div style={{ fontFamily: F.display, fontSize: 16, color: C.ink, fontWeight: 600 }}>
+            Today <span style={{ color: C.accent }}>{todayCount}</span> loads <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}>(no yesterday comparison)</span>
+          </div>
+        ) : (
+          <div style={{ fontFamily: F.display, fontSize: 16, color: C.ink, fontWeight: 600 }}>
+            Today <span style={{ color: C.accent }}>{todayCount}</span> loads
+            <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> — </span>
+            <span style={{ color: deltaColor }}>{deltaArrow} {deltaPct}%</span>
+            <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> vs yesterday ({yesterdayCount})</span>
+          </div>
+        )}
+      </Card>
+
+      {/* C. Project status table */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+        <Label color={C.accent}>Projects</Label>
+        <div style={{ flex: 1, height: 1, background: C.rule }} />
+        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{sortedRows.length}</span>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <SortTh label="Project" k="name" />
+              <SortTh label="Status" k="status" />
+              <SortTh label="Operators" k="operators" align="right" />
+              <SortTh label="Trucks" k="trucks" align="right" />
+              <SortTh label="Loads today" k="loadsToday" align="right" />
+              <SortTh label="Loads yesterday" k="loadsYesterday" align="right" />
+              <SortTh label="Last load" k="lastTime" align="right" />
+            </tr>
+          </thead>
+          <tbody>
+            {sortedRows.map(r => {
+              const sc = statusColor[r.status] || statusColor.active;
+              return (
+                <Tr key={r.id} onClick={() => navigate(`/admin/p/${r.id}`)}>
+                  <Td><span style={{ fontWeight: 600 }}>{r.name}</span></Td>
+                  <Td><Pill color={sc.color} soft={sc.soft}>{sc.label}</Pill></Td>
+                  <Td align="right" mono>{r.operators}</Td>
+                  <Td align="right" mono>{r.trucks}</Td>
+                  <Td align="right" mono style={{ fontWeight: 600 }}>{r.loadsToday}</Td>
+                  <Td align="right" mono dim>{r.loadsYesterday}</Td>
+                  <Td align="right" mono dim>{r.lastTime}</Td>
+                </Tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* D. Operator productivity */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+        <Label color={C.accent}>Top operators today</Label>
+        <div style={{ flex: 1, height: 1, background: C.rule }} />
+        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{operatorRows.length} of {db.operators.length}</span>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        {operatorRows.length === 0 ? (
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No operators on the roster yet.</div>
+        ) : (
+          <div>
+            {operatorRows.map((op, i) => (
+              <div key={op.id} style={{
+                display: 'flex', alignItems: 'center', gap: S[4],
+                padding: `${S[3]}px ${S[4]}px`,
+                borderBottom: i < operatorRows.length - 1 ? `1px solid ${C.rule}` : 'none',
+              }}>
+                <div style={{
+                  width: 28, textAlign: 'center', fontFamily: F.mono, fontSize: 13,
+                  color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
+                }}>{i + 1}</div>
+                <div style={{ flex: 1, fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink }}>{op.name}</div>
+                <div style={{ textAlign: 'right', minWidth: 64 }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.loadsToday}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>loads</div>
+                </div>
+                <div style={{ textAlign: 'right', minWidth: 64 }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{fmtHours(op.hoursToday)}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>hours</div>
+                </div>
+                <div style={{ textAlign: 'right', minWidth: 64 }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.activeProjects}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>projects</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* E. Truck utilization */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+        <Label color={C.accent}>Truck utilization</Label>
+        <div style={{ flex: 1, height: 1, background: C.rule }} />
+        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{truckRows.length}</span>
+      </div>
+      <Card padding={0}>
+        {truckRows.length === 0 ? (
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No trucks on the roster yet.</div>
+        ) : (
+          <div>
+            {truckRows.map((t, i) => (
+              <div key={t.id} style={{
+                display: 'flex', alignItems: 'center', gap: S[4],
+                padding: `${S[3]}px ${S[4]}px`,
+                borderBottom: i < truckRows.length - 1 ? `1px solid ${C.rule}` : 'none',
+                flexWrap: 'wrap',
+              }}>
+                <div style={{
+                  width: 28, textAlign: 'center', fontFamily: F.mono, fontSize: 13,
+                  color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
+                }}>{i + 1}</div>
+                <div style={{ minWidth: 80 }}>
+                  <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink }}>#{t.plate}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 2 }}>{t.type}</div>
+                </div>
+                <div style={{ flex: 1, minWidth: 120 }}>
+                  <div style={{ fontFamily: F.body, fontSize: 13, color: C.ink }}>{t.driverName}</div>
+                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>{t.projectName}</div>
+                </div>
+                <Pill
+                  color={t.status === 'In service' ? C.ok : C.inkDim}
+                  soft={t.status === 'In service' ? C.okSoft : 'rgba(255,255,255,0.06)'}
+                >{t.status}</Pill>
+                <div style={{ textAlign: 'right', minWidth: 64 }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{t.loadsToday}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>loads today</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
 function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   const resetDemoData = () => {
@@ -3078,11 +3411,18 @@ function AdminShell({ db, setDb, navigate, hash }) {
     window.location.reload();
   };
   const resetBtn = <Btn variant="danger" size="sm" onClick={resetDemoData}>Reset demo data</Btn>;
+  const navBtns = (
+    <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
+      <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/reports')}>Reports</Btn>
+      {resetBtn}
+    </div>
+  );
   return (
     <div>
-      <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={resetBtn} />
+      <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={navBtns} />
       {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
+      {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
       {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} operatorId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
