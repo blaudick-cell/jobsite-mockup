@@ -4059,7 +4059,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             No haulers available right now.
           </div>
         ) : (
-          <div>
+          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {suggestedHaulers.map((op, i) => {
               const opTrucks = db.trucks.filter(t => t.operatorId === op.id);
               const isMatched = req.matchedHaulerId === op.id;
@@ -4192,7 +4192,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
             <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
           </div>
         </div>
-        <Btn variant="secondary" size="sm">Message</Btn>
+        <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -4259,8 +4259,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
 
 // Shared admin sidebar nav (desktop) + drawer (mobile).
 // Renders the same nav items in both modes; parent controls visibility via CSS.
-function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar' }) {
-  const [haulersExpanded, setHaulersExpanded] = useState(false);
+function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', haulersExpanded, setHaulersExpanded }) {
   const requests = db.haulRequests || [];
   const pendingCount = requests.filter(r => r.status === 'pending').length;
   const parts = (hash || '').split('/').filter(Boolean);
@@ -4272,37 +4271,51 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar' }) {
 
   const go = (to) => { navigate(to); if (onNavigate) onNavigate(); };
 
-  const Item = ({ icon, label, active, onClick, badge, expandable, expanded, onToggleExpand }) => (
-    <div>
-      <button onClick={onClick} style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: S[3],
-        background: active ? C.accentSoft : 'transparent',
-        color: active ? C.accent : C.inkDim,
-        border: 'none', borderLeft: `3px solid ${active ? C.accent : 'transparent'}`,
-        padding: '10px 12px', borderRadius: R.md,
-        cursor: 'pointer', fontFamily: F.body, fontSize: 14, fontWeight: 600,
-        textAlign: 'left',
-      }}
+  const Item = ({ icon, label, active, onClick, badge, expandable, expanded, onToggleExpand }) => {
+    const rowBg = active ? C.accentSoft : 'transparent';
+    const rowColor = active ? C.accent : C.inkDim;
+    return (
+      <div
+        style={{
+          display: 'flex', alignItems: 'stretch',
+          background: rowBg, color: rowColor,
+          borderLeft: `3px solid ${active ? C.accent : 'transparent'}`,
+          borderRadius: R.md, overflow: 'hidden',
+        }}
         onMouseEnter={e => { if (!active) { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; } }}
         onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; } }}
       >
-        <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span>
-        <span style={{ flex: 1 }}>{label}</span>
-        {badge != null && badge > 0 && (
-          <span style={{
-            background: C.accent, color: C.bg, borderRadius: R.pill,
-            padding: '2px 8px', fontFamily: F.mono, fontSize: 10, fontWeight: 700,
-          }}>{badge}</span>
-        )}
+        <button onClick={onClick} style={{
+          flex: 1, display: 'flex', alignItems: 'center', gap: S[3],
+          background: 'transparent', color: 'inherit',
+          border: 'none', padding: '10px 12px', cursor: 'pointer',
+          fontFamily: F.body, fontSize: 14, fontWeight: 600, textAlign: 'left',
+        }}>
+          <span style={{ display: 'inline-flex', flexShrink: 0 }} aria-hidden="true">{icon}</span>
+          <span style={{ flex: 1 }}>{label}</span>
+          {badge != null && badge > 0 && (
+            <span style={{
+              background: C.accent, color: C.bg, borderRadius: R.pill,
+              padding: '2px 8px', fontFamily: F.mono, fontSize: 10, fontWeight: 700,
+            }}>{badge}</span>
+          )}
+        </button>
         {expandable && (
-          <span onClick={(e) => { e.stopPropagation(); onToggleExpand && onToggleExpand(); }} style={{
-            color: C.inkFaint, fontFamily: F.mono, fontSize: 11,
-            cursor: 'pointer', padding: '0 4px',
-          }}>{expanded ? '▾' : '▸'}</span>
+          <button
+            type="button"
+            onClick={onToggleExpand}
+            aria-expanded={!!expanded}
+            aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
+            style={{
+              background: 'transparent', color: C.inkFaint, border: 'none',
+              padding: '0 10px', cursor: 'pointer',
+              fontFamily: F.mono, fontSize: 11,
+            }}
+          ><span aria-hidden="true">{expanded ? '▾' : '▸'}</span></button>
         )}
-      </button>
-    </div>
-  );
+      </div>
+    );
+  };
 
   const sortedHaulers = [...db.operators].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -4362,6 +4375,8 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar' }) {
 function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [haulersExpanded, setHaulersExpanded] = useState(false);
+  const sidebarProps = { db, navigate, hash, haulersExpanded, setHaulersExpanded };
   const resetDemoData = () => {
     if (!window.confirm('Reset all demo data? This will reload the page.')) return;
     try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) {}
@@ -4394,7 +4409,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
             maxHeight: 'calc(100vh - 56px)', overflowY: 'auto',
           }}
         >
-          <AdminSidebar db={db} navigate={navigate} hash={hash} />
+          <AdminSidebar {...sidebarProps} />
         </aside>
         <main style={{ flex: 1, minWidth: 0 }}>
           {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
@@ -4413,7 +4428,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
         <>
           <div className="admin-drawer-backdrop" onClick={() => setDrawerOpen(false)} />
           <div className="admin-drawer" role="dialog" aria-label="Admin navigation">
-            <AdminSidebar db={db} navigate={navigate} hash={hash} onNavigate={() => setDrawerOpen(false)} variant="drawer" />
+            <AdminSidebar {...sidebarProps} onNavigate={() => setDrawerOpen(false)} variant="drawer" />
           </div>
         </>
       )}
