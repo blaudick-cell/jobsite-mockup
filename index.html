@@ -7,7 +7,7 @@
   <title>Jobsite Exchange â€” Role Dashboards</title>
   <meta name="description" content="Admin / Hauler / Driver dashboards for hourly hauling â€” Jobsite Exchange." />
   <meta property="og:title" content="Jobsite Exchange â€” Role Dashboards" />
-  <meta property="og:description" content="Hierarchy: Admin â†’ Projects â†’ Haulers â†’ Trucks â†’ Drivers." />
+  <meta property="og:description" content="Hierarchy: Admin â†’ Hauls â†’ Haulers â†’ Trucks â†’ Drivers." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z' fill='%23B3E635'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='sans-serif' font-size='34' font-weight='800' fill='%230A0A0A'%3EJ%3C/text%3E%3C/svg%3E" />
   <style>
@@ -1186,7 +1186,7 @@ function haulerName(state, id) {
 }
 function projectName(state, id) {
   const p = state && state.projects ? state.projects.find(x => x.id === id) : null;
-  return p ? p.name : 'a project';
+  return p ? p.name : 'a haul';
 }
 function truckPlate(state, id) {
   const t = state && state.trucks ? state.trucks.find(x => x.id === id) : null;
@@ -1328,17 +1328,17 @@ function Landing({ navigate }) {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
   const cards = [
-    { role: 'Admin',    to: '/admin',    blurb: 'Create projects, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
-    { role: 'Hauler',   to: '/hauler', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: HaulerIcon },
+    { role: 'Admin',    to: '/admin',    blurb: 'Create hauls, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
+    { role: 'Hauler',   to: '/hauler', blurb: "Manage your hauls, your trucks, and your team's day.",                    Icon: HaulerIcon },
     { role: 'Driver',   to: '/driver',   blurb: 'Clock in, log loads, and see your assignments at a glance.',                  Icon: DriverIcon },
   ];
   const audience = [
-    { Icon: AdminIcon,    title: 'Project managers',         body: 'Spin up a project, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
+    { Icon: AdminIcon,    title: 'Haul managers',         body: 'Spin up a haul, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
     { Icon: HaulerIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen â€” drill into any shift in two taps." },
     { Icon: DriverIcon,   title: 'Drivers & equipment ops',  body: 'Clock in, log loads, and know your assignments from your phone. Mobile-first, field-ready.' },
   ];
   const steps = [
-    { n: '01', title: 'Plan',     body: 'Create projects, set the materials, assign haulers and trucks in a quick wizard.' },
+    { n: '01', title: 'Plan',     body: 'Create hauls, set the materials, assign haulers and trucks in a quick wizard.' },
     { n: '02', title: 'Dispatch', body: 'Haulers assign drivers to trucks. Drivers see their day on their phone.' },
     { n: '03', title: 'Track',    body: 'Loads, hours, and KPIs roll up to a live dashboard. No re-entry, no daily-recap meetings.' },
   ];
@@ -1387,7 +1387,7 @@ function Landing({ navigate }) {
               <span data-hero-line="break">on the same page.</span>
             </h1>
             <p style={{ ...T.bodyLg, fontSize: 19, color: C.inkDim, lineHeight: 1.5, maxWidth: 540, margin: 0 }}>
-              Jobsite Exchange coordinates project managers, haulers, and drivers in real time â€” so loads, hours, and truck assignments stay tight across every shift.
+              Jobsite Exchange coordinates haul managers, haulers, and drivers in real time â€” so loads, hours, and truck assignments stay tight across every shift.
             </p>
             <div style={{ display: 'flex', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
               <Btn size="lg" variant="primary" onClick={() => scrollTo('demo')}>
@@ -1716,7 +1716,7 @@ function AdminProjects({ db, setDb, navigate }) {
   const head = (
     <thead>
       <tr>
-        <Th>Project</Th><Th>GC</Th><Th>Status</Th>
+        <Th>Haul</Th><Th>GC</Th><Th>Status</Th>
         <Th align="right">Haulers</Th>
         <Th align="right">Trucks active</Th>
         <Th align="right">Total loads</Th>
@@ -1730,20 +1730,20 @@ function AdminProjects({ db, setDb, navigate }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin' }, { label: 'Projects' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin' }, { label: 'Hauls' }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Active projects Â· {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Projects overview</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a project between sections.</div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Active hauls Â· {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Overview</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a haul between sections.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="secondary" size="sm">Export CSV</Btn>
-          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/new')}>+ New project</Btn>
+          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/new')}>+ New haul</Btn>
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Active projects" value={totals.activeProjects} /></Card>
+        <Card padding={S[4]}><Stat label="Active hauls" value={totals.activeProjects} /></Card>
         <Card padding={S[4]}><Stat label="Trucks running now" value={totals.totalTrucksActive} /></Card>
         <Card padding={S[4]}><Stat label="Total loads delivered" value={totals.totalLoadsAll} sub="across active" /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totals.totalRevenueAll)} sub="across active" /></Card>
@@ -1760,11 +1760,11 @@ function AdminProjects({ db, setDb, navigate }) {
           {head}
           <tbody>
             {active.map(p => renderRow(p, false))}
-            {active.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No active projects.</td></tr>}
+            {active.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No active hauls.</td></tr>}
             <tr onClick={() => navigate('/admin/new')} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={11} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new project</td>
+              <td colSpan={11} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new haul</td>
             </tr>
           </tbody>
         </table>
@@ -1781,7 +1781,7 @@ function AdminProjects({ db, setDb, navigate }) {
           {head}
           <tbody>
             {upcoming.map(p => renderRow(p, false))}
-            {upcoming.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No upcoming projects.</td></tr>}
+            {upcoming.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No upcoming hauls.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -1797,7 +1797,7 @@ function AdminProjects({ db, setDb, navigate }) {
           {head}
           <tbody>
             {completed.map(p => renderRow(p, true))}
-            {completed.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No completed projects.</td></tr>}
+            {completed.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No completed hauls.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -1825,7 +1825,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Projects', to: '/admin' }, { label: project.name }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls', to: '/admin' }, { label: project.name }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: 6 }}>
@@ -1856,7 +1856,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
         <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0))} /></Card>
       </div>
-      <div style={{ marginBottom: S[3] }}><Label>Haulers on this project</Label></div>
+      <div style={{ marginBottom: S[3] }}><Label>Haulers on this haul</Label></div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><Th>Hauler</Th><Th>Contact</Th><Th align="right">Trucks managed</Th><Th align="right">Active now</Th><Th align="right">Total hours</Th><Th></Th></tr></thead>
@@ -1873,7 +1873,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
                       <Avatar name={op.name} color={C.accent} />
                       <div>
                         <div style={{ fontWeight: 600 }}>{op.name}</div>
-                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler Â· {op.projectIds.length > 1 ? `${op.projectIds.length} projects` : '1 project'}</div>
+                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler Â· {op.projectIds.length > 1 ? `${op.projectIds.length} hauls` : '1 haul'}</div>
                       </div>
                     </div>
                   </Td>
@@ -1888,7 +1888,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={6} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this project</td>
+              <td colSpan={6} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this haul</td>
             </tr>
           </tbody>
         </table>
@@ -2010,7 +2010,7 @@ function AdminHaulerProject({ projectId, haulerId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={10} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this project</td>
+              <td colSpan={10} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this haul</td>
             </tr>
           </tbody>
         </table>
@@ -2091,7 +2091,7 @@ function AdminTruck({ projectId, haulerId, truckId, db, setDb, navigate }) {
         </div>
         <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
           {hr && <StatusPill status={hr.status} />}
-          <Btn variant="secondary" size="sm" onClick={() => alert('In real app: re-assign truck to different project/hauler')}>Reassignâ€¦</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => alert('In real app: re-assign truck to different haul/hauler')}>Reassignâ€¦</Btn>
         </div>
       </div>
 
@@ -2330,16 +2330,16 @@ function AdminNewProject({ db, setDb, navigate }) {
       onSubmit={submit}
       nextDisabled={nextDisabled}
       submitDisabled={!allValid}
-      submitLabel="Create project"
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Projects', to: '/admin' }, { label: 'New project' }]}
-      eyebrow="New project"
-      title="Create a new project"
+      submitLabel="Create haul"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls', to: '/admin' }, { label: 'New haul' }]}
+      eyebrow="New haul"
+      title="Create a new haul"
     >
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-            <Label>Step 1 â€” Project basics</Label>
+            <Label>Step 1 â€” Haul basics</Label>
             <div>
-              <div style={{ ...T.caption, marginBottom: 4 }}>Project name</div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Haul name</div>
               <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="e.g., West Side Phase 2" style={inputStyle} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
@@ -2393,7 +2393,7 @@ function AdminNewProject({ db, setDb, navigate }) {
         {step === 2 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
             <Label>Step 2 â€” Assign haulers</Label>
-            <div style={{ ...T.bodySm, color: C.inkDim }}>Pick the haulers who will run this project. You'll assign trucks to them in the next step.</div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>Pick the haulers who will run this haul. You'll assign trucks to them in the next step.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
               {db.haulers.map(op => {
                 const selected = haulerIds.includes(op.id);
@@ -2418,7 +2418,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
                     </div>
                     <div style={{ ...T.monoSm, color: C.inkDim }}>
-                      {op.projectIds.length} {op.projectIds.length === 1 ? 'project' : 'projects'} Â· {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
+                      {op.projectIds.length} {op.projectIds.length === 1 ? 'haul' : 'hauls'} Â· {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
                     </div>
                   </div>
                 );
@@ -2431,7 +2431,7 @@ function AdminNewProject({ db, setDb, navigate }) {
         {step === 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
             <Label>Step 3 â€” Assign trucks</Label>
-            <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the haulers you selected.</div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this haul and assign each to one of the haulers you selected.</div>
             <div>
               <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
             </div>
@@ -2640,10 +2640,10 @@ function AdminNewHauler({ db, setDb, navigate }) {
 
       {step === 2 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-          <Label>Step 2 — Assign to projects</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick the active or upcoming projects this hauler will run. You can change this later.</div>
+          <Label>Step 2 — Assign to hauls</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick the active or upcoming hauls this hauler will run. You can change this later.</div>
           {eligibleProjects.length === 0 ? (
-            <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No active or upcoming projects yet.</div>
+            <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No active or upcoming hauls yet.</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
               {eligibleProjects.map(p => {
@@ -2689,9 +2689,9 @@ function AdminNewHauler({ db, setDb, navigate }) {
             </div>
           </div>
           <div>
-            <Label style={{ marginBottom: S[2] }}>Projects ({projectIds.length})</Label>
+            <Label style={{ marginBottom: S[2] }}>Hauls ({projectIds.length})</Label>
             {projectIds.length === 0 ? (
-              <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No projects assigned yet — you can assign them later.</div>
+              <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No hauls assigned yet — you can assign them later.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
                 {projectIds.map(pid => {
@@ -2921,9 +2921,9 @@ function AdminNewTruck({ db, setDb, navigate }) {
       {step === 2 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
           <Label>Step 2 — Assignments</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick a project and hauler for this truck. Leave either blank to keep the truck on the bench.</div>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick a haul and hauler for this truck. Leave either blank to keep the truck on the bench.</div>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Project</div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Haul</div>
             <select value={projectId} onChange={e => setProjectId(e.target.value)} style={inputStyle}>
               <option value="">— Leave unassigned —</option>
               {eligibleProjects.map(p => <option key={p.id} value={p.id}>{p.name} · {p.gc}</option>)}
@@ -2957,7 +2957,7 @@ function AdminNewTruck({ db, setDb, navigate }) {
             <Label style={{ marginBottom: S[2] }}>Assignments</Label>
             <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
               <div>
-                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Project</div>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Haul</div>
                 <div style={{ fontFamily: F.body, color: projectId ? C.ink : C.inkDim }}>
                   {projectId ? (db.projects.find(p => p.id === projectId) || {}).name : 'Unassigned (bench)'}
                 </div>
@@ -3354,9 +3354,9 @@ function AdminReports({ db, navigate }) {
         <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
         <EmptyState
           icon={<ProjectIcon size={40} />}
-          title="No projects yet"
+          title="No hauls yet"
           body="Create one to start generating activity reports."
-          action={<Btn variant="primary" onClick={() => navigate('/admin/new')}>+ New project</Btn>}
+          action={<Btn variant="primary" onClick={() => navigate('/admin/new')}>+ New haul</Btn>}
         />
       </div>
     );
@@ -3386,7 +3386,7 @@ function AdminReports({ db, navigate }) {
           <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            Activity across projects, haulers, and trucks. Numbers update live as drivers log hours and loads.
+            Activity across hauls, haulers, and trucks. Numbers update live as drivers log hours and loads.
           </div>
         </div>
 
@@ -3410,7 +3410,7 @@ function AdminReports({ db, navigate }) {
       <div className={flashing ? 'jse-pulse' : undefined} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[4] }}>
         <Card padding={S[4]}>
           <Stat
-            label="Active projects"
+            label="Active hauls"
             value={activeProjects.length}
             sub={`total ${db.projects.length}`}
           />
@@ -3481,7 +3481,7 @@ function AdminReports({ db, navigate }) {
 
       {/* C. Project status table */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Projects</Label>
+        <Label color={C.accent}>Hauls</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{sortedRows.length}</span>
       </div>
@@ -3489,7 +3489,7 @@ function AdminReports({ db, navigate }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
-              <SortTh label="Project" k="name" />
+              <SortTh label="Haul" k="name" />
               <SortTh label="Status" k="status" />
               <SortTh label="Haulers" k="haulers" align="right" />
               <SortTh label="Trucks" k="trucks" align="right" />
@@ -3549,7 +3549,7 @@ function AdminReports({ db, navigate }) {
                 </div>
                 <div style={{ textAlign: 'right', minWidth: 64 }}>
                   <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.activeProjects}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>projects</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>hauls</div>
                 </div>
               </div>
             ))}
@@ -3653,7 +3653,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
             <thead>
               <tr>
                 <Th>Request ID</Th>
-                <Th>Project</Th>
+                <Th>Haul</Th>
                 <Th>Material</Th>
                 <Th align="right">Volume</Th>
                 <Th>Requested</Th>
@@ -3886,7 +3886,7 @@ function AdminHaulers({ db, navigate }) {
             </div>
             <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
               <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: 4 }}>Projects</Label>
+                <Label style={{ marginBottom: 4 }}>Hauls</Label>
                 <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{h.projectCount}</div>
               </div>
               <div style={{ flex: 1 }}>
@@ -3944,19 +3944,19 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Projects" value={projects.length} /></Card>
+        <Card padding={S[4]}><Stat label="Hauls" value={projects.length} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
         <Card padding={S[4]}><Stat label="Loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs`} /></Card>
       </div>
 
-      <div style={{ marginBottom: S[3] }}><Label>Projects this hauler is on</Label></div>
+      <div style={{ marginBottom: S[3] }}><Label>Hauls this hauler is on</Label></div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {projects.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>This hauler isn't on any projects.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>This hauler isn't on any hauls.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Project</Th><Th>GC</Th><Th>Status</Th><Th align="right">Trucks</Th><Th align="right">Loads</Th><Th></Th></tr></thead>
+            <thead><tr><Th>Haul</Th><Th>GC</Th><Th>Status</Th><Th align="right">Trucks</Th><Th align="right">Loads</Th><Th></Th></tr></thead>
             <tbody>
               {projects.map(p => {
                 const pTrucks = trucks.filter(t => t.projectId === p.id);
@@ -3983,7 +3983,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Plate</Th><Th>Type</Th><Th>Project</Th><Th>Driver</Th></tr></thead>
+            <thead><tr><Th>Plate</Th><Th>Type</Th><Th>Haul</Th><Th>Driver</Th></tr></thead>
             <tbody>
               {trucks.map(t => {
                 const driver = db.drivers.find(d => d.id === t.driverId);
@@ -4232,7 +4232,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       )}
       <Item
         icon={<ProjectIcon size={20} />}
-        label="Project Overview"
+        label="Hauling Overview"
         active={onOverview}
         onClick={() => go('/admin')}
       />
@@ -4309,7 +4309,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
   );
   return (
     <div>
-      <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={navBtns} />
+      <Topbar navigate={navigate} role="Admin" current="Admin - all hauls" right={navBtns} />
       <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 'calc(100vh - 56px)' }}>
         <aside
           className="admin-sidebar"
@@ -4371,7 +4371,7 @@ function HaulerLanding({ db, navigate }) {
         <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler view</Label>
         <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick a hauler</h1>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-          Each hauler sees only the projects they're assigned to. Click any card to enter their view.
+          Each hauler sees only the hauls they're assigned to. Click any card to enter their view.
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
@@ -4392,7 +4392,7 @@ function HaulerLanding({ db, navigate }) {
             </div>
             <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
               <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: S[1] }}>Projects</Label>
+                <Label style={{ marginBottom: S[1] }}>Hauls</Label>
                 <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{op.projectCount}</div>
               </div>
               <div style={{ flex: 1 }}>
@@ -4437,7 +4437,7 @@ function HaulerHome({ haulerId, db, navigate }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Projects" value={projects.length} sub="assigned" /></Card>
+        <Card padding={S[4]}><Stat label="Hauls" value={projects.length} sub="assigned" /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={myTrucks.length} sub={`${activeTrucks} active`} /></Card>
         <Card padding={S[4]}><Stat label="Loads" value={myLoads.filter(l => l.status === 'approved').length} sub={`${myLoads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(totalHours)} /></Card>
@@ -4445,14 +4445,14 @@ function HaulerHome({ haulerId, db, navigate }) {
 
       {pendingCount > 0 && (
         <Card style={{ marginBottom: S[5], borderLeft: `3px solid ${C.warn}` }}>
-          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{pendingCount} item{pendingCount === 1 ? '' : 's'} pending across your projects</div>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{pendingCount} item{pendingCount === 1 ? '' : 's'} pending across your hauls</div>
           <div style={{ ...T.caption, marginTop: 2 }}>
             Drill into a project to review loads and hour adjustments.
           </div>
         </Card>
       )}
 
-      <div style={{ marginBottom: S[3] }}><Label>Your projects</Label></div>
+      <div style={{ marginBottom: S[3] }}><Label>Your hauls</Label></div>
       {projects.length === 0 ? (
         <EmptyState
           icon={<ProjectIcon size={40} />}
@@ -4521,7 +4521,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
-          <Label color={C.accent}>Project</Label>
+          <Label color={C.accent}>Haul</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>{project.name}</h1>
           <div style={{ ...T.bodySm, color: C.inkDim }}>{project.gc} Â· {project.address}</div>
         </div>
@@ -4546,7 +4546,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
           </thead>
           <tbody>
             {trucks.length === 0 && (
-              <tr><td colSpan={8} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this project yet.</td></tr>
+              <tr><td colSpan={8} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this haul yet.</td></tr>
             )}
             {trucks.map(t => {
               const driver = db.drivers.find(d => d.id === t.driverId);
@@ -4783,7 +4783,7 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
     setShowAdd(false);
   };
   const removeTruck = (id) => {
-    if (!confirm('Remove this truck from the project?')) return;
+    if (!confirm('Remove this truck from the haul?')) return;
     setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
   };
   const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
@@ -4794,7 +4794,7 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[4] }}>
         <div>
           <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Trucks</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this project Â· click any value to edit Â· rate updates all trucks of that type</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this haul Â· click any value to edit Â· rate updates all trucks of that type</div>
         </div>
       </div>
       <Card padding={0}>
@@ -5425,7 +5425,7 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
         <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType.label} Â· {truckType.cap} Â· {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-          <Label style={{ marginBottom: 4 }}>On project</Label>
+          <Label style={{ marginBottom: 4 }}>On haul</Label>
           <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project.name}</div>
           <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project.address}</div>
         </div>
@@ -5747,7 +5747,7 @@ function DriverMultiTruckHome({ driver, trucks, db, setDb, navigate }) {
             </div>
             <div style={{ ...T.caption, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} Â· {truck.hauler}</div>
             <div style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[3] }}>
-              <Label style={{ marginBottom: 4 }}>On project</Label>
+              <Label style={{ marginBottom: 4 }}>On haul</Label>
               <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : 'â€”'}</div>
               <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
             </div>
@@ -5890,7 +5890,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
         <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} Â· {truckType ? truckType.cap : ''} Â· {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-          <Label style={{ marginBottom: 4 }}>On project</Label>
+          <Label style={{ marginBottom: 4 }}>On haul</Label>
           <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project ? project.name : 'â€”'}</div>
           <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
           <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.address : ''}</div>
@@ -6008,7 +6008,7 @@ function App() {
     let title = 'Jobsite Exchange';
     if (h === '/' || h === '') title = 'Jobsite Exchange';
     else if (h.startsWith('/admin/reports')) title = 'JSE â€” Reports';
-    else if (h.startsWith('/admin/new')) title = 'JSE â€” New Project';
+    else if (h.startsWith('/admin/new')) title = 'JSE â€” New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
     else if (h.startsWith('/admin/requests')) {
       title = parts[2] ? `JSE â€” Haul Request ${parts[2]}` : 'JSE â€” Haul Requests';
