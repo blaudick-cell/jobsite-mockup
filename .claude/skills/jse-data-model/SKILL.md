@@ -21,7 +21,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, the relations
 | `loads` | `LOADS_SEED` | `{ id, driverId, truckId, projectId, material, cy, ticketNo?, time, date, status }` |
 | `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, ..., lineItems: [] }` |
 | `rates` | `RATES_INIT` | `{ [truckType]: hourlyRate }` |
-| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, notes? }` (added in v3) |
+| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?: driverId \| null, passedBy: string[], notes? }` (added in v3; `acceptedByDriver` + `passedBy` added in v7) |
 | `activity` | `ACTIVITY_SEED` | `{ id, type, actorRole, actorId, summary, refId?, timestamp }` (added in v6) |
 
 ## Activity events
@@ -114,7 +114,7 @@ The frozen "current time" used by `calcHours` when `clockOut` is null (live shif
 | `projects.status` | `active`, `upcoming`, `completed` |
 | `hours.status` | `open` (live), `pending` (clocked out, awaiting approval), `closed` (approved) |
 | `loads.status` | `approved`, `pending` |
-| `haulRequests.status` | `pending` (unassigned), `matched` (hauler + truck assigned), `completed` (delivered) |
+| `haulRequests.status` | `pending` (unassigned), `matched` (hauler + truck assigned by admin), `accepted` (driver opted in), `completed` (delivered) |
 | (truck) | `inservice` / `idle` — derived, not stored. `inservice` = has an open shift on this truck. |
 
 See [[jse-design-system]] for how each status maps to a color/pill.
@@ -124,4 +124,4 @@ See [[jse-design-system]] for how each status maps to a color/pill.
 - **No `users` collection.** Driver/hauler/admin "identity" is just a UI shell selection.
 - **No auth.**
 - **No real timestamps** (other than `clockedInAt`/`pausedAt`/`pausedMs` on live shifts, used for the live ticker).
-- **Schema versioning is in place** (v6 as of the activity-feed migration). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices, v4→v5 converts load/hours `date` from `'today'`/`'yesterday'` labels to ISO date strings, v5→v6 seeds `activity` and `activityLastReadAt`) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.
+- **Schema versioning is in place** (v7 as of the driver accept/pass flow). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices, v4→v5 converts load/hours `date` from `'today'`/`'yesterday'` labels to ISO date strings, v5→v6 seeds `activity` and `activityLastReadAt`, v6→v7 backfills `acceptedByDriver: null` + `passedBy: []` on every haul request and introduces the `accepted` status value) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.

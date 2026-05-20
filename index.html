@@ -511,19 +511,22 @@ const DRIVERS_SEED = [
 ];
 
 // Haul requests (v3 collection) â€” incoming material-hauling needs that admins
-// match to a hauler + truck. Status flows: pending â†’ matched â†’ completed.
-// `matchedHaulerId` / `matchedTruckId` only populated for matched/completed.
+// match to a hauler + truck. Status flows: pending â†’ accepted (driver opted in) /
+// matched (admin assigned, awaiting driver) â†’ completed.
+// `matchedHaulerId` / `matchedTruckId` only populated for matched/accepted/completed.
+// `acceptedByDriver` set when the driver taps Accept (v7). `passedBy` tracks
+// driver IDs who passed on a pending request so we don't show it to them again.
 const HAUL_REQUESTS_SEED = [
-  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: 'Needs to be on-site before noon.' },
-  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
-  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', notes: 'Spread on north access road.' },
-  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
-  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', notes: '' },
-  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: 'Site opens 09:30.' },
-  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
-  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', notes: 'Delivered 11:05.' },
-  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
-  { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', notes: 'Stockpile at SW corner.' },
+  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.' },
+  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
+  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.' },
+  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
+  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '' },
+  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.' },
+  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
+  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.' },
+  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
+  { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', acceptedByDriver: null,    passedBy: [], notes: 'Stockpile at SW corner.' },
 ];
 
 const INVOICES_SEED = [
@@ -823,6 +826,7 @@ function StatusPill({ status }) {
     pending:   { color: C.warn,   soft: C.warnSoft,   label: 'Pending' },
     approved:  { color: C.ok,     soft: C.okSoft,     label: 'Approved' },
     matched:   { color: C.ok,     soft: C.okSoft,     label: 'Matched' },
+    accepted:  { color: C.info,   soft: C.infoSoft,   label: 'Accepted' },
     closed:    { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Closed' },
     upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
     completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
@@ -2847,7 +2851,7 @@ function DriverShell({ db, setDb, navigate, hash }) {
       {trucks.length === 0 && <DriverNoTruck driver={driver} />}
       {trucks.length === 1 && sub === 'home' && <DriverHome driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
       {trucks.length === 1 && sub === 'log' && !parts[2] && <DriverLogLoad driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
-      {trucks.length > 1 && sub === 'home' && <DriverMultiTruckHome driver={driver} trucks={trucks} db={db} navigate={navigate} />}
+      {trucks.length > 1 && sub === 'home' && <DriverMultiTruckHome driver={driver} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />}
       {trucks.length >= 1 && sub === 'truck' && (() => {
         const tId = parts[2];
         const truck = trucks.find(t => t.id === tId);
@@ -3208,12 +3212,105 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
   );
 }
 
-function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
+// Driver "incoming requests" card — surfaces pending haul requests on the
+// driver's project(s) and lets them Accept or Pass. Shared by both the
+// multi-truck home screen and the single-truck detail screen. Passing on a
+// request keeps it pending in the admin pool but hides it from this driver.
+function DriverIncomingRequests({ db, setDb, driver, projectIds }) {
+  const requests = (db.haulRequests || []).filter(r =>
+    r.status === 'pending'
+    && projectIds.includes(r.projectId)
+    && !(r.passedBy || []).includes(driver.id)
+  );
+
+  const acceptRequest = (reqId) => {
+    const req = (db.haulRequests || []).find(r => r.id === reqId);
+    if (!req) return;
+    const matLabel = materialLabel(req.materialCode);
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === reqId
+          ? { ...r, status: 'accepted', acceptedByDriver: driver.id }
+          : r),
+      },
+      {
+        type: 'haulRequest.accepted',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} accepted ${req.volumeCY} CY of ${matLabel}`,
+        refId: reqId,
+      }
+    ));
+  };
+
+  const passRequest = (reqId) => {
+    const req = (db.haulRequests || []).find(r => r.id === reqId);
+    if (!req) return;
+    const matLabel = materialLabel(req.materialCode);
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === reqId
+          ? { ...r, passedBy: [...(r.passedBy || []), driver.id] }
+          : r),
+      },
+      {
+        type: 'haulRequest.passed',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} passed on ${req.volumeCY} CY of ${matLabel}`,
+        refId: reqId,
+      }
+    ));
+  };
+
+  return (
+    <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
+        <Label>Incoming requests</Label>
+        <Pill color={requests.length > 0 ? C.warn : C.inkDim} soft={requests.length > 0 ? C.warnSoft : 'rgba(255,255,255,0.06)'}>{requests.length}</Pill>
+      </div>
+      {requests.length === 0 ? (
+        <div style={{ ...T.bodySm, color: C.inkDim, padding: `${S[2]}px 0` }}>Nothing waiting right now.</div>
+      ) : requests.map((r, i) => {
+        const project = db.projects.find(p => p.id === r.projectId);
+        const matLabel = materialLabel(r.materialCode);
+        return (
+          <div key={r.id} style={{
+            padding: `${S[3]}px 0`,
+            borderTop: i === 0 ? 'none' : `1px solid ${C.rule}`,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
+              <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
+              <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
+            </div>
+            <div style={{ ...T.monoSm, color: C.inkDim, marginBottom: S[3] }}>{r.volumeCY} CY · {r.requestedAt}</div>
+            <div style={{ display: 'flex', gap: S[2] }}>
+              <button onClick={() => acceptRequest(r.id)} style={{
+                ...T.bodySm, flex: 1, height: 40, border: 'none', cursor: 'pointer',
+                background: C.accent, color: C.bg, borderRadius: R.md, fontFamily: F.display, fontWeight: 700,
+                letterSpacing: -0.2,
+              }}>Accept</button>
+              <button onClick={() => passRequest(r.id)} style={{
+                ...T.bodySm, flex: 1, height: 40, border: `1px solid ${C.ruleHi}`, cursor: 'pointer',
+                background: 'transparent', color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontWeight: 600,
+              }}>Pass</button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DriverMultiTruckHome({ driver, trucks, db, setDb, navigate }) {
   const fmtClock = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   // Aggregate across all the driver's trucks
   const todaysLoadsAll = db.loads.filter(l => l.driverId === driver.id && isToday(l.date));
   const openShifts = db.hours.filter(h => h.driverId === driver.id && h.status === 'open');
   const totalCY = todaysLoadsAll.reduce((s, l) => s + (l.cy || 0), 0);
+  const projectIds = Array.from(new Set(trucks.map(t => t.projectId).filter(Boolean)));
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
@@ -3222,6 +3319,8 @@ function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
         <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>You're assigned to {trucks.length} trucks today. Tap one to log loads or start a shift.</div>
       </div>
+
+      <DriverIncomingRequests db={db} setDb={setDb} driver={driver} projectIds={projectIds} />
 
       {trucks.map(truck => {
         const truckType = TRUCK_TYPES.find(t => t.code === truck.type);
@@ -3374,6 +3473,8 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
       <button onClick={() => navigate(backHref)} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>â† All my trucks</button>
+
+      <DriverIncomingRequests db={db} setDb={setDb} driver={driver} projectIds={truck.projectId ? [truck.projectId] : []} />
 
       {/* Truck header */}
       <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
@@ -4899,12 +5000,13 @@ function AdminReports({ db, navigate }) {
 // Haul Requests â€” admin views (v3)
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate }) {
-  const [filter, setFilter] = useState('all'); // all | pending | matched | completed
+  const [filter, setFilter] = useState('all'); // all | pending | matched | accepted | completed
   const requests = db.haulRequests || [];
   const counts = {
     all: requests.length,
     pending: requests.filter(r => r.status === 'pending').length,
     matched: requests.filter(r => r.status === 'matched').length,
+    accepted: requests.filter(r => r.status === 'accepted').length,
     completed: requests.filter(r => r.status === 'completed').length,
   };
   const visible = filter === 'all' ? requests : requests.filter(r => r.status === filter);
@@ -4933,6 +5035,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
         <Tab k="all" label="All" />
         <Tab k="pending" label="Pending" />
         <Tab k="matched" label="Matched" />
+        <Tab k="accepted" label="Accepted" />
         <Tab k="completed" label="Completed" />
       </div>
       <Card padding={0}>
@@ -4966,7 +5069,14 @@ function AdminHaulRequests({ db, setDb, navigate }) {
                     <Td>{material ? material.label : req.materialCode}</Td>
                     <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
                     <Td mono dim>{req.requestedAt}</Td>
-                    <Td><StatusPill status={req.status} /></Td>
+                    <Td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <StatusPill status={req.status} />
+                        {req.status === 'pending' && (req.passedBy || []).length > 0 && (
+                          <Pill color={C.inkDim} soft={'rgba(255,255,255,0.06)'}>Passed by {req.passedBy.length}</Pill>
+                        )}
+                      </span>
+                    </Td>
                     <Td align="right">
                       {req.status === 'pending' ? (
                         <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
@@ -5060,6 +5170,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>
               {matchedHauler.name} Â· Truck #{matchedTruck.plate}
             </div>
+          </div>
+        )}
+        {req.status === 'matched' && !req.acceptedByDriver && (
+          <div style={{ marginTop: S[3], padding: S[3], background: C.warnSoft, borderRadius: R.md, border: `1px solid ${C.warn}` }}>
+            <Label color={C.warn} style={{ marginBottom: 4 }}>Driver response</Label>
+            <div style={{ ...T.bodySm, color: C.ink }}>Awaiting driver response.</div>
+          </div>
+        )}
+        {req.status === 'accepted' && req.acceptedByDriver && (
+          <div style={{ marginTop: S[3], padding: S[3], background: C.infoSoft, borderRadius: R.md, border: `1px solid ${C.info}` }}>
+            <Label color={C.info} style={{ marginBottom: 4 }}>Driver accepted</Label>
+            <div style={{ ...T.bodySm, color: C.ink }}>{driverName(db, req.acceptedByDriver)} accepted this haul.</div>
           </div>
         )}
       </Card>
@@ -5652,7 +5774,7 @@ function HaulerShell({ db, setDb, navigate, hash }) {
   );
 }
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 6;
+const DB_SCHEMA_VERSION = 7;
 const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity'];
 
 // =====================================================================
@@ -5766,6 +5888,8 @@ function hydrateDb(raw) {
     //   v4 → v5: load/hours `date` fields migrate from 'today'/'yesterday' label
     //            strings to ISO date strings (YYYY-MM-DD).
     //   v5 → v6: add `activity` collection + `activityLastReadAt` mark-as-read pointer.
+    //   v6 → v7: backfill `acceptedByDriver` (null) + `passedBy` ([]) on haulRequests;
+    //            new `accepted` status enum value for driver-opt-in flow.
     const { operators: legacyOperators, ...rest } = parsed;
     const migratedHaulers = Array.isArray(rest.haulers)
       ? rest.haulers
@@ -5795,7 +5919,11 @@ function hydrateDb(raw) {
       hours: Array.isArray(rest.hours)
         ? rest.hours.map(h => h ? { ...h, date: isoBackfill(h.date) } : h)
         : rest.hours,
-      haulRequests: Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED,
+      // v6 → v7: backfill `acceptedByDriver` / `passedBy` defaults on existing
+      // haul requests. Spread `r` last so a v7+ payload preserves real values.
+      haulRequests: (Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED).map(r =>
+        r ? { acceptedByDriver: null, passedBy: [], ...r } : r
+      ),
       // v5 → v6: add activity collection + activityLastReadAt mark-as-read pointer.
       activity: Array.isArray(rest.activity) ? rest.activity : ACTIVITY_SEED,
       activityLastReadAt: typeof rest.activityLastReadAt === 'number' ? rest.activityLastReadAt : 0,
