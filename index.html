@@ -1328,9 +1328,7 @@ function Landing({ navigate }) {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
   const cards = [
-    { role: 'Admin',    to: '/admin',    blurb: 'Create hauls, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
-    { role: 'Hauler',   to: '/hauler', blurb: "Manage your hauls, your trucks, and your team's day.",                    Icon: HaulerIcon },
-    { role: 'Driver',   to: '/driver',   blurb: 'Clock in, log loads, and see your assignments at a glance.',                  Icon: DriverIcon },
+    { role: 'Admin', to: '/admin', blurb: 'Enter as Admin. From the org tree you can drill into any hauler dash or driver widget â€” the same view those users see in production.', Icon: AdminIcon },
   ];
   const audience = [
     { Icon: AdminIcon,    title: 'Haul managers',         body: 'Spin up a haul, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
@@ -1519,10 +1517,10 @@ function Landing({ navigate }) {
         <div style={sectionShell}>
           <Label color={C.accent}>Live demo</Label>
           <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[3]}px`, color: C.ink }}>
-            Try every role in your browser.
+            Try it in your browser.
           </h2>
           <p style={{ ...T.bodyLg, color: C.inkDim, maxWidth: 720, marginTop: 0, marginBottom: S[6] }}>
-            All three role experiences in one page. Demo data persists locally and updates in real time as you click. Try opening this in two browser tabs â€” clock in as a driver in one, watch the Admin Reports KPIs update in the other. Hit Reset on the Admin shell anytime to start over.
+            Enter as Admin and click through the org tree to reach every hauler dash and driver widget â€” all three role experiences from one entry point. Demo data persists locally and updates in real time as you click. Hit Reset on the Admin shell anytime to start over.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[4] }}>
             {cards.map(c => {
@@ -1916,307 +1914,6 @@ function AddHaulerForm({ onAdd, onCancel }) {
         </div>
       </div>
     </Card>
-  );
-}
-
-function AdminHaulerProject({ projectId, haulerId, db, setDb, navigate }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const project = db.projects.find(p => p.id === projectId);
-  const hauler = db.haulers.find(o => o.id === haulerId);
-  if (!project || !hauler) return <NotFound navigate={navigate} />;
-  const trucks = db.trucks.filter(t => t.projectId === projectId && t.haulerId === haulerId);
-  const truckIds = new Set(trucks.map(t => t.id));
-  const hours = db.hours.filter(h => h.projectId === projectId && truckIds.has(h.truckId));
-  const loads = db.loads.filter(l => l.projectId === projectId && truckIds.has(l.truckId));
-  const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
-  const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
-  const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
-  const addTruck = (form) => {
-    const id = 'tk-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => appendActivity(
-      { ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId, driverId: null }] },
-      { type: 'truck.created', actorRole: 'admin', actorId: null, summary: `Admin added truck #${form.plate} on ${projectName(prev, projectId)}`, refId: id }
-    ));
-    setShowAdd(false);
-  };
-  const typeOptions = TRUCK_TYPES.map(t => ({ value: t.code, label: t.label }));
-
-  const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  const totalRevenue = hours.reduce((s, h) => {
-    const t = trucks.find(x => x.id === h.truckId);
-    return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0);
-  }, 0);
-  const pendingHrs = hours.filter(h => h.status === 'pending').length;
-  const pendingLoads = loads.filter(l => l.status === 'pending').length;
-
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: project.name, to: `/admin/p/${projectId}` }, { label: hauler.name }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
-        <Avatar name={hauler.name} size={56} color={C.accent} />
-        <div style={{ flex: 1 }}>
-          <Label color={C.accent}>Hauler on {project.name}</Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
-            <EditableText value={hauler.name} onSave={(v) => updateHauler({ name: v })} />
-          </h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            <EditableText value={hauler.phone} onSave={(v) => updateHauler({ phone: v })} mono /> Â·{' '}
-            <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
-          </div>
-        </div>
-        <Btn variant="secondary" size="sm">Message</Btn>
-      </div>
-
-      {/* Hauler KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
-        <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${pendingLoads} pending`} /></Card>
-        <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(totalHours)} /></Card>
-        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} /></Card>
-      </div>
-
-      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Label>Trucks on {project.name}</Label>
-        <span style={{ ...T.caption }}>Click any value to edit. Click row to drill into truck.</span>
-      </div>
-      <Card padding={0}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
-            <tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Driver</Th><Th>Status</Th><Th align="right">Total hours</Th><Th align="right">Total loads</Th><Th align="right">Total revenue</Th><Th></Th><Th></Th></tr>
-          </thead>
-          <tbody>
-            {trucks.map(t => {
-              const driver = db.drivers.find(d => d.id === t.driverId);
-              const hr = db.hours.find(h => h.truckId === t.id);
-              const truckHours = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
-              const truckLoadsAll = db.loads.filter(l => l.truckId === t.id);
-              const rate = db.rates[t.type];
-              const revenue = truckHours * rate;
-              return (
-                <Tr key={t.id} onClick={() => navigate(`/admin/p/${projectId}/o/${haulerId}/t/${t.id}`)}>
-                  <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
-                  <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={typeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
-                  <Td align="right" mono>$<EditableText value={String(rate || 0)} onSave={(v) => updateRate(t.type, v)} mono />/hr</Td>
-                  <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>â€” unassigned</span>}</Td>
-                  <Td>{hr ? <StatusPill status={hr.status} /> : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off</Pill>}</Td>
-                  <Td align="right" mono>{fmtHours(truckHours)}</Td>
-                  <Td align="right" mono>{truckLoadsAll.filter(l => l.status === 'approved').length}{truckLoadsAll.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: 4 }}>+{truckLoadsAll.filter(l => l.status === 'pending').length}p</span>}</Td>
-                  <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(revenue)}</Td>
-                  <Td align="right">{driver ? <button onClick={(e) => { e.stopPropagation(); navigate(`/driver/${driver.id}`); }} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '4px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase' }}>Widget {'â†—'}</button> : <span style={{ color: C.inkFaint }}>â€”</span>}</Td>
-                  <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
-                </Tr>
-              );
-            })}
-            <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={10} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this haul</td>
-            </tr>
-          </tbody>
-        </table>
-      </Card>
-      {showAdd && <AddTruckForm onAdd={addTruck} onCancel={() => setShowAdd(false)} />}
-
-      {/* Approvals */}
-      {(pendingLoads + pendingHrs > 0) && (
-        <div style={{ marginTop: S[7] }}>
-          <HaulerApprovals projectId={projectId} hours={hours} loads={loads} hauler={hauler} db={db} setDb={setDb} />
-        </div>
-      )}
-
-      {/* Invoices */}
-      <div style={{ marginTop: S[7] }}>
-        <HaulerInvoices hauler={hauler} projectId={projectId} project={project} trucks={trucks} hours={hours} db={db} setDb={setDb} />
-      </div>
-    </div>
-  );
-}
-
-function AdminTruck({ projectId, haulerId, truckId, db, setDb, navigate }) {
-  const project = db.projects.find(p => p.id === projectId);
-  const hauler = db.haulers.find(o => o.id === haulerId);
-  const truck = db.trucks.find(t => t.id === truckId);
-  if (!project || !hauler || !truck) return <NotFound navigate={navigate} />;
-  const driver = db.drivers.find(d => d.id === truck.driverId);
-  const hr = db.hours.find(h => h.truckId === truckId);
-  const truckLoads = db.loads.filter(l => l.truckId === truckId).sort((a, b) => a.time.localeCompare(b.time));
-  const rate = db.rates[truck.type];
-  const truckType = TRUCK_TYPES.find(tt => tt.code === truck.type);
-  const truckHours = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
-
-  // Field updaters
-  const updateTruck = (patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === truck.id ? { ...t, ...patch } : t) }));
-  const updateDriver = (patch) => driver && setDb(prev => ({ ...prev, drivers: prev.drivers.map(d => d.id === driver.id ? { ...d, ...patch } : d) }));
-  const updateRate = (newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [truck.type]: parseInt(newRate) || 0 } }));
-  const updateHr = (patch) => hr && setDb(prev => ({ ...prev, hours: prev.hours.map(h => h.id === hr.id ? { ...h, ...patch } : h) }));
-  const updateLoad = (id, patch) => setDb(prev => ({ ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, ...patch } : l) }));
-  const deleteLoad = (id) => { if (confirm('Delete this load?')) setDb(prev => ({ ...prev, loads: prev.loads.filter(l => l.id !== id) })); };
-  const reassignDriver = (newDriverId) => updateTruck({ driverId: newDriverId || null });
-
-  const driverOptions = [
-    { value: '', label: 'â€” Unassigned â€”' },
-    ...db.drivers.map(d => ({ value: d.id, label: d.name + ' Â· ' + d.phone })),
-  ];
-  const typeOptions = TRUCK_TYPES.map(t => ({ value: t.code, label: t.label + ' (' + t.cap + ')' }));
-  const materialOptions = MATERIALS.map(m => ({ value: m.code, label: m.label }));
-  const statusOptions = [
-    { value: 'open', label: 'Active' },
-    { value: 'pending', label: 'Pending' },
-    { value: 'approved', label: 'Approved' },
-    { value: 'closed', label: 'Closed' },
-  ];
-
-  return (
-    <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
-      <Crumbs items={[
-        { label: 'Admin', to: '/admin' },
-        { label: project.name, to: `/admin/p/${projectId}` },
-        { label: hauler.name, to: `/admin/p/${projectId}/o/${haulerId}` },
-        { label: `Truck #${truck.plate}` },
-      ]} navigate={navigate} />
-
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[5], marginBottom: S[5] }}>
-        <div style={{ flex: 1 }}>
-          <Label color={C.accent}>
-            <EditableText value={truck.hauler} onSave={(v) => updateTruck({ hauler: v })} style={{ color: C.accent }} />
-          </Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>
-            Truck <span style={{ color: C.accent }}>#</span>
-            <EditableText value={truck.plate} onSave={(v) => updateTruck({ plate: v })} mono />
-          </h1>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>
-            <EditableSelect value={truck.type} options={typeOptions} onSave={(v) => updateTruck({ type: v })} /> Â· {truckType.axles} Â· ${' '}
-            <EditableText value={String(rate)} onSave={updateRate} mono /><span>/hr</span>
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
-          {hr && <StatusPill status={hr.status} />}
-          <Btn variant="secondary" size="sm" onClick={() => alert('In real app: re-assign truck to different haul/hauler')}>Reassignâ€¦</Btn>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: S[5] }}>
-        <div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: S[4], marginBottom: S[5] }}>
-            <Card>
-              <Label style={{ marginBottom: S[3] }}>Driver</Label>
-              <EditableSelect value={truck.driverId || ''} options={driverOptions} onSave={reassignDriver} style={{ display: 'inline-block', marginBottom: S[3], color: C.accent, fontWeight: 600 }} />
-              {driver ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                  <Avatar name={driver.name} size={44} />
-                  <div>
-                    <div style={{ ...T.h4, fontWeight: 700 }}>
-                      <EditableText value={driver.name} onSave={(v) => updateDriver({ name: v })} />
-                    </div>
-                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                      <EditableText value={driver.phone} onSave={(v) => updateDriver({ phone: v })} mono />
-                    </div>
-                  </div>
-                </div>
-              ) : <div style={{ ...T.bodySm, color: C.inkFaint, marginTop: S[3] }}>No driver assigned. Hauler (or admin) will assign one.</div>}
-              {hr && (
-                <div style={{ marginTop: S[4], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
-                    <Label>Clocked in</Label>
-                    <span style={{ ...T.mono, color: C.ink, fontWeight: 600 }}>
-                      <EditableText value={hr.clockIn} onSave={(v) => updateHr({ clockIn: v })} mono placeholder="HH:MM" />
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
-                    <Label>Break</Label>
-                    <span style={{ ...T.mono, color: C.ink }}>
-                      <EditableText value={String(hr.breakMin)} onSave={(v) => updateHr({ breakMin: parseInt(v) || 0 })} mono /> min
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
-                    <Label>Status</Label>
-                    <span style={{ ...T.mono, color: C.accent, fontWeight: 700 }}>
-                      <EditableSelect value={hr.status} options={statusOptions} onSave={(v) => updateHr({ status: v })} />
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <Label color={C.accent}>Hours so far</Label>
-                    <span style={{ ...T.mono, color: C.accent, fontWeight: 700 }}>{fmtHours(truckHours)}</span>
-                  </div>
-                </div>
-              )}
-            </Card>
-            <Card>
-              <Label style={{ marginBottom: S[3] }}>Today summary</Label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[4] }}>
-                <Stat label="Hours" value={fmtHours(truckHours)} />
-                <Stat label="Loads (approved)" value={truckLoads.filter(l => l.status === 'approved').length} />
-                <Stat label="Pending" value={truckLoads.filter(l => l.status === 'pending').length} />
-                <Stat label="Revenue" value={fmtMoney(truckHours * rate)} sub="approved hours" />
-              </div>
-            </Card>
-          </div>
-          <div style={{ marginBottom: S[3], display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Label>Today's loads</Label>
-            <span style={{ ...T.micro, color: C.inkFaint }}>Click any value to edit</span>
-          </div>
-          <Card padding={0}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr><Th width={70}>Time</Th><Th>CY</Th><Th>Material</Th><Th width={50}>Photo</Th><Th>Status</Th><Th></Th></tr>
-              </thead>
-              <tbody>
-                {truckLoads.length === 0 && (
-                  <tr><td colSpan="6" style={{ padding: S[6], textAlign: 'center' }}>
-                    <div style={{ color: C.inkFaint, marginBottom: S[2], display: 'inline-flex' }}><TruckIcon size={28} /></div>
-                    <div style={{ ...T.h3, fontSize: 15, color: C.ink, marginBottom: S[1] }}>No loads logged yet today</div>
-                    <div style={{ ...T.caption}}>Loads logged by the driver will appear here.</div>
-                  </td></tr>
-                )}
-                {truckLoads.map(l => (
-                  <Tr key={l.id}>
-                    <Td mono><EditableText value={l.time} onSave={(v) => updateLoad(l.id, { time: v })} mono placeholder="HH:MM" /></Td>
-                    <Td mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
-                    <Td><EditableSelect value={l.material} options={materialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
-                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 36, height: 36, borderRadius: R.xs, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ ...T.micro, color: C.inkFaint}}>â€”</span>}</Td>
-                    <Td><EditableSelect value={l.status} options={statusOptions} onSave={(v) => updateLoad(l.id, { status: v })} /></Td>
-                    <Td align="right"><Btn variant="ghost" size="xs" onClick={() => deleteLoad(l.id)}>Delete</Btn></Td>
-                  </Tr>
-                ))}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-
-        {/* Driver mobile widget link */}
-        <div style={{ marginTop: S[6] }}>
-          <Label style={{ marginBottom: S[3] }}>Driver mobile widget</Label>
-          {driver ? (
-            <Card>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                  <Avatar name={driver.name} size={44} color={C.accent} />
-                  <div>
-                    <Label style={{ marginBottom: S[1] }}>What {driver.name.split(' ').pop()} sees</Label>
-                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink }}>
-                      Driver phone widget Â· #{truck.plate}
-                    </div>
-                    <div style={{ ...T.caption, marginTop: 2 }}>
-                      Clock in/out, log loads, see today's earnings
-                    </div>
-                  </div>
-                </div>
-                <Btn size="md" onClick={() => navigate(`/driver/${driver.id}`)}>
-                  Open widget {'â†’'}
-                </Btn>
-              </div>
-            </Card>
-          ) : (
-            <Card>
-              <div style={{ ...T.bodySm, color: C.inkFaint, textAlign: 'center', padding: S[3] }}>
-                No driver assigned to this truck yet. Assign one above to open their mobile widget.
-              </div>
-            </Card>
-          )}
-        </div>
-
-      </div>
-    </div>
   );
 }
 
@@ -4336,8 +4033,8 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'drivers' && parts[2] === 'new' && <AdminNewDriver db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] !== 'new' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
           {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 5 && parts[3] === 'o' && <AdminHaulerProject projectId={parts[2]} haulerId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} haulerId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 5 && parts[3] === 'o' && <HaulerProject haulerId={parts[4]} projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} viewer="admin" />}
+          {parts.length === 7 && parts[5] === 't' && <HaulerTruckView haulerId={parts[4]} projectId={parts[2]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} viewer="admin" />}
         </main>
       </div>
       {drawerOpen && (
@@ -4499,7 +4196,8 @@ function HaulerHome({ haulerId, db, navigate }) {
   );
 }
 
-function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
+function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hauler' }) {
+  const isAdmin = viewer === 'admin';
   const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   if (!op || !project) return <NotFound navigate={navigate} />;
@@ -4512,13 +4210,26 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
   const activeTrucks = trucks.filter(t => t.driverId && hours.some(h => h.truckId === t.id && h.status === 'open')).length;
   const pendingLoads = loads.filter(l => l.status === 'pending').length;
 
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[
+  const truckLink = (tId) => isAdmin
+    ? `/admin/p/${projectId}/o/${haulerId}/t/${tId}`
+    : `/hauler/o/${haulerId}/p/${projectId}/t/${tId}`;
+
+  const crumbs = isAdmin
+    ? [
+        { label: 'Admin', to: '/admin' },
+        { label: 'Hauls', to: '/admin' },
+        { label: project.name, to: `/admin/p/${projectId}` },
+        { label: op.name },
+      ]
+    : [
         { label: 'Hauler', to: '/hauler' },
         { label: op.name, to: `/hauler/o/${haulerId}` },
         { label: project.name },
-      ]} navigate={navigate} />
+      ];
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={crumbs} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
           <Label color={C.accent}>Haul</Label>
@@ -4536,17 +4247,17 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
       </div>
 
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Label>Your trucks on {project.name}</Label>
+        <Label>{isAdmin ? `Trucks on ${project.name}` : `Your trucks on ${project.name}`}</Label>
         <span style={{ ...T.caption }}>Click a row to drill into the truck.</span>
       </div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr><Th>Truck</Th><Th>Driver</Th><Th>Clock-in</Th><Th align="right">Hours</Th><Th align="right">Loads</Th><Th align="right">CY</Th><Th>Status</Th><Th></Th></tr>
+            <tr><Th>Truck</Th><Th>Driver</Th><Th>Clock-in</Th><Th align="right">Hours</Th><Th align="right">Loads</Th><Th align="right">CY</Th><Th>Status</Th>{isAdmin && <Th align="right">Widget</Th>}<Th></Th></tr>
           </thead>
           <tbody>
             {trucks.length === 0 && (
-              <tr><td colSpan={8} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this haul yet.</td></tr>
+              <tr><td colSpan={isAdmin ? 9 : 8} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this haul yet.</td></tr>
             )}
             {trucks.map(t => {
               const driver = db.drivers.find(d => d.id === t.driverId);
@@ -4555,7 +4266,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
               const truckCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
               const truckHours = hours.filter(h => h.truckId === t.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
               return (
-                <Tr key={t.id} onClick={() => navigate(`/hauler/o/${haulerId}/p/${projectId}/t/${t.id}`)}>
+                <Tr key={t.id} onClick={() => navigate(truckLink(t.id))}>
                   <Td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
                       <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{t.plate}</span>
@@ -4569,6 +4280,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
                   <Td align="right" mono>{truckLoads.filter(l => l.status === 'approved').length}{truckLoads.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: S[1] }}>+{truckLoads.filter(l => l.status === 'pending').length}p</span>}</Td>
                   <Td align="right" mono>{truckCY}</Td>
                   <Td>{hr ? <StatusPill status={hr.status} /> : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off</Pill>}</Td>
+                  {isAdmin && <Td align="right">{driver ? <button onClick={(e) => { e.stopPropagation(); navigate(`/driver/${driver.id}`); }} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '4px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase' }}>Widget {'â†—'}</button> : <span style={{ color: C.inkFaint }}>â€”</span>}</Td>}
                   <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
                 </Tr>
               );
@@ -4580,7 +4292,8 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
   );
 }
 
-function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate }) {
+function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, viewer = 'hauler' }) {
+  const isAdmin = viewer === 'admin';
   const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   const truck = db.trucks.find(t => t.id === truckId);
@@ -4593,14 +4306,24 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate }) 
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const rate = db.rates[truck.type];
 
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[
+  const crumbs = isAdmin
+    ? [
+        { label: 'Admin', to: '/admin' },
+        { label: 'Hauls', to: '/admin' },
+        { label: project.name, to: `/admin/p/${projectId}` },
+        { label: op.name, to: `/admin/p/${projectId}/o/${haulerId}` },
+        { label: `Truck #${truck.plate}` },
+      ]
+    : [
         { label: 'Hauler', to: '/hauler' },
         { label: op.name, to: `/hauler/o/${haulerId}` },
         { label: project.name, to: `/hauler/o/${haulerId}/p/${projectId}` },
         { label: `Truck #${truck.plate}` },
-      ]} navigate={navigate} />
+      ];
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={crumbs} navigate={navigate} />
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[5], marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
@@ -4620,6 +4343,9 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate }) 
                 <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}>{driver.name}</div>
                 <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim }}>{driver.phone}</div>
               </div>
+              {isAdmin && (
+                <button onClick={() => navigate(`/driver/${driver.id}`)} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase', marginLeft: S[2] }}>Widget {'â†—'}</button>
+              )}
             </div>
           ) : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">No driver</Pill>}
         </div>
@@ -5235,15 +4961,30 @@ function Phone({ children }) {
 }
 
 function DriverShell({ db, setDb, navigate, hash }) {
-  const [drId, setDrId] = useState('dr-001');
+  // Hash forms supported:
+  //   /driver                              -> picker default (dr-001)
+  //   /driver/<driverId>                   -> deep-link to a driver
+  //   /driver/<driverId>/truck/<truckId>   -> driver's truck detail
+  //   /driver/<driverId>/log/<truckId>     -> log-load for that truck
+  //   /driver/truck/<truckId>              -> legacy form (uses pickedId)
+  //   /driver/log/<truckId>                -> legacy form
+  const parts = hash.split('/').filter(Boolean); // ['driver', ...]
+  // A driver id has the prefix 'dr-'; sub-routes ('home','truck','log') do not.
+  const urlDriverId = parts[1] && parts[1].startsWith('dr-') ? parts[1] : null;
+  const [pickedId, setPickedId] = useState('dr-001');
+  const drId = urlDriverId || pickedId;
+  // Keep pickedId in sync when the URL changes externally
+  useEffect(() => { if (urlDriverId && urlDriverId !== pickedId) setPickedId(urlDriverId); }, [urlDriverId]);
   const driver = db.drivers.find(d => d.id === drId);
   const trucks = db.trucks.filter(t => t.driverId === drId);
-  const parts = hash.split('/').filter(Boolean); // e.g. ['driver','truck','tk-447'] or ['driver','log','tk-447']
-  const sub = parts[1] || 'home';
+  const subIdx = urlDriverId ? 2 : 1;
+  const sub = parts[subIdx] || 'home';
+  const subArg = parts[subIdx + 1];
+  const basePrefix = urlDriverId ? `/driver/${urlDriverId}` : '/driver';
   return (
     <Phone>
       <div style={{ padding: '4px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <select value={drId} onChange={e => { setDrId(e.target.value); navigate('/driver'); }} style={{ background: 'transparent', color: C.inkFaint, border: 'none', padding: 0, fontFamily: F.mono, fontSize: 10 }}>
+        <select value={drId} onChange={e => { setPickedId(e.target.value); navigate(urlDriverId ? `/driver/${e.target.value}` : '/driver'); }} style={{ background: 'transparent', color: C.inkFaint, border: 'none', padding: 0, fontFamily: F.mono, fontSize: 10 }}>
           {db.drivers.map(d => {
             const tc = db.trucks.filter(t => t.driverId === d.id).length;
             return <option key={d.id} value={d.id} style={{ background: C.surface }}>Demo: {d.name}{tc > 1 ? ' (' + tc + ' trucks)' : ''}</option>;
@@ -5251,21 +4992,22 @@ function DriverShell({ db, setDb, navigate, hash }) {
         </select>
         <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', color: C.inkFaint, fontFamily: F.mono, fontSize: 10, cursor: 'pointer' }}>Switch role</button>
       </div>
-      {trucks.length === 0 && <DriverNoTruck driver={driver} />}
-      {trucks.length === 1 && sub === 'home' && <DriverHome driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
-      {trucks.length === 1 && sub === 'log' && !parts[2] && <DriverLogLoad driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
-      {trucks.length > 1 && sub === 'home' && <DriverMultiTruckHome driver={driver} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />}
-      {trucks.length >= 1 && sub === 'truck' && (() => {
-        const tId = parts[2];
+      {!driver && <DriverNoTruck driver={{ name: 'Unknown driver' }} />}
+      {driver && trucks.length === 0 && <DriverNoTruck driver={driver} />}
+      {driver && trucks.length === 1 && sub === 'home' && <DriverHome driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
+      {driver && trucks.length === 1 && sub === 'log' && !subArg && <DriverLogLoad driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
+      {driver && trucks.length > 1 && sub === 'home' && <DriverMultiTruckHome driver={driver} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />}
+      {driver && trucks.length >= 1 && sub === 'truck' && (() => {
+        const tId = subArg;
         const truck = trucks.find(t => t.id === tId);
         if (!truck) return <DriverTruckNotFound navigate={navigate} />;
         return <DriverTruckDetail driver={driver} truck={truck} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />;
       })()}
-      {trucks.length >= 1 && sub === 'log' && parts[2] && (() => {
-        const tId = parts[2];
+      {driver && trucks.length >= 1 && sub === 'log' && subArg && (() => {
+        const tId = subArg;
         const truck = trucks.find(t => t.id === tId);
         if (!truck) return <DriverTruckNotFound navigate={navigate} />;
-        return <DriverLogLoad driver={driver} truck={truck} db={db} setDb={setDb} navigate={navigate} returnTo={`/driver/truck/${truck.id}`} />;
+        return <DriverLogLoad driver={driver} truck={truck} db={db} setDb={setDb} navigate={navigate} returnTo={`${basePrefix}/truck/${truck.id}`} />;
       })()}
     </Phone>
   );
