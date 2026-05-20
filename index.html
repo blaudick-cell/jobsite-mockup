@@ -24,6 +24,21 @@
       border-radius: 50%; animation: spin 0.8s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Cross-tab sync flash: a subtle accent pulse on elements that just hydrated
+       from another browser tab's localStorage write. */
+    @keyframes jsePulse {
+      0%   { box-shadow: 0 0 0 0 rgba(179, 230, 53, 0.55); }
+      60%  { box-shadow: 0 0 0 12px rgba(179, 230, 53, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(179, 230, 53, 0); }
+    }
+    .jse-pulse {
+      animation: jsePulse 1.2s ease-out;
+      border-radius: 16px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .jse-pulse { animation: none; }
+    }
     *::-webkit-scrollbar { width: 10px; height: 10px; }
     *::-webkit-scrollbar-track { background: transparent; }
     *::-webkit-scrollbar-thumb { background: #1f1f1f; border-radius: 6px; }
@@ -274,7 +289,7 @@
   <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <script type="text/babel" data-presets="react" data-type="module">
-const { useState, useEffect, useMemo, useRef } = React;
+const { useState, useEffect, useMemo, useRef, useContext } = React;
 
 // =====================================================================
 // Design tokens — preserved from Phase 1 mockup
@@ -1120,7 +1135,7 @@ function Landing({ navigate }) {
             Try every role in your browser.
           </h2>
           <p style={{ ...T.bodyLg, fontSize: 16, color: C.inkDim, maxWidth: 720, marginTop: 0, marginBottom: S[6] }}>
-            All three role experiences in one page. Demo data persists locally and updates in real time as you click. Hit Reset on the Admin shell anytime to start over.
+            All three role experiences in one page. Demo data persists locally and updates in real time as you click. Try opening this in two browser tabs — clock in as a driver in one, watch the Admin Reports KPIs update in the other. Hit Reset on the Admin shell anytime to start over.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[4] }}>
             {cards.map(c => {
@@ -3461,6 +3476,16 @@ function AdminNewProject({ db, setDb, navigate }) {
 function AdminReports({ db, navigate }) {
   const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
 
+  // Pulse the KPI row when another browser tab pushes new data into our db.
+  const remoteNonce = useContext(RemoteUpdateContext);
+  const [flashing, setFlashing] = useState(false);
+  useEffect(() => {
+    if (remoteNonce === 0) return;
+    setFlashing(true);
+    const id = setTimeout(() => setFlashing(false), 1200);
+    return () => clearTimeout(id);
+  }, [remoteNonce]);
+
   // ----- KPIs -----
   const activeProjects = db.projects.filter(p => p.status === 'active');
   const openShifts = db.hours.filter(h => h.status === 'open');
@@ -3608,7 +3633,7 @@ function AdminReports({ db, navigate }) {
       </div>
 
       {/* A. Headline KPI row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[4] }}>
+      <div className={flashing ? 'jse-pulse' : undefined} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[4] }}>
         <Card padding={S[4]}>
           <Stat
             label="Active projects"
@@ -3841,52 +3866,92 @@ const DB_STORAGE_KEY = 'jse_db_v1';
 const DB_SCHEMA_VERSION = 2;
 const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
 
+function buildSeed() {
+  return {
+    projects: PROJECTS_SEED,
+    operators: OPERATORS_SEED,
+    trucks: TRUCKS_SEED,
+    drivers: DRIVERS_SEED,
+    hours: HOURS_SEED,
+    loads: LOADS_SEED,
+    invoices: INVOICES_SEED,
+    rates: RATES_INIT,
+    schemaVersion: DB_SCHEMA_VERSION,
+  };
+}
+
+// Parse a stored localStorage payload (or null) into a valid db.
+// Used both at initial mount and when a sibling tab writes to `jse_db_v1`.
+function hydrateDb(raw) {
+  const seed = buildSeed();
+  if (raw == null) return seed;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return seed;
+    const valid = DB_REQUIRED_KEYS.every(k => k in parsed);
+    if (!valid) return seed;
+    if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
+    if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
+    // Schema migration: backfill missing date fields on loads/hours, bump version (persisted on next render).
+    return {
+      ...parsed,
+      loads: Array.isArray(parsed.loads)
+        ? parsed.loads.map(l => l && l.date == null ? { ...l, date: 'yesterday' } : l)
+        : parsed.loads,
+      hours: Array.isArray(parsed.hours)
+        ? parsed.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
+        : parsed.hours,
+      schemaVersion: DB_SCHEMA_VERSION,
+    };
+  } catch (e) {
+    return seed;
+  }
+}
+
+// Context broadcast a monotonic nonce whenever this tab's db was rehydrated
+// from another tab's localStorage write. Components subscribe to flash a cue.
+const RemoteUpdateContext = React.createContext(0);
+
 function App() {
   const [hash, navigate] = useHash();
   const [db, setDb] = useState(() => {
-    const seed = {
-      projects: PROJECTS_SEED,
-      operators: OPERATORS_SEED,
-      trucks: TRUCKS_SEED,
-      drivers: DRIVERS_SEED,
-      hours: HOURS_SEED,
-      loads: LOADS_SEED,
-      invoices: INVOICES_SEED,
-      rates: RATES_INIT,
-      schemaVersion: DB_SCHEMA_VERSION,
-    };
     try {
-      const raw = window.localStorage.getItem(DB_STORAGE_KEY);
-      if (!raw) return seed;
-      const parsed = JSON.parse(raw);
-      if (!parsed || typeof parsed !== 'object') return seed;
-      const valid = DB_REQUIRED_KEYS.every(k => k in parsed);
-      if (!valid) return seed;
-      if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
-      if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
-      // Schema migration: backfill missing date fields on loads/hours, bump version, persist.
-      const migrated = {
-        ...parsed,
-        loads: Array.isArray(parsed.loads)
-          ? parsed.loads.map(l => l && l.date == null ? { ...l, date: 'yesterday' } : l)
-          : parsed.loads,
-        hours: Array.isArray(parsed.hours)
-          ? parsed.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
-          : parsed.hours,
-        schemaVersion: DB_SCHEMA_VERSION,
-      };
-      return migrated;
+      return hydrateDb(window.localStorage.getItem(DB_STORAGE_KEY));
     } catch (e) {
-      return seed;
+      return buildSeed();
     }
   });
+  const [remoteUpdateNonce, setRemoteUpdateNonce] = useState(0);
+  // Track the last serialized payload we wrote (or received) so we can skip
+  // redundant writes — including the write that would otherwise echo back the
+  // value we just received from another tab.
+  const lastSerializedRef = useRef(null);
   useEffect(() => {
     try {
-      window.localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(db));
+      const serialized = JSON.stringify(db);
+      if (lastSerializedRef.current === serialized) return;
+      lastSerializedRef.current = serialized;
+      window.localStorage.setItem(DB_STORAGE_KEY, serialized);
     } catch (e) {
       // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
+  // Cross-tab sync: when another tab writes to jse_db_v1, hydrate the new value
+  // here. `storage` events do not fire in the originating tab, so no loop.
+  // newValue === null means a sibling tab cleared the key (Reset demo data) —
+  // hydrateDb(null) returns a fresh seed, so peer tabs reseed too.
+  useEffect(() => {
+    const onStorage = (e) => {
+      if (e.key !== DB_STORAGE_KEY) return;
+      const next = hydrateDb(e.newValue);
+      // Pre-arm the persist guard so it won't re-write the value we just got.
+      lastSerializedRef.current = e.newValue == null ? null : JSON.stringify(next);
+      setDb(next);
+      setRemoteUpdateNonce(n => n + 1);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   // Derive document.title from the current hash so the browser tab reflects context.
   useEffect(() => {
     const h = hash || '/';
@@ -3927,12 +3992,14 @@ function App() {
   }, [hash, db]);
   const route = (hash || '/').split('/')[1] || '';
   return (
-    <div>
-      {route === '' && <Landing navigate={navigate} />}
-      {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-      {route === 'operator' && <OperatorShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-      {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-    </div>
+    <RemoteUpdateContext.Provider value={remoteUpdateNonce}>
+      <div>
+        {route === '' && <Landing navigate={navigate} />}
+        {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+        {route === 'operator' && <OperatorShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+        {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+      </div>
+    </RemoteUpdateContext.Provider>
   );
 }
 
