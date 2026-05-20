@@ -875,6 +875,15 @@ function ReportingIcon({ size = 24 }) {
     </svg>
   );
 }
+function PaymentsIcon({ size = 24 }) {
+  // Dollar sign in a rounded receipt
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M12 7 V17 M14.5 9.5 a2.5 2 0 0 0 -2.5 -1.5 c-1.5 0 -2.5 1 -2.5 2 s1 1.5 2.5 1.5 c1.5 0 2.5 .8 2.5 1.8 c0 1.2 -1 2 -2.5 2 a3 2 0 0 1 -2.5 -1.5" />
+    </svg>
+  );
+}
 function ActivityIcon({ size = 24, color = 'currentColor' }) {
   // Pulse-line shape â€” left-to-right zigzag suggesting heartbeat / activity
   return (
@@ -4203,6 +4212,105 @@ function AdminReporting({ db, navigate }) {
 }
 
 // =====================================================================
+// AdminPayments — placeholder cards for hauler payouts + GC billing at
+// /admin/payments. Separate from /admin/reporting which is the printable
+// statement view; this is the in-app "what needs paying / who paid"
+// dashboard for the ops lead.
+// =====================================================================
+function AdminPayments({ db, navigate }) {
+  const invoices = db.invoices || [];
+  const invoiceTotal = (inv) => (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
+  const paidThisMonth = invoices.filter(i => i.status === 'paid');
+  const openInvoices = invoices.filter(i => i.status !== 'paid');
+  const paidAmount = paidThisMonth.reduce((s, i) => s + invoiceTotal(i), 0);
+  const openAmount = openInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
+  const haulersWithBalance = new Set(openInvoices.map(i => i.haulerId)).size;
+
+  const kpiCards = [
+    { label: 'Outstanding to haulers', value: fmtMoney(openAmount), sub: `${openInvoices.length} invoice${openInvoices.length === 1 ? '' : 's'} pending` },
+    { label: 'Haulers awaiting payout', value: haulersWithBalance, sub: 'with at least one open invoice' },
+    { label: 'Paid this period', value: fmtMoney(paidAmount), sub: `${paidThisMonth.length} invoice${paidThisMonth.length === 1 ? '' : 's'} cleared` },
+    { label: 'Next batch run', value: '— scheduled', sub: 'ACH batch placeholder' },
+  ];
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Payments' }]} navigate={navigate} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Payments</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauler payouts &amp; GC billing.</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Who's owed money, who owes us, and when the next batch goes out.</div>
+        </div>
+        <div style={{ display: 'flex', gap: S[2] }}>
+          <Btn variant="secondary" size="sm" onClick={() => alert('Coming soon — ACH batch run placeholder')}>Run payout batch</Btn>
+          <Btn variant="primary"   size="sm" onClick={() => alert('Coming soon — send GC invoice statements')}>Send GC statements</Btn>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+        {kpiCards.map(c => (
+          <Card key={c.label} padding={S[4]}>
+            <Stat label={c.label} value={c.value} sub={c.sub} />
+          </Card>
+        ))}
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+        <Card padding={S[4]}>
+          <Label style={{ marginBottom: S[2] }}>Open hauler invoices</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>{openInvoices.length} invoice{openInvoices.length === 1 ? '' : 's'} waiting on disbursement.</div>
+          {openInvoices.length === 0 ? (
+            <div style={{ ...T.bodySm, color: C.inkFaint, padding: `${S[3]}px 0` }}>Nothing pending — all haulers paid through last period.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+              {openInvoices.slice(0, 6).map(inv => {
+                const h = db.haulers.find(x => x.id === inv.haulerId);
+                return (
+                  <div key={inv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+                    <div>
+                      <div style={{ ...T.bodySm, fontWeight: 600, color: C.ink }}>{h ? h.name : '—'}</div>
+                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{inv.number} · {inv.periodStart} → {inv.periodEnd}</div>
+                    </div>
+                    <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.accent }}>{fmtMoney(invoiceTotal(inv))}</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+
+        <Card padding={S[4]}>
+          <Label style={{ marginBottom: S[2] }}>Payment methods (placeholder)</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>Where outbound payouts and inbound GC payments will land.</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+            {[
+              { label: 'ACH (outbound to haulers)', detail: 'Stripe Connect — connect bank account', status: 'Not connected' },
+              { label: 'Check run (outbound)',     detail: 'Weekly mailed checks',                  status: 'Disabled' },
+              { label: 'Card on file (GC)',        detail: 'Accept GC payment via Stripe',          status: 'Coming soon' },
+              { label: 'Wire instructions (GC)',   detail: 'Routing + account printed on invoice',  status: 'Coming soon' },
+            ].map(row => (
+              <div key={row.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+                <div>
+                  <div style={{ ...T.bodySm, fontWeight: 600, color: C.ink }}>{row.label}</div>
+                  <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{row.detail}</div>
+                </div>
+                <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{row.status}</Pill>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+
+      <div style={{ padding: S[5], background: C.surfaceHi, borderRadius: R.md, ...T.bodySm, color: C.inkDim }}>
+        <Label style={{ marginBottom: S[2] }}>Roadmap</Label>
+        Payments wires the existing <a href="#/admin/reporting" style={{ color: C.accent, textDecoration: 'none' }}>Reports</a> view into actual money movement: schedule a batch payout, record a GC's wire receipt, mark an invoice paid. Right now this is the shell.
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
 // AdminActivity â€” reverse-chrono event feed at /admin/activity
 // =====================================================================
 // Reads db.activity (appended via appendActivity() on every mutation).
@@ -4364,6 +4472,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onRequests = parts[1] === 'requests';
   const onActivity = parts[1] === 'activity';
   const onReporting = parts[1] === 'reporting';
+  const onPayments  = parts[1] === 'payments';
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
@@ -4455,6 +4564,12 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onClick={() => go('/admin/reporting')}
       />
       <Item
+        icon={<PaymentsIcon size={20} />}
+        label="Payments"
+        active={onPayments}
+        onClick={() => go('/admin/payments')}
+      />
+      <Item
         icon={<HaulerIcon size={20} />}
         label="Haulers"
         active={onHaulers}
@@ -4532,6 +4647,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
@@ -6300,6 +6416,7 @@ function App() {
     if (h === '/' || h === '') title = 'Jobsite Exchange';
     else if (h.startsWith('/admin/reporting')) title = 'JSE — Reports';
     else if (h.startsWith('/admin/reports')) title = 'JSE — Live stats';
+    else if (h.startsWith('/admin/payments')) title = 'JSE — Payments';
     else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
     else if (h.startsWith('/admin/requests')) {
