@@ -5,9 +5,9 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Jobsite Exchange — Role Dashboards</title>
-  <meta name="description" content="Admin / Operator / Driver dashboards for hourly hauling — Jobsite Exchange." />
+  <meta name="description" content="Admin / Hauler / Driver dashboards for hourly hauling — Jobsite Exchange." />
   <meta property="og:title" content="Jobsite Exchange — Role Dashboards" />
-  <meta property="og:description" content="Hierarchy: Admin → Projects → Operators → Trucks → Drivers." />
+  <meta property="og:description" content="Hierarchy: Admin → Projects → Haulers → Trucks → Drivers." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z' fill='%23B3E635'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='sans-serif' font-size='34' font-weight='800' fill='%230A0A0A'%3EJ%3C/text%3E%3C/svg%3E" />
   <style>
@@ -261,6 +261,44 @@
     @media (max-width: 600px) {
       html, body { overflow-x: clip; }
     }
+    /* === Admin sidebar + mobile drawer ===
+       Desktop (>900px): permanent 240px sidebar to the left of the main content.
+       Mobile (≤900px): sidebar hides; a hamburger button in the Topbar opens
+       a slide-in drawer with the same nav items. Backdrop dims the page. */
+    .admin-mobile-nav-trigger { display: none; }
+    @media (max-width: 900px) {
+      .admin-sidebar { display: none !important; }
+      .admin-mobile-nav-trigger {
+        display: inline-flex !important;
+        align-items: center; justify-content: center;
+        background: transparent; border: 1px solid #2A2A2A; color: #9A9A9A;
+        width: 36px; height: 36px; border-radius: 999px; cursor: pointer;
+      }
+      .admin-mobile-nav-trigger:hover { color: #fff; border-color: #B3E635; }
+    }
+    @keyframes adminDrawerSlideIn {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(0); }
+    }
+    @keyframes adminDrawerFade {
+      from { opacity: 0; }
+      to   { opacity: 1; }
+    }
+    .admin-drawer-backdrop {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+      z-index: 80; animation: adminDrawerFade 180ms ease-out;
+    }
+    .admin-drawer {
+      position: fixed; top: 0; left: 0; bottom: 0;
+      width: 280px; background: #141414; border-right: 1px solid #1F1F1F;
+      z-index: 90; padding: 16px; box-sizing: border-box;
+      animation: adminDrawerSlideIn 200ms ease-out;
+      overflow-y: auto;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .admin-drawer, .admin-drawer-backdrop { animation: none !important; }
+    }
+
     @media print {
       html, body { background: #fff !important; color: #000 !important; }
       body * { visibility: hidden; }
@@ -412,6 +450,22 @@ const DRIVERS_SEED = [
   { id: 'dr-016', name: 'W. Stenberg', phone: '(303) 555-2116' },
 ];
 
+// Haul requests (v3 collection) — incoming material-hauling needs that admins
+// match to a hauler + truck. Status flows: pending → matched → completed.
+// `matchedHaulerId` / `matchedTruckId` only populated for matched/completed.
+const HAUL_REQUESTS_SEED = [
+  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: 'Needs to be on-site before noon.' },
+  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
+  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', notes: 'Spread on north access road.' },
+  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
+  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', notes: '' },
+  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: 'Site opens 09:30.' },
+  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
+  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', notes: 'Delivered 11:05.' },
+  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  notes: '' },
+  { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', notes: 'Stockpile at SW corner.' },
+];
+
 const INVOICES_SEED = [
   { id: 'inv-9001', operatorId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes', status: 'paid',
     lineItems: [
@@ -553,11 +607,20 @@ const fmtMoney = (n) => '$' + n.toLocaleString('en-US', { maximumFractionDigits:
 // Hash router
 // =====================================================================
 function useHash() {
-  const [hash, setHash] = useState(() => window.location.hash.replace(/^#/, '') || '/');
+  // Read + normalize. `#/hauler/...` is an alias for `#/operator/...` since the
+  // role was renamed from "Operator" to "Hauler" — old links keep working.
+  const read = () => {
+    let h = window.location.hash.replace(/^#/, '') || '/';
+    if (h === '/hauler' || h.startsWith('/hauler/')) {
+      h = '/operator' + h.slice('/hauler'.length);
+    }
+    return h;
+  };
+  const [hash, setHash] = useState(read);
   useEffect(() => {
-    const h = () => setHash(window.location.hash.replace(/^#/, '') || '/');
-    window.addEventListener('hashchange', h);
-    return () => window.removeEventListener('hashchange', h);
+    const onChange = () => setHash(read());
+    window.addEventListener('hashchange', onChange);
+    return () => window.removeEventListener('hashchange', onChange);
   }, []);
   const navigate = (to) => { window.location.hash = to; };
   return [hash, navigate];
@@ -639,6 +702,7 @@ function StatusPill({ status }) {
     active:    { color: C.accent, soft: C.accentSoft, label: 'Active' },
     pending:   { color: C.warn,   soft: C.warnSoft,   label: 'Pending' },
     approved:  { color: C.ok,     soft: C.okSoft,     label: 'Approved' },
+    matched:   { color: C.ok,     soft: C.okSoft,     label: 'Matched' },
     closed:    { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Closed' },
     upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
     completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
@@ -929,6 +993,24 @@ function FlowIcon({ size = 24 }) {
     </svg>
   );
 }
+function HaulRequestIcon({ size = 24 }) {
+  // Inbox tray with a down-arrow — "incoming request"
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 16 L4 22 A2 2 0 0 0 6 24 L22 24 A2 2 0 0 0 24 22 L24 16" />
+      <path d="M4 16 L9 16 L11 19 L17 19 L19 16 L24 16" />
+      <path d="M14 4 L14 13 M10 9 L14 13 L18 9" />
+    </svg>
+  );
+}
+function MenuIcon({ size = 22 }) {
+  // 3-line hamburger
+  return (
+    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+      <path d="M5 8 H23 M5 14 H23 M5 20 H23" />
+    </svg>
+  );
+}
 
 // =====================================================================
 // LANDING
@@ -942,22 +1024,22 @@ function Landing({ navigate }) {
   };
   const cards = [
     { role: 'Admin',    to: '/admin',    blurb: 'Create projects, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
-    { role: 'Operator', to: '/operator', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: OperatorIcon },
+    { role: 'Hauler',   to: '/operator', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: OperatorIcon },
     { role: 'Driver',   to: '/driver',   blurb: 'Clock in, log loads, and see your assignments at a glance.',                  Icon: DriverIcon },
   ];
   const audience = [
     { Icon: AdminIcon,    title: 'Project managers',         body: 'Spin up a project, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
-    { Icon: OperatorIcon, title: 'Site operators',           body: "Manage your trucks and your team's day from one screen — drill into any shift in two taps." },
+    { Icon: OperatorIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen — drill into any shift in two taps." },
     { Icon: DriverIcon,   title: 'Drivers & equipment ops',  body: 'Clock in, log loads, and know your assignments from your phone. Mobile-first, field-ready.' },
   ];
   const steps = [
-    { n: '01', title: 'Plan',     body: 'Create projects, set the materials, assign operators and trucks in a quick wizard.' },
-    { n: '02', title: 'Dispatch', body: 'Operators assign drivers to trucks. Drivers see their day on their phone.' },
+    { n: '01', title: 'Plan',     body: 'Create projects, set the materials, assign haulers and trucks in a quick wizard.' },
+    { n: '02', title: 'Dispatch', body: 'Haulers assign drivers to trucks. Drivers see their day on their phone.' },
     { n: '03', title: 'Track',    body: 'Loads, hours, and KPIs roll up to a live dashboard. No re-entry, no daily-recap meetings.' },
   ];
   const pillars = [
     { Icon: EyeIcon,   title: 'Real-time visibility',       body: 'Loads logged in the field land on the admin dashboard the moment they happen.' },
-    { Icon: FlowIcon,  title: 'One workflow across roles',  body: 'Admin, operator, and driver views share the same data model — no double entry.' },
+    { Icon: FlowIcon,  title: 'One workflow across roles',  body: 'Admin, hauler, and driver views share the same data model — no double entry.' },
     { Icon: PhoneIcon, title: 'Mobile-first for the field', body: "Driver shell is built for a phone in a work glove. Big tap targets, no menus to dig through." },
     { Icon: BoltIcon,  title: 'Zero setup',                 body: 'Open the URL and start assigning work. Demo data persists locally; reset anytime.' },
   ];
@@ -1000,7 +1082,7 @@ function Landing({ navigate }) {
               <span data-hero-line="break">on the same page.</span>
             </h1>
             <p style={{ ...T.bodyLg, fontSize: 19, color: C.inkDim, lineHeight: 1.5, maxWidth: 540, margin: 0 }}>
-              Jobsite Exchange coordinates project managers, operators, and drivers in real time — so loads, hours, and truck assignments stay tight across every shift.
+              Jobsite Exchange coordinates project managers, haulers, and drivers in real time — so loads, hours, and truck assignments stay tight across every shift.
             </p>
             <div style={{ display: 'flex', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
               <Btn size="lg" variant="primary" onClick={() => scrollTo('demo')}>
@@ -1258,7 +1340,7 @@ function AdminProjects({ db, setDb, navigate }) {
     <thead>
       <tr>
         <Th>Project</Th><Th>GC</Th><Th>Status</Th>
-        <Th align="right">Operators</Th>
+        <Th align="right">Haulers</Th>
         <Th align="right">Trucks active</Th>
         <Th align="right">Total loads</Th>
         <Th align="right">Pending</Th>
@@ -1389,15 +1471,15 @@ function AdminProject({ projectId, db, setDb, navigate }) {
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Operators" value={operators.length} /></Card>
+        <Card padding={S[4]}><Stat label="Haulers" value={operators.length} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} assigned`} /></Card>
         <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0))} /></Card>
       </div>
-      <div style={{ marginBottom: S[3] }}><Label>Operators on this project</Label></div>
+      <div style={{ marginBottom: S[3] }}><Label>Haulers on this project</Label></div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Operator</Th><Th>Contact</Th><Th align="right">Trucks managed</Th><Th align="right">Active now</Th><Th align="right">Total hours</Th><Th></Th></tr></thead>
+          <thead><tr><Th>Hauler</Th><Th>Contact</Th><Th align="right">Trucks managed</Th><Th align="right">Active now</Th><Th align="right">Total hours</Th><Th></Th></tr></thead>
           <tbody>
             {operators.map(op => {
               const opTrucks = trucks.filter(t => t.operatorId === op.id);
@@ -1411,7 +1493,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
                       <Avatar name={op.name} color={C.accent} />
                       <div>
                         <div style={{ fontWeight: 600 }}>{op.name}</div>
-                        <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}>Operator · {op.projectIds.length > 1 ? `${op.projectIds.length} projects` : '1 project'}</div>
+                        <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} projects` : '1 project'}</div>
                       </div>
                     </div>
                   </Td>
@@ -1426,7 +1508,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={6} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign operator to this project</td>
+              <td colSpan={6} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this project</td>
             </tr>
           </tbody>
         </table>
@@ -1443,14 +1525,14 @@ function AddOperatorForm({ onAdd, onCancel }) {
   const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14, width: '100%', boxSizing: 'border-box' };
   return (
     <Card style={{ marginTop: S[4] }}>
-      <Label style={{ marginBottom: S[3] }}>Assign operator</Label>
+      <Label style={{ marginBottom: S[3] }}>Assign hauler</Label>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto', gap: S[3], alignItems: 'flex-end' }}>
         <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Name</div><input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" style={inputStyle} autoFocus /></div>
         <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Phone</div><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-1234" style={inputStyle} /></div>
         <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Email</div><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" style={inputStyle} /></div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
-          <Btn onClick={() => { if (name) onAdd({ name, phone, email }); }} disabled={!name}>Assign operator</Btn>
+          <Btn onClick={() => { if (name) onAdd({ name, phone, email }); }} disabled={!name}>Assign hauler</Btn>
         </div>
       </div>
     </Card>
@@ -1490,7 +1572,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
         <Avatar name={operator.name} size={56} color={C.accent} />
         <div style={{ flex: 1 }}>
-          <Label color={C.accent}>Operator on {project.name}</Label>
+          <Label color={C.accent}>Hauler on {project.name}</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
             <EditableText value={operator.name} onSave={(v) => updateOperator({ name: v })} />
           </h1>
@@ -1626,7 +1708,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
         </div>
         <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
           {hr && <StatusPill status={hr.status} />}
-          <Btn variant="secondary" size="sm" onClick={() => alert('In real app: re-assign truck to different project/operator')}>Reassign…</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => alert('In real app: re-assign truck to different project/hauler')}>Reassign…</Btn>
         </div>
       </div>
 
@@ -1648,7 +1730,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
                     </div>
                   </div>
                 </div>
-              ) : <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, marginTop: S[3] }}>No driver assigned. Operator (or admin) will assign one.</div>}
+              ) : <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, marginTop: S[3] }}>No driver assigned. Hauler (or admin) will assign one.</div>}
               {hr && (
                 <div style={{ marginTop: S[4], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
@@ -1773,12 +1855,12 @@ function OperatorLanding({ db, navigate }) {
   });
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Operator' }, { label: 'Pick operator' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Hauler' }, { label: 'Pick a hauler' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
-        <Label color={C.accent} style={{ marginBottom: 6 }}>Operator view</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick an operator</h1>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler view</Label>
+        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick a hauler</h1>
         <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
-          Each operator sees only the projects they're assigned to. Click any card to enter their view.
+          Each hauler sees only the projects they're assigned to. Click any card to enter their view.
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
@@ -1829,13 +1911,13 @@ function OperatorHome({ operatorId, db, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Operator', to: '/operator' },
+        { label: 'Hauler', to: '/operator' },
         { label: op.name },
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
         <Avatar name={op.name} size={56} color={C.accent} />
         <div style={{ flex: 1 }}>
-          <Label color={C.accent}>Operator dashboard</Label>
+          <Label color={C.accent}>Hauler dashboard</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{op.name}</h1>
           <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
             <span style={{ fontFamily: F.mono }}>{op.phone}</span> · <span style={{ fontFamily: F.mono }}>{op.email}</span>
@@ -1922,7 +2004,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Operator', to: '/operator' },
+        { label: 'Hauler', to: '/operator' },
         { label: op.name, to: `/operator/o/${operatorId}` },
         { label: project.name },
       ]} navigate={navigate} />
@@ -2003,7 +2085,7 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Operator', to: '/operator' },
+        { label: 'Hauler', to: '/operator' },
         { label: op.name, to: `/operator/o/${operatorId}` },
         { label: project.name, to: `/operator/o/${operatorId}/p/${projectId}` },
         { label: `Truck #${truck.plate}` },
@@ -2902,7 +2984,7 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
         opacity: canSubmit ? 1 : 0.4,
       }}>Submit load</button>
       <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, textAlign: 'center', marginTop: S[2] }}>
-        Operator will review and approve.
+        Hauler will review and approve.
       </div>
     </div>
   );
@@ -3242,7 +3324,7 @@ function AdminNewProject({ db, setDb, navigate }) {
 
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[5], flexWrap: 'wrap' }}>
         <StepDot n={1} label="Basics" />
-        <StepDot n={2} label="Operators" />
+        <StepDot n={2} label="Haulers" />
         <StepDot n={3} label="Trucks" />
         <StepDot n={4} label="Review" />
       </div>
@@ -3305,8 +3387,8 @@ function AdminNewProject({ db, setDb, navigate }) {
 
         {step === 2 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-            <Label>Step 2 — Assign operators</Label>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Pick the operators who will run this project. You'll assign trucks to them in the next step.</div>
+            <Label>Step 2 — Assign haulers</Label>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Pick the haulers who will run this project. You'll assign trucks to them in the next step.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
               {db.operators.map(op => {
                 const selected = operatorIds.includes(op.id);
@@ -3337,14 +3419,14 @@ function AdminNewProject({ db, setDb, navigate }) {
                 );
               })}
             </div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{operatorIds.length} selected</div>
+            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{operatorIds.length} hauler{operatorIds.length === 1 ? '' : 's'} selected</div>
           </div>
         )}
 
         {step === 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
             <Label>Step 3 — Assign trucks</Label>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the operators you selected.</div>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the haulers you selected.</div>
             <div>
               <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
             </div>
@@ -3379,7 +3461,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                     {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
                     {selected && (
                       <select value={sel.operatorId} onChange={e => setTruckOperator(t.id, e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '8px 10px', fontSize: 13 }}>
-                        <option value="">Pick operator…</option>
+                        <option value="">Pick a hauler…</option>
                         {operatorIds.map(opId => {
                           const op = db.operators.find(o => o.id === opId);
                           return op ? <option key={opId} value={opId}>{op.name}</option> : null;
@@ -3391,7 +3473,7 @@ function AdminNewProject({ db, setDb, navigate }) {
               })}
             </div>
             <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>
-              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick an operator for each' : ''}
+              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick a hauler for each' : ''}
             </div>
           </div>
         )}
@@ -3417,7 +3499,7 @@ function AdminNewProject({ db, setDb, navigate }) {
               </div>
             </div>
             <div>
-              <Label style={{ marginBottom: S[2] }}>Operators ({operatorIds.length})</Label>
+              <Label style={{ marginBottom: S[2] }}>Haulers ({operatorIds.length})</Label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
                 {operatorIds.map(opId => {
                   const op = db.operators.find(o => o.id === opId);
@@ -3446,7 +3528,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                         <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
                         <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{t.hauler}</div>
                         <div style={{ flex: 1 }} />
-                        <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>→ {op ? op.name : 'No operator'}</div>
+                        <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>→ {op ? op.name : 'No hauler'}</div>
                       </div>
                     ) : null;
                   })}
@@ -3629,7 +3711,7 @@ function AdminReports({ db, navigate }) {
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
         <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Today vs yesterday across projects, operators, and trucks. Numbers update live as drivers log hours and loads.</div>
+        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Today vs yesterday across projects, haulers, and trucks. Numbers update live as drivers log hours and loads.</div>
       </div>
 
       {/* A. Headline KPI row */}
@@ -3645,7 +3727,7 @@ function AdminReports({ db, navigate }) {
           <Stat
             label="On shift now"
             value={onShiftNow}
-            sub={`${distinctOperatorsOnShift} operator${distinctOperatorsOnShift === 1 ? '' : 's'}`}
+            sub={`${distinctOperatorsOnShift} hauler${distinctOperatorsOnShift === 1 ? '' : 's'}`}
           />
         </Card>
         <Card padding={S[4]}>
@@ -3699,7 +3781,7 @@ function AdminReports({ db, navigate }) {
             <tr>
               <SortTh label="Project" k="name" />
               <SortTh label="Status" k="status" />
-              <SortTh label="Operators" k="operators" align="right" />
+              <SortTh label="Haulers" k="operators" align="right" />
               <SortTh label="Trucks" k="trucks" align="right" />
               <SortTh label="Loads today" k="loadsToday" align="right" />
               <SortTh label="Loads yesterday" k="loadsYesterday" align="right" />
@@ -3725,15 +3807,15 @@ function AdminReports({ db, navigate }) {
         </table>
       </Card>
 
-      {/* D. Operator productivity */}
+      {/* D. Hauler productivity */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Top operators today</Label>
+        <Label color={C.accent}>Top haulers today</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{operatorRows.length} of {db.operators.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {operatorRows.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No operators on the roster yet.</div>
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No haulers on the roster yet.</div>
         ) : (
           <div>
             {operatorRows.map((op, i) => (
@@ -3809,8 +3891,477 @@ function AdminReports({ db, navigate }) {
   );
 }
 
+// =====================================================================
+// Haul Requests — admin views (v3)
+// =====================================================================
+function AdminHaulRequests({ db, setDb, navigate }) {
+  const [filter, setFilter] = useState('all'); // all | pending | matched | completed
+  const requests = db.haulRequests || [];
+  const counts = {
+    all: requests.length,
+    pending: requests.filter(r => r.status === 'pending').length,
+    matched: requests.filter(r => r.status === 'matched').length,
+    completed: requests.filter(r => r.status === 'completed').length,
+  };
+  const visible = filter === 'all' ? requests : requests.filter(r => r.status === filter);
+
+  const Tab = ({ k, label }) => {
+    const active = filter === k;
+    return (
+      <button onClick={() => setFilter(k)} style={{
+        background: active ? C.accent : 'transparent',
+        color: active ? C.bg : C.inkDim,
+        border: `1px solid ${active ? C.accent : C.ruleHi}`,
+        borderRadius: R.pill, padding: '6px 14px',
+        fontFamily: F.body, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+      }}>{label} <span style={{ opacity: 0.65, marginLeft: 4 }}>({counts[k]})</span></button>
+    );
+  };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Requests</Label>
+        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
+        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Match incoming requests to available haulers.</div>
+      </div>
+      <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[4] }}>
+        <Tab k="all" label="All" />
+        <Tab k="pending" label="Pending" />
+        <Tab k="matched" label="Matched" />
+        <Tab k="completed" label="Completed" />
+      </div>
+      <Card padding={0}>
+        {visible.length === 0 ? (
+          <div style={{ padding: S[6], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>
+            No {filter === 'all' ? '' : filter + ' '}requests.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Request ID</Th>
+                <Th>Project</Th>
+                <Th>Material</Th>
+                <Th align="right">Volume</Th>
+                <Th>Requested</Th>
+                <Th>Status</Th>
+                <Th align="right">Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map(req => {
+                const project = db.projects.find(p => p.id === req.projectId);
+                const material = MATERIALS.find(m => m.code === req.materialCode);
+                const hauler = req.matchedHaulerId ? db.operators.find(o => o.id === req.matchedHaulerId) : null;
+                const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
+                return (
+                  <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
+                    <Td mono><span style={{ color: C.accent }}>{req.id}</span></Td>
+                    <Td>{project ? project.name : '—'}</Td>
+                    <Td>{material ? material.label : req.materialCode}</Td>
+                    <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
+                    <Td mono dim>{req.requestedAt}</Td>
+                    <Td><StatusPill status={req.status} /></Td>
+                    <Td align="right">
+                      {req.status === 'pending' ? (
+                        <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
+                      ) : hauler && truck ? (
+                        <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{hauler.name} / #{truck.plate}</span>
+                      ) : <span style={{ color: C.inkFaint }}>—</span>}
+                    </Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
+  const requests = db.haulRequests || [];
+  const req = requests.find(r => r.id === requestId);
+  // Inline truck-picker keyed by hauler id
+  const [pickerHaulerId, setPickerHaulerId] = useState(null);
+  if (!req) return <NotFound navigate={navigate} />;
+  const project = db.projects.find(p => p.id === req.projectId);
+  const material = MATERIALS.find(m => m.code === req.materialCode);
+  const matchedHauler = req.matchedHaulerId ? db.operators.find(o => o.id === req.matchedHaulerId) : null;
+  const matchedTruck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
+
+  // Suggested haulers: any that have at least one truck on this project, or
+  // unassigned trucks they could deploy.
+  const suggestedHaulers = db.operators.filter(op => {
+    const trucksHere     = db.trucks.filter(t => t.operatorId === op.id && t.projectId === req.projectId);
+    const trucksFloating = db.trucks.filter(t => t.operatorId === op.id && t.projectId == null);
+    return trucksHere.length + trucksFloating.length > 0;
+  });
+
+  const assign = (haulerId, truckId) => {
+    setDb(prev => ({
+      ...prev,
+      haulRequests: prev.haulRequests.map(r => r.id === req.id
+        ? { ...r, status: 'matched', matchedHaulerId: haulerId, matchedTruckId: truckId }
+        : r),
+    }));
+    setPickerHaulerId(null);
+  };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[
+        { label: 'Admin', to: '/admin' },
+        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: req.id },
+      ]} navigate={navigate} />
+
+      {/* Request summary */}
+      <Card style={{ marginBottom: S[5] }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <Label color={C.accent} style={{ marginBottom: 6 }}>Request {req.id}</Label>
+            <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
+              {req.volumeCY} CY of {material ? material.label : req.materialCode}
+            </h1>
+            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
+              {project ? project.name : '—'} · requested at {req.requestedAt}
+            </div>
+            {req.notes && (
+              <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, fontFamily: F.body, fontSize: 13, color: C.ink }}>
+                {req.notes}
+              </div>
+            )}
+          </div>
+          <StatusPill status={req.status} />
+        </div>
+
+        {matchedHauler && matchedTruck && (
+          <div style={{ marginTop: S[4], padding: S[3], background: C.accentSoft, borderRadius: R.md, border: `1px solid ${C.accent}` }}>
+            <Label color={C.accent} style={{ marginBottom: 4 }}>Matched</Label>
+            <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>
+              {matchedHauler.name} · Truck #{matchedTruck.plate}
+            </div>
+          </div>
+        )}
+      </Card>
+
+      {/* Suggested haulers */}
+      <div style={{ marginBottom: S[3] }}>
+        <Label>{req.status === 'pending' ? 'Suggested haulers' : 'Other haulers'}</Label>
+      </div>
+      <Card padding={0}>
+        {suggestedHaulers.length === 0 ? (
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>
+            No haulers available right now.
+          </div>
+        ) : (
+          <div>
+            {suggestedHaulers.map((op, i) => {
+              const opTrucks = db.trucks.filter(t => t.operatorId === op.id);
+              const isMatched = req.matchedHaulerId === op.id;
+              const showPicker = pickerHaulerId === op.id;
+              return (
+                <div key={op.id} style={{
+                  padding: S[4],
+                  borderBottom: i < suggestedHaulers.length - 1 ? `1px solid ${C.rule}` : 'none',
+                  background: isMatched ? C.accentSoft : 'transparent',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                    <Avatar name={op.name} color={C.accent} />
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{op.name}</div>
+                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>
+                        {op.projectIds.length} project{op.projectIds.length === 1 ? '' : 's'} · {opTrucks.length} truck{opTrucks.length === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                    {isMatched
+                      ? <Pill color={C.accent} soft={C.accentSoft}>Assigned</Pill>
+                      : <Btn variant="primary" size="sm" onClick={() => setPickerHaulerId(showPicker ? null : op.id)}>{showPicker ? 'Cancel' : 'Assign'}</Btn>}
+                  </div>
+                  {showPicker && (
+                    <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
+                      <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
+                        {opTrucks.length === 0 ? (
+                          <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkFaint }}>This hauler has no trucks on the roster.</span>
+                        ) : opTrucks.map(t => (
+                          <button key={t.id} onClick={() => assign(op.id, t.id)} style={{
+                            background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
+                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer',
+                            fontFamily: F.body, fontSize: 13, fontWeight: 600,
+                          }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
+                          >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>{t.type}</span></button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+function AdminHaulers({ db, navigate }) {
+  const haulers = db.operators.map(op => {
+    const trucks = db.trucks.filter(t => t.operatorId === op.id);
+    return { ...op, truckCount: trucks.length, projectCount: op.projectIds.length };
+  });
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>Haulers</Label>
+        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
+        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
+        {haulers.map(h => (
+          <button key={h.id} onClick={() => navigate(`/admin/haulers/${h.id}`)} style={{
+            textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
+            padding: S[5], cursor: 'pointer', color: C.ink,
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
+            onMouseLeave={e => { e.currentTarget.style.background = C.surface; }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4] }}>
+              <Avatar name={h.name} color={C.accent} size={44} />
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
+                <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{h.phone}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
+              <div style={{ flex: 1 }}>
+                <Label style={{ marginBottom: 4 }}>Projects</Label>
+                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{h.projectCount}</div>
+              </div>
+              <div style={{ flex: 1 }}>
+                <Label style={{ marginBottom: 4 }}>Trucks</Label>
+                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{h.truckCount}</div>
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
+  const hauler = db.operators.find(o => o.id === haulerId);
+  if (!hauler) return <NotFound navigate={navigate} />;
+  const projects = db.projects.filter(p => hauler.projectIds.includes(p.id));
+  const trucks = db.trucks.filter(t => t.operatorId === hauler.id);
+  const truckIds = new Set(trucks.map(t => t.id));
+  const hours = db.hours.filter(h => truckIds.has(h.truckId));
+  const loads = db.loads.filter(l => truckIds.has(l.truckId));
+  const updateHauler = (patch) => setDb(prev => ({ ...prev, operators: prev.operators.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
+  const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  const totalRevenue = hours.reduce((s, h) => {
+    const t = trucks.find(x => x.id === h.truckId);
+    return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0);
+  }, 0);
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[
+        { label: 'Admin', to: '/admin' },
+        { label: 'Haulers', to: '/admin/haulers' },
+        { label: hauler.name },
+      ]} navigate={navigate} />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
+        <Avatar name={hauler.name} size={56} color={C.accent} />
+        <div style={{ flex: 1 }}>
+          <Label color={C.accent}>Hauler</Label>
+          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
+            <EditableText value={hauler.name} onSave={(v) => updateHauler({ name: v })} />
+          </h1>
+          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
+            <EditableText value={hauler.phone} onSave={(v) => updateHauler({ phone: v })} mono /> ·{' '}
+            <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
+          </div>
+        </div>
+        <Btn variant="secondary" size="sm">Message</Btn>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
+        <Card padding={S[4]}><Stat label="Projects" value={projects.length} /></Card>
+        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
+        <Card padding={S[4]}><Stat label="Loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
+        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs`} /></Card>
+      </div>
+
+      <div style={{ marginBottom: S[3] }}><Label>Projects this hauler is on</Label></div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        {projects.length === 0 ? (
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>This hauler isn't on any projects.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Project</Th><Th>GC</Th><Th>Status</Th><Th align="right">Trucks</Th><Th align="right">Loads</Th><Th></Th></tr></thead>
+            <tbody>
+              {projects.map(p => {
+                const pTrucks = trucks.filter(t => t.projectId === p.id);
+                const pLoads = loads.filter(l => l.projectId === p.id);
+                return (
+                  <Tr key={p.id} onClick={() => navigate(`/admin/p/${p.id}/o/${hauler.id}`)}>
+                    <Td><span style={{ fontWeight: 600 }}>{p.name}</span></Td>
+                    <Td dim>{p.gc}</Td>
+                    <Td><StatusPill status={p.status || 'active'} /></Td>
+                    <Td align="right" mono>{pTrucks.length}</Td>
+                    <Td align="right" mono>{pLoads.filter(l => l.status === 'approved').length}</Td>
+                    <Td align="right" dim>{'>'}</Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      <div style={{ marginBottom: S[3] }}><Label>All trucks</Label></div>
+      <Card padding={0}>
+        {trucks.length === 0 ? (
+          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No trucks under this hauler.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Plate</Th><Th>Type</Th><Th>Project</Th><Th>Driver</Th></tr></thead>
+            <tbody>
+              {trucks.map(t => {
+                const driver = db.drivers.find(d => d.id === t.driverId);
+                const project = db.projects.find(p => p.id === t.projectId);
+                return (
+                  <Tr key={t.id}>
+                    <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
+                    <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
+                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
+                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+    </div>
+  );
+}
+
+// Shared admin sidebar nav (desktop) + drawer (mobile).
+// Renders the same nav items in both modes; parent controls visibility via CSS.
+function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar' }) {
+  const [haulersExpanded, setHaulersExpanded] = useState(false);
+  const requests = db.haulRequests || [];
+  const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const parts = (hash || '').split('/').filter(Boolean);
+  const onOverview = parts.length === 1 && parts[0] === 'admin';
+  const onRequests = parts[1] === 'requests';
+  // "Haulers" section is active for the new /admin/haulers/* routes AND for the
+  // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
+  const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
+
+  const go = (to) => { navigate(to); if (onNavigate) onNavigate(); };
+
+  const Item = ({ icon, label, active, onClick, badge, expandable, expanded, onToggleExpand }) => (
+    <div>
+      <button onClick={onClick} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: S[3],
+        background: active ? C.accentSoft : 'transparent',
+        color: active ? C.accent : C.inkDim,
+        border: 'none', borderLeft: `3px solid ${active ? C.accent : 'transparent'}`,
+        padding: '10px 12px', borderRadius: R.md,
+        cursor: 'pointer', fontFamily: F.body, fontSize: 14, fontWeight: 600,
+        textAlign: 'left',
+      }}
+        onMouseEnter={e => { if (!active) { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; } }}
+        onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; } }}
+      >
+        <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span>
+        <span style={{ flex: 1 }}>{label}</span>
+        {badge != null && badge > 0 && (
+          <span style={{
+            background: C.accent, color: C.bg, borderRadius: R.pill,
+            padding: '2px 8px', fontFamily: F.mono, fontSize: 10, fontWeight: 700,
+          }}>{badge}</span>
+        )}
+        {expandable && (
+          <span onClick={(e) => { e.stopPropagation(); onToggleExpand && onToggleExpand(); }} style={{
+            color: C.inkFaint, fontFamily: F.mono, fontSize: 11,
+            cursor: 'pointer', padding: '0 4px',
+          }}>{expanded ? '▾' : '▸'}</span>
+        )}
+      </button>
+    </div>
+  );
+
+  const sortedHaulers = [...db.operators].sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <nav style={{ display: 'flex', flexDirection: 'column', gap: S[1] }}>
+      {variant === 'drawer' && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], paddingBottom: S[3], borderBottom: `1px solid ${C.rule}` }}>
+          <Brand size="sm" />
+          <button onClick={onNavigate} aria-label="Close menu" style={{
+            background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
+            width: 30, height: 30, borderRadius: '50%', cursor: 'pointer',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontFamily: F.body, fontSize: 16,
+          }}>×</button>
+        </div>
+      )}
+      <Item
+        icon={<ProjectIcon size={20} />}
+        label="Project Overview"
+        active={onOverview}
+        onClick={() => go('/admin')}
+      />
+      <Item
+        icon={<HaulRequestIcon size={20} />}
+        label="Haul Requests"
+        active={onRequests}
+        badge={pendingCount}
+        onClick={() => go('/admin/requests')}
+      />
+      <Item
+        icon={<OperatorIcon size={20} />}
+        label="Haulers"
+        active={onHaulers}
+        expandable
+        expanded={haulersExpanded}
+        onToggleExpand={() => setHaulersExpanded(v => !v)}
+        onClick={() => go('/admin/haulers')}
+      />
+      {haulersExpanded && (
+        <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
+          {sortedHaulers.map(op => (
+            <button key={op.id} onClick={() => go(`/admin/haulers/${op.id}`)} style={{
+              background: 'transparent', border: 'none', textAlign: 'left',
+              padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer',
+              fontFamily: F.body, fontSize: 13, color: C.inkDim,
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; }}
+            >{op.name}</button>
+          ))}
+        </div>
+      )}
+    </nav>
+  );
+}
+
 function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const resetDemoData = () => {
     if (!window.confirm('Reset all demo data? This will reload the page.')) return;
     try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) {}
@@ -3819,6 +4370,12 @@ function AdminShell({ db, setDb, navigate, hash }) {
   const resetBtn = <Btn variant="danger" size="sm" onClick={resetDemoData}>Reset demo data</Btn>;
   const navBtns = (
     <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
+      <button
+        type="button"
+        aria-label="Open navigation"
+        className="admin-mobile-nav-trigger"
+        onClick={() => setDrawerOpen(true)}
+      ><MenuIcon size={18} /></button>
       <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/reports')}>Reports</Btn>
       {resetBtn}
     </div>
@@ -3826,12 +4383,40 @@ function AdminShell({ db, setDb, navigate, hash }) {
   return (
     <div>
       <Topbar navigate={navigate} role="Admin" current="Admin - all projects" right={navBtns} />
-      {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
-      {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
-      {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
-      {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
-      {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
-      {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} operatorId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
+      <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 'calc(100vh - 56px)' }}>
+        <aside
+          className="admin-sidebar"
+          style={{
+            width: 240, flexShrink: 0,
+            background: C.surface, borderRight: `1px solid ${C.rule}`,
+            padding: S[4], boxSizing: 'border-box',
+            position: 'sticky', top: 56, alignSelf: 'flex-start',
+            maxHeight: 'calc(100vh - 56px)', overflowY: 'auto',
+          }}
+        >
+          <AdminSidebar db={db} navigate={navigate} hash={hash} />
+        </aside>
+        <main style={{ flex: 1, minWidth: 0 }}>
+          {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
+          {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'haulers' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
+          {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} operatorId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
+        </main>
+      </div>
+      {drawerOpen && (
+        <>
+          <div className="admin-drawer-backdrop" onClick={() => setDrawerOpen(false)} />
+          <div className="admin-drawer" role="dialog" aria-label="Admin navigation">
+            <AdminSidebar db={db} navigate={navigate} hash={hash} onNavigate={() => setDrawerOpen(false)} variant="drawer" />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -3839,7 +4424,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
 function OperatorShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   // Build "current" label for topbar based on depth
-  let current = 'All operators';
+  let current = 'All haulers';
   if (parts.length >= 3 && parts[1] === 'o') {
     const op = db.operators.find(o => o.id === parts[2]);
     if (op) current = op.name;
@@ -3854,7 +4439,7 @@ function OperatorShell({ db, setDb, navigate, hash }) {
   }
   return (
     <div>
-      <Topbar navigate={navigate} role="Operator" current={current} />
+      <Topbar navigate={navigate} role="Hauler" current={current} />
       {parts.length === 1 && <OperatorLanding db={db} navigate={navigate} />}
       {parts.length === 3 && parts[1] === 'o' && <OperatorHome operatorId={parts[2]} db={db} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'p' && <OperatorProject operatorId={parts[2]} projectId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
@@ -3863,8 +4448,8 @@ function OperatorShell({ db, setDb, navigate, hash }) {
   );
 }
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 2;
-const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
+const DB_SCHEMA_VERSION = 3;
+const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests'];
 
 function buildSeed() {
   return {
@@ -3876,6 +4461,7 @@ function buildSeed() {
     loads: LOADS_SEED,
     invoices: INVOICES_SEED,
     rates: RATES_INIT,
+    haulRequests: HAUL_REQUESTS_SEED,
     schemaVersion: DB_SCHEMA_VERSION,
   };
 }
@@ -3888,11 +4474,17 @@ function hydrateDb(raw) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return seed;
-    const valid = DB_REQUIRED_KEYS.every(k => k in parsed);
+    // The v3 required-keys list includes `haulRequests`, which v1/v2 payloads
+    // won't have. Check only the keys present in every schema version so we
+    // can migrate forward instead of dropping a populated db on the floor.
+    const baselineKeys = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
+    const valid = baselineKeys.every(k => k in parsed);
     if (!valid) return seed;
     if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
     if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
-    // Schema migration: backfill missing date fields on loads/hours, bump version (persisted on next render).
+    // Schema migration. Apply each forward-step in order:
+    //   v1 → v2: backfill missing date fields on loads/hours.
+    //   v2 → v3: seed `haulRequests` if missing.
     return {
       ...parsed,
       loads: Array.isArray(parsed.loads)
@@ -3901,6 +4493,7 @@ function hydrateDb(raw) {
       hours: Array.isArray(parsed.hours)
         ? parsed.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
         : parsed.hours,
+      haulRequests: Array.isArray(parsed.haulRequests) ? parsed.haulRequests : HAUL_REQUESTS_SEED,
       schemaVersion: DB_SCHEMA_VERSION,
     };
   } catch (e) {
@@ -3960,6 +4553,17 @@ function App() {
     if (h === '/' || h === '') title = 'Jobsite Exchange';
     else if (h.startsWith('/admin/reports')) title = 'JSE — Reports';
     else if (h.startsWith('/admin/new')) title = 'JSE — New Project';
+    else if (h.startsWith('/admin/requests')) {
+      title = parts[2] ? `JSE — Haul Request ${parts[2]}` : 'JSE — Haul Requests';
+    }
+    else if (h.startsWith('/admin/haulers')) {
+      if (parts[2] && db && db.operators) {
+        const op = db.operators.find(o => o.id === parts[2]);
+        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Haulers';
+      } else {
+        title = 'JSE — Haulers';
+      }
+    }
     else if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) {
       const proj = db && db.projects ? db.projects.find(p => p.id === parts[2]) : null;
       if (proj && parts[3] === 'o' && parts[4]) {
@@ -3974,12 +4578,12 @@ function App() {
       const op = db && db.operators ? db.operators.find(o => o.id === parts[2]) : null;
       if (op && parts[3] === 'p' && parts[4]) {
         const proj = db.projects.find(p => p.id === parts[4]);
-        title = proj ? `JSE — Operator — ${op.name} / ${proj.name}` : `JSE — Operator — ${op.name}`;
+        title = proj ? `JSE — Hauler — ${op.name} / ${proj.name}` : `JSE — Hauler — ${op.name}`;
       } else {
-        title = op ? `JSE — Operator — ${op.name}` : 'JSE — Operator';
+        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Hauler';
       }
     }
-    else if (h.startsWith('/operator')) title = 'JSE — Operator';
+    else if (h.startsWith('/operator')) title = 'JSE — Hauler';
     else if (parts[0] === 'driver' && parts[1] === 'log') {
       title = 'JSE — Driver — Log load';
     }

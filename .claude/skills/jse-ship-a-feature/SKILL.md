@@ -31,7 +31,8 @@ Definitions in `.claude/agents/`. Run them serially:
 ## Persistence semantics
 
 - Key: `jse_db_v1`. Lazy hydrate on mount with a structural sanity check. Writes via `useEffect` on every `db` change.
-- **No migration.** If the seed schema changes, users with stale localStorage see broken UI silently. When you add a new required field on an existing collection (like `date` on loads), either add a migration step OR document that users need to hit "Reset demo data". See [[jse-data-model]] for the current shape.
+- **`DB_SCHEMA_VERSION` is currently `3`.** Bump it when adding required collections or fields. `hydrateDb` walks forward-migrations in the same function; the structural sanity check only looks at baseline keys present in every schema version so old payloads aren't dropped on the floor. Anything stored at a higher schema version than the running bundle is reseeded.
+- When you add a new collection (like `haulRequests` in v3), do all three: add the seed constant, list the key in `buildSeed()`, and seed it in the migration block of `hydrateDb` if missing.
 - "Reset demo data" lives in the AdminShell Topbar `right` slot. Don't add another reset elsewhere.
 
 ## Deploy
@@ -60,4 +61,4 @@ Push back on any of these. The mockup's value is in being a single static file t
 - **`window.matchMedia('(hover: hover)')`** isn't used yet — touch-device hover-sticking on Landing cards is a known followup.
 - **`.claude/launch.json`** is a preview-server config that should stay untracked (it's in `.gitignore`).
 - **`.claude/worktrees/`** is where Claude Code creates ephemeral worktrees — also gitignored.
-- Schema doesn't have a version field. If you bump it, add one.
+- Schema has a version field as of v3 (`DB_SCHEMA_VERSION`). When bumping, add a forward-migration branch in `hydrateDb`.

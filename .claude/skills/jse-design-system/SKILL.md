@@ -21,7 +21,7 @@ This is what's in place. Match it. Don't invent parallel systems.
 
 - **`Btn`** — variants: `primary | secondary | ghost | danger | ok`. Sizes: `lg | md | sm | xs`. Props: `onClick`, `disabled`, `fullWidth`, `style`. Mobile rule auto-bumps `sm`/`xs` to 44px min-height at ≤700px.
 - **`Card`** — bordered surface. Pass `padding` prop, defaults to `S[5]`.
-- **`Topbar`** — `{ navigate, role, current, right }`. Brand + role pill + breadcrumb + optional right slot + always-on "Switch role". Position `sticky`. AdminShell wraps `Reports` + `Reset demo data` Btns in the right slot; OperatorShell/DriverShell don't.
+- **`Topbar`** — `{ navigate, role, current, right }`. Brand + role pill + breadcrumb + optional right slot + always-on "Switch role". Position `sticky`. AdminShell wraps a mobile hamburger trigger + `Reports` + `Reset demo data` Btns in the right slot; OperatorShell/DriverShell don't. Role values currently in use: `"Admin"`, `"Hauler"` (formerly `"Operator"` — the UI-level rename), `"Driver"`.
 - **`Pill` / `StatusPill`** — see status colors below.
 - **`Stat`** — `{ label, value, sub, align }`. The canonical KPI card content.
 - **`Crumbs`** — `[{label, to?}]`. Last item is the current page (no `to`).
@@ -34,7 +34,11 @@ This is what's in place. Match it. Don't invent parallel systems.
 
 ## SVG icon set
 
-Inline components above `Landing`: `AdminIcon`, `OperatorIcon`, `DriverIcon`, `TruckIcon`, `ProjectIcon`, `HexLogo`. All use `currentColor` stroke at 1.5 weight, sized via prop or default 28-32px. Inherit color from parent (`color: C.accent` on wrapper). Use these in empty states and any new UI rather than unicode glyphs.
+Inline components above `Landing`: `AdminIcon`, `OperatorIcon` (used for the **Hauler** role — kept by component name only), `DriverIcon`, `TruckIcon`, `ProjectIcon`, `HaulRequestIcon` (inbox + down-arrow), `MenuIcon` (hamburger, used by AdminShell mobile drawer trigger), `HexLogo`. All use `currentColor` stroke at 1.5 weight (1.8 for MenuIcon), sized via prop or default 28-32px. Inherit color from parent (`color: C.accent` on wrapper). Use these in empty states and any new UI rather than unicode glyphs.
+
+## Admin sidebar + mobile drawer
+
+`AdminShell` renders a 240px left-side sidebar at desktop widths (>900px) with three primary nav items: Project Overview, Haul Requests (with a pending-count badge), and Haulers (with an inline expandable list of every hauler). At ≤900px the sidebar collapses; a `MenuIcon` button in the Topbar's right slot opens a left-sliding drawer (`.admin-drawer`) with the same nav, animated by `adminDrawerSlideIn` + `adminDrawerFade` keyframes. The drawer respects `prefers-reduced-motion`. CSS hooks added: `.admin-sidebar`, `.admin-mobile-nav-trigger`, `.admin-drawer`, `.admin-drawer-backdrop`.
 
 ## Status color story (canonical)
 
@@ -44,9 +48,10 @@ Inline components above `Landing`: `AdminIcon`, `OperatorIcon`, `DriverIcon`, `T
 |---|---|---|
 | `active` / `open` | `C.accent` (green) | active projects, open shifts |
 | `upcoming` | `C.info` (blue) | future projects |
-| `completed` / `closed` | `C.inkDim` (gray) | done |
-| `pending` | `C.warn` (orange) | pending loads, hours awaiting approval |
+| `completed` / `closed` | `C.inkDim` (gray) | done, completed haul requests |
+| `pending` | `C.warn` (orange) | pending loads, hours awaiting approval, unmatched haul requests |
 | `approved` | `C.ok` (green-cyan) | approved loads |
+| `matched` | `C.ok` (green-cyan) | haul request matched to a hauler + truck |
 | `inservice` | `C.ok` (green) | truck in service |
 | `idle` | `C.inkDim` (gray) | idle truck |
 
