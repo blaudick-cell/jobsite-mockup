@@ -1,13 +1,15 @@
 ---
 name: jse-data-model
-description: The `db` shape for Jobsite Exchange. Nine collections, the relationships between them, ID conventions, the ISO date convention on loads + hours, and the frozen `NOW_MIN` / `TODAY_ISO` references.
+description: The `db` shape for Jobsite Exchange. Ten collections, the relationships between them, ID conventions, the ISO date convention on loads + hours, and the frozen `NOW_MIN` / `TODAY_ISO` references.
 ---
 
 # JSE Data Model
 
 `db` lives in App-level `useState` and persists via `jse_db_v1` localStorage. See [[jse-ship-a-feature]] for persistence semantics.
 
-## Nine collections
+`db` also carries a single root-level scalar: `activityLastReadAt: number` — the millisecond timestamp of the most-recent activity event the admin has viewed. Used by the sidebar to compute the unread badge. Updated by `AdminActivity` on mount.
+
+## Ten collections
 
 | key | seed name | shape |
 |---|---|---|
@@ -20,6 +22,21 @@ description: The `db` shape for Jobsite Exchange. Nine collections, the relation
 | `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, ..., lineItems: [] }` |
 | `rates` | `RATES_INIT` | `{ [truckType]: hourlyRate }` |
 | `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, notes? }` (added in v3) |
+| `activity` | `ACTIVITY_SEED` | `{ id, type, actorRole, actorId, summary, refId?, timestamp }` (added in v6) |
+
+## Activity events
+
+`db.activity` is an append-only feed of business events. Each event:
+
+- `id` — `'act-' + random5`
+- `type` — dotted string, e.g. `load.logged`, `load.approved`, `load.rejected`, `hours.approved`, `shift.started`, `shift.ended`, `invoice.sent`, `project.created`, `hauler.created`, `driver.created`, `truck.created`, `haulRequest.matched`
+- `actorRole` — `'driver' | 'hauler' | 'admin'`
+- `actorId` — driver/hauler ID, or `null` for admin events
+- `summary` — pre-rendered display string (the activity feed doesn't re-derive from refs)
+- `refId` — optional ID for click-through routing (load → project, truck → hauler, etc.)
+- `timestamp` — `Date.now()` at append time
+
+**Composer:** `appendActivity(state, evt)` — append inside any `setDb` updater that performs a tracked mutation. See [[jse-ship-a-feature]] § Persistence semantics for the pattern.
 
 ## Relationships
 
@@ -107,4 +124,4 @@ See [[jse-design-system]] for how each status maps to a color/pill.
 - **No `users` collection.** Driver/hauler/admin "identity" is just a UI shell selection.
 - **No auth.**
 - **No real timestamps** (other than `clockedInAt`/`pausedAt`/`pausedMs` on live shifts, used for the live ticker).
-- **Schema versioning is in place** (v5 as of the ISO-date migration). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices, v4→v5 converts load/hours `date` from `'today'`/`'yesterday'` labels to ISO date strings) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.
+- **Schema versioning is in place** (v6 as of the activity-feed migration). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices, v4→v5 converts load/hours `date` from `'today'`/`'yesterday'` labels to ISO date strings, v5→v6 seeds `activity` and `activityLastReadAt`) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.

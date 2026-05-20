@@ -31,7 +31,8 @@ Definitions in `.claude/agents/`. Run them serially:
 ## Persistence semantics
 
 - Key: `jse_db_v1`. Lazy hydrate on mount with a structural sanity check. Writes via `useEffect` on every `db` change.
-- **`DB_SCHEMA_VERSION` is currently `5`.** Bump it when adding required collections or fields, or when renaming an existing collection / field. `hydrateDb` walks forward-migrations in the same function; the structural sanity check only looks at baseline keys present in every schema version so old payloads aren't dropped on the floor. Anything stored at a higher schema version than the running bundle is reseeded.
+- **`DB_SCHEMA_VERSION` is currently `6`.** Bump it when adding required collections or fields, or when renaming an existing collection / field. `hydrateDb` walks forward-migrations in the same function; the structural sanity check only looks at baseline keys present in every schema version so old payloads aren't dropped on the floor. Anything stored at a higher schema version than the running bundle is reseeded.
+- **Activity feed composer:** any new tracked mutation should pipe its `setDb` updater through `appendActivity(state, evt)` to write to `db.activity`. Pattern: `setDb(prev => appendActivity({ ...prev, loads: [...prev.loads, newLoad] }, { type: 'load.logged', actorRole: 'driver', actorId, summary, refId }))`. See [[jse-data-model]] § Activity events for the event shape and the canonical type list.
 - When you add a new collection (like `haulRequests` in v3), do all three: add the seed constant, list the key in `buildSeed()`, and seed it in the migration block of `hydrateDb` if missing.
 - When you rename a collection or field (like v3 → v4 renamed `operators` → `haulers` and `operatorId` → `haulerId`), update `DB_REQUIRED_KEYS`, the `baselineKeys` inside `hydrateDb`, and add a forward-migration branch that destructures the legacy key and re-emits under the new name.
 - "Reset demo data" lives in the AdminShell Topbar `right` slot. Don't add another reset elsewhere.
@@ -62,4 +63,4 @@ Push back on any of these. The mockup's value is in being a single static file t
 - **`window.matchMedia('(hover: hover)')`** isn't used yet — touch-device hover-sticking on Landing cards is a known followup.
 - **`.claude/launch.json`** is a preview-server config that should stay untracked (it's in `.gitignore`).
 - **`.claude/worktrees/`** is where Claude Code creates ephemeral worktrees — also gitignored.
-- Schema has a version field (`DB_SCHEMA_VERSION`, currently `5`). When bumping, add a forward-migration branch in `hydrateDb`.
+- Schema has a version field (`DB_SCHEMA_VERSION`, currently `6`). When bumping, add a forward-migration branch in `hydrateDb`.

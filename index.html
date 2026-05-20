@@ -1122,6 +1122,14 @@ function HaulRequestIcon({ size = 24 }) {
     </svg>
   );
 }
+function ActivityIcon({ size = 24, color = 'currentColor' }) {
+  // Pulse-line shape â€” left-to-right zigzag suggesting heartbeat / activity
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M3 12 H7 L9 6 L13 18 L15 9 L17 12 H21" />
+    </svg>
+  );
+}
 function MenuIcon({ size = 22 }) {
   // 3-line hamburger
   return (
@@ -1558,7 +1566,10 @@ function AdminProject({ projectId, db, setDb, navigate }) {
   const updateProject = (patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === project.id ? { ...p, ...patch } : p) }));
   const addHauler = (form) => {
     const id = 'op-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, haulers: [...prev.haulers, { id, ...form, projectIds: [projectId] }] }));
+    setDb(prev => appendActivity(
+      { ...prev, haulers: [...prev.haulers, { id, ...form, projectIds: [projectId] }] },
+      { type: 'hauler.created', actorRole: 'admin', actorId: null, summary: `Admin added ${form.name} as a hauler on ${projectName(prev, projectId)}`, refId: id }
+    ));
     setShowAdd(false);
   };
 
@@ -1672,7 +1683,10 @@ function AdminHaulerProject({ projectId, haulerId, db, setDb, navigate }) {
   const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
   const addTruck = (form) => {
     const id = 'tk-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId, driverId: null }] }));
+    setDb(prev => appendActivity(
+      { ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId, driverId: null }] },
+      { type: 'truck.created', actorRole: 'admin', actorId: null, summary: `Admin added truck #${form.plate} on ${projectName(prev, projectId)}`, refId: id }
+    ));
     setShowAdd(false);
   };
   const typeOptions = TRUCK_TYPES.map(t => ({ value: t.code, label: t.label }));
@@ -1756,7 +1770,7 @@ function AdminHaulerProject({ projectId, haulerId, db, setDb, navigate }) {
       {/* Approvals */}
       {(pendingLoads + pendingHrs > 0) && (
         <div style={{ marginTop: S[7] }}>
-          <HaulerApprovals projectId={projectId} hours={hours} loads={loads} db={db} setDb={setDb} />
+          <HaulerApprovals projectId={projectId} hours={hours} loads={loads} hauler={hauler} db={db} setDb={setDb} />
         </div>
       )}
 
@@ -2329,7 +2343,16 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
       time,
       status: 'pending',
     };
-    setDb(prev => ({ ...prev, loads: [...prev.loads, newLoad] }));
+    setDb(prev => appendActivity(
+      { ...prev, loads: [...prev.loads, newLoad] },
+      {
+        type: 'load.logged',
+        actorRole: 'driver',
+        actorId: newLoad.driverId,
+        summary: `${driver ? driver.name : 'A driver'} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)} on #${truck.plate}`,
+        refId: newLoad.id,
+      }
+    ));
     setCy('');
     setTicketNo('');
     const d = new Date();
@@ -2375,7 +2398,10 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
   const [showAdd, setShowAdd] = useState(false);
   const addTruck = (form) => {
     const id = 'tk-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId: opId, driverId: null }] }));
+    setDb(prev => appendActivity(
+      { ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId: opId, driverId: null }] },
+      { type: 'truck.created', actorRole: 'hauler', actorId: opId, summary: `${haulerName(prev, opId)} added truck #${form.plate} on ${projectName(prev, projectId)}`, refId: id }
+    ));
     setShowAdd(false);
   };
   const removeTruck = (id) => {
@@ -2503,14 +2529,54 @@ function HaulerDrivers({ projectId, trucks, db, setDb }) {
   );
 }
 
-function HaulerApprovals({ projectId, hours, loads, db, setDb }) {
+function HaulerApprovals({ projectId, hours, loads, hauler, db, setDb }) {
   const pendingLoads = loads.filter(l => l.status === 'pending');
   const pendingHrs = hours.filter(h => h.status === 'pending');
   const updateLoad = (id, patch) => setDb(prev => ({ ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, ...patch } : l) }));
   const updateHr = (id, patch) => setDb(prev => ({ ...prev, hours: prev.hours.map(h => h.id === id ? { ...h, ...patch } : h) }));
-  const approveLoad = (id) => updateLoad(id, { status: 'approved' });
-  const rejectLoad = (id) => setDb(prev => ({ ...prev, loads: prev.loads.filter(l => l.id !== id) }));
-  const approveHr = (id) => updateHr(id, { status: 'open' });
+  const actorName = hauler ? hauler.name : 'A hauler';
+  const actorId = hauler ? hauler.id : null;
+  const approveLoad = (id) => {
+    const ld = db.loads.find(l => l.id === id);
+    setDb(prev => appendActivity(
+      { ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, status: 'approved' } : l) },
+      {
+        type: 'load.approved',
+        actorRole: 'hauler',
+        actorId,
+        summary: ld ? `${actorName} approved ${ld.cy} CY of ${materialLabel(ld.material)}` : `${actorName} approved a load`,
+        refId: id,
+      }
+    ));
+  };
+  const rejectLoad = (id) => {
+    const ld = db.loads.find(l => l.id === id);
+    setDb(prev => appendActivity(
+      { ...prev, loads: prev.loads.filter(l => l.id !== id) },
+      {
+        type: 'load.rejected',
+        actorRole: 'hauler',
+        actorId,
+        summary: ld ? `${actorName} rejected ${ld.cy} CY of ${materialLabel(ld.material)}` : `${actorName} rejected a load`,
+        refId: null,
+      }
+    ));
+  };
+  const approveHr = (id) => {
+    const hr = db.hours.find(h => h.id === id);
+    const drv = hr ? db.drivers.find(d => d.id === hr.driverId) : null;
+    const hrsCalc = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
+    setDb(prev => appendActivity(
+      { ...prev, hours: prev.hours.map(h => h.id === id ? { ...h, status: 'open' } : h) },
+      {
+        type: 'hours.approved',
+        actorRole: 'hauler',
+        actorId,
+        summary: drv ? `${actorName} approved ${fmtHours(hrsCalc)} hrs for ${drv.name}` : `${actorName} approved hours`,
+        refId: null,
+      }
+    ));
+  };
   const materialOptions = MATERIALS.map(m => ({ value: m.code, label: m.label }));
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -2623,7 +2689,16 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
 
   const sendInvoice = () => {
     const finalDraft = { ...draft, status: 'sent', sentAt: new Date().toISOString() };
-    setDb(prev => ({ ...prev, invoices: [...(prev.invoices || []), finalDraft] }));
+    setDb(prev => appendActivity(
+      { ...prev, invoices: [...(prev.invoices || []), finalDraft] },
+      {
+        type: 'invoice.sent',
+        actorRole: 'hauler',
+        actorId: hauler ? hauler.id : null,
+        summary: `${hauler ? hauler.name : 'A hauler'} sent invoice ${finalDraft.number} to ${finalDraft.billTo}`,
+        refId: null,
+      }
+    ));
     alert('Invoice ' + finalDraft.number + ' sent to ' + finalDraft.billTo + '.');
     setShowDraft(false);
     setDraft(null);
@@ -2854,18 +2929,27 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
 
   const clockIn = () => {
     const now = Date.now();
-    setDb(prev => ({
-      ...prev,
-      hours: [
-        ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
-        {
-          id: 'hr-' + Math.random().toString(36).substring(2, 7),
-          driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-          clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
-        },
-      ],
-    }));
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        hours: [
+          ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
+          {
+            id: 'hr-' + Math.random().toString(36).substring(2, 7),
+            driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
+            clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
+            breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
+          },
+        ],
+      },
+      {
+        type: 'shift.started',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} clocked in on #${truck.plate}`,
+        refId: truck.id,
+      }
+    ));
   };
 
   const togglePause = () => {
@@ -2891,19 +2975,28 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
     if (!hr) return;
     if (!confirm('End your shift?')) return;
     const now = Date.now();
-    setDb(prev => ({
-      ...prev,
-      hours: prev.hours.map(h => {
-        if (h.id !== hr.id) return h;
-        let pausedMs = h.pausedMs || 0;
-        if (h.pausedAt) pausedMs += now - h.pausedAt;
-        return {
-          ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
-          pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
-          status: 'pending',
-        };
-      }),
-    }));
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        hours: prev.hours.map(h => {
+          if (h.id !== hr.id) return h;
+          let pausedMs = h.pausedMs || 0;
+          if (h.pausedAt) pausedMs += now - h.pausedAt;
+          return {
+            ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
+            pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
+            status: 'pending',
+          };
+        }),
+      },
+      {
+        type: 'shift.ended',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} ended shift on #${truck.plate}`,
+        refId: truck.id,
+      }
+    ));
   };
 
   return (
@@ -3042,14 +3135,21 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
     if (!canSubmit) return;
     const now = new Date();
     const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    setDb(prev => ({
-      ...prev,
-      loads: [...prev.loads, {
-        id: 'ld-' + Math.random().toString(36).substring(2, 7),
-        driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-        material, cy: parseFloat(cy), photo, time: hhmm, date: TODAY_ISO, status: 'pending',
-      }],
-    }));
+    const newLoad = {
+      id: 'ld-' + Math.random().toString(36).substring(2, 7),
+      driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
+      material, cy: parseFloat(cy), photo, time: hhmm, date: TODAY_ISO, status: 'pending',
+    };
+    setDb(prev => appendActivity(
+      { ...prev, loads: [...prev.loads, newLoad] },
+      {
+        type: 'load.logged',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)} on #${truck.plate}`,
+        refId: newLoad.id,
+      }
+    ));
     navigate(back);
   };
 
@@ -3220,37 +3320,55 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
 
   const clockIn = () => {
     const now = Date.now();
-    setDb(prev => ({
-      ...prev,
-      hours: [
-        ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
-        {
-          id: 'hr-' + Math.random().toString(36).substring(2, 7),
-          driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-          clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-          breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
-        },
-      ],
-    }));
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        hours: [
+          ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
+          {
+            id: 'hr-' + Math.random().toString(36).substring(2, 7),
+            driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
+            clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
+            breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
+          },
+        ],
+      },
+      {
+        type: 'shift.started',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} clocked in on #${truck.plate}`,
+        refId: truck.id,
+      }
+    ));
   };
 
   const clockOut = () => {
     if (!hr) return;
     if (!confirm('End your shift on this truck?')) return;
     const now = Date.now();
-    setDb(prev => ({
-      ...prev,
-      hours: prev.hours.map(h => {
-        if (h.id !== hr.id) return h;
-        let pausedMs = h.pausedMs || 0;
-        if (h.pausedAt) pausedMs += now - h.pausedAt;
-        return {
-          ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
-          pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
-          status: 'pending',
-        };
-      }),
-    }));
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        hours: prev.hours.map(h => {
+          if (h.id !== hr.id) return h;
+          let pausedMs = h.pausedMs || 0;
+          if (h.pausedAt) pausedMs += now - h.pausedAt;
+          return {
+            ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
+            pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
+            status: 'pending',
+          };
+        }),
+      },
+      {
+        type: 'shift.ended',
+        actorRole: 'driver',
+        actorId: driver.id,
+        summary: `${driver.name} ended shift on #${truck.plate}`,
+        refId: truck.id,
+      }
+    ));
   };
 
   return (
@@ -3460,15 +3578,24 @@ function AdminNewProject({ db, setDb, navigate }) {
       status: basics.status,
       material: basics.materials,
     };
-    setDb(prev => ({
-      ...prev,
-      projects: [...prev.projects, newProject],
-      haulers: prev.haulers.map(o => haulerIds.includes(o.id) ? { ...o, projectIds: [...o.projectIds, id] } : o),
-      trucks: prev.trucks.map(t => {
-        const sel = trucks.find(x => x.truckId === t.id);
-        return sel ? { ...t, projectId: id, haulerId: sel.haulerId } : t;
-      }),
-    }));
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        projects: [...prev.projects, newProject],
+        haulers: prev.haulers.map(o => haulerIds.includes(o.id) ? { ...o, projectIds: [...o.projectIds, id] } : o),
+        trucks: prev.trucks.map(t => {
+          const sel = trucks.find(x => x.truckId === t.id);
+          return sel ? { ...t, projectId: id, haulerId: sel.haulerId } : t;
+        }),
+      },
+      {
+        type: 'project.created',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin created project ${newProject.name}`,
+        refId: newProject.id,
+      }
+    ));
     navigate('/admin/p/' + id);
   };
 
@@ -3740,17 +3867,24 @@ function AdminNewHauler({ db, setDb, navigate }) {
   const next   = () => setStep(s => Math.min(3, s + 1));
   const submit = () => {
     const newId = 'op-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({
-      ...prev,
-      haulers: [...prev.haulers, {
-        id: newId,
-        name: name.trim(),
-        email: email.trim(),
-        phone: phone.trim(),
-        projectIds,
-        ...(company.trim() ? { company: company.trim() } : {}),
-      }],
-    }));
+    const newHauler = {
+      id: newId,
+      name: name.trim(),
+      email: email.trim(),
+      phone: phone.trim(),
+      projectIds,
+      ...(company.trim() ? { company: company.trim() } : {}),
+    };
+    setDb(prev => appendActivity(
+      { ...prev, haulers: [...prev.haulers, newHauler] },
+      {
+        type: 'hauler.created',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin onboarded hauler ${newHauler.name}`,
+        refId: newId,
+      }
+    ));
     navigate('/admin/haulers/' + newId);
   };
 
@@ -3891,18 +4025,28 @@ function AdminNewDriver({ db, setDb, navigate }) {
   const cancel = () => navigate('/admin/haulers');
   const submit = () => {
     const newId = 'dr-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({
-      ...prev,
-      drivers: [...prev.drivers, {
-        id: newId,
-        name: name.trim(),
-        phone: phone.trim(),
-        ...(licenseNumber.trim() ? { licenseNumber: licenseNumber.trim() } : {}),
-      }],
-      trucks: defaultTruckId
-        ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: newId } : t)
-        : prev.trucks,
-    }));
+    const newDriver = {
+      id: newId,
+      name: name.trim(),
+      phone: phone.trim(),
+      ...(licenseNumber.trim() ? { licenseNumber: licenseNumber.trim() } : {}),
+    };
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        drivers: [...prev.drivers, newDriver],
+        trucks: defaultTruckId
+          ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: newId } : t)
+          : prev.trucks,
+      },
+      {
+        type: 'driver.created',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin added driver ${newDriver.name}`,
+        refId: newId,
+      }
+    ));
     // If a truck was selected, land on that truck's hauler page when known;
     // otherwise return to the haulers list (no flat driver index exists).
     if (defaultTruckId) {
@@ -3987,21 +4131,29 @@ function AdminNewTruck({ db, setDb, navigate }) {
   const submit = () => {
     const newId = 'tk-' + Math.random().toString(36).substring(2, 7);
     const capNum = parseFloat(capacityCY);
-    setDb(prev => ({
-      ...prev,
-      trucks: [...prev.trucks, {
-        id: newId,
-        plate: plate.trim(),
-        type,
-        hauler: haulerCompany.trim() || 'Bench (unassigned)',
-        projectId: projectId || null,
-        haulerId: haulerId || null,
-        driverId: null,
-        ...(make.trim() ? { make: make.trim() } : {}),
-        ...(model.trim() ? { model: model.trim() } : {}),
-        ...(Number.isFinite(capNum) && capNum > 0 ? { capacityCY: capNum } : {}),
-      }],
-    }));
+    const newTruck = {
+      id: newId,
+      plate: plate.trim(),
+      type,
+      hauler: haulerCompany.trim() || 'Bench (unassigned)',
+      projectId: projectId || null,
+      haulerId: haulerId || null,
+      driverId: null,
+      ...(make.trim() ? { make: make.trim() } : {}),
+      ...(model.trim() ? { model: model.trim() } : {}),
+      ...(Number.isFinite(capNum) && capNum > 0 ? { capacityCY: capNum } : {}),
+    };
+    const typeLabel = (TRUCK_TYPES.find(tt => tt.code === type) || {}).label || type;
+    setDb(prev => appendActivity(
+      { ...prev, trucks: [...prev.trucks, newTruck] },
+      {
+        type: 'truck.created',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin created truck #${newTruck.plate} (${typeLabel})`,
+        refId: newId,
+      }
+    ));
     navigate(haulerId ? '/admin/haulers/' + haulerId : '/admin/haulers');
   };
 
@@ -4853,12 +5005,24 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   });
 
   const assign = (haulerId, truckId) => {
-    setDb(prev => ({
-      ...prev,
-      haulRequests: prev.haulRequests.map(r => r.id === req.id
-        ? { ...r, status: 'matched', matchedHaulerId: haulerId, matchedTruckId: truckId }
-        : r),
-    }));
+    const assignedHauler = db.haulers.find(h => h.id === haulerId);
+    const assignedTruck = db.trucks.find(t => t.id === truckId);
+    const matMaterial = material ? material.label : req.materialCode;
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === req.id
+          ? { ...r, status: 'matched', matchedHaulerId: haulerId, matchedTruckId: truckId }
+          : r),
+      },
+      {
+        type: 'haulRequest.matched',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Matched ${req.volumeCY} CY ${matMaterial} request to ${assignedHauler ? assignedHauler.name : 'a hauler'} / #${assignedTruck ? assignedTruck.plate : '?'}`,
+        refId: req.id,
+      }
+    ));
     setPickerHaulerId(null);
   };
 
@@ -5114,14 +5278,167 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   );
 }
 
+// =====================================================================
+// AdminActivity â€” reverse-chrono event feed at /admin/activity
+// =====================================================================
+// Reads db.activity (appended via appendActivity() on every mutation).
+// On first render, advances db.activityLastReadAt to the latest event timestamp
+// so the sidebar unread badge clears once the user has viewed the page.
+function AdminActivity({ db, setDb, navigate }) {
+  const activity = (db.activity || []).slice().sort((a, b) => b.timestamp - a.timestamp);
+  const markedRef = useRef(false);
+  useEffect(() => {
+    if (markedRef.current) return;
+    markedRef.current = true;
+    const latest = activity.length ? activity[0].timestamp : 0;
+    setDb(prev => {
+      const lastRead = prev.activityLastReadAt || 0;
+      if (latest <= lastRead) return prev;
+      return { ...prev, activityLastReadAt: latest };
+    });
+    // Only run once on mount â€” mark-as-read fires on first view, not on every
+    // re-render that follows new events arriving while the page is open.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Pragmatic refId-prefix routing. Unknown / ambiguous refs are no-ops.
+  const goRef = (evt) => {
+    const id = evt.refId;
+    if (!id) return;
+    if (id.startsWith('hreq-')) { navigate('/admin/requests/' + id); return; }
+    if (id.startsWith('op-'))   { navigate('/admin/haulers/' + id); return; }
+    if (id.startsWith('tk-')) {
+      const tr = db.trucks.find(t => t.id === id);
+      if (tr && tr.haulerId) { navigate('/admin/haulers/' + tr.haulerId); return; }
+      return;
+    }
+    if (id.startsWith('ld-')) {
+      const ld = db.loads.find(l => l.id === id);
+      if (ld && ld.projectId) { navigate('/admin/p/' + ld.projectId); return; }
+      return;
+    }
+    if (id.startsWith('dr-')) {
+      // No flat drivers index â€” fall back to haulers list.
+      navigate('/admin/haulers'); return;
+    }
+    // Project codes are uppercase letters/digits without a known prefix.
+    if (/^[A-Z0-9]{2,6}$/.test(id) && db.projects.some(p => p.id === id)) {
+      navigate('/admin/p/' + id); return;
+    }
+  };
+
+  // Group reverse-chrono by day. Buckets: 'Today' / 'Yesterday' / 'May 14' etc.
+  const labelFor = (ts) => {
+    const d = new Date(ts);
+    const iso = d.toISOString().slice(0, 10);
+    if (isToday(iso)) return 'Today';
+    if (isYesterday(iso)) return 'Yesterday';
+    return isoToShortDate(iso);
+  };
+  const groups = [];
+  const byLabel = new Map();
+  activity.forEach(e => {
+    const lbl = labelFor(e.timestamp);
+    if (!byLabel.has(lbl)) { byLabel.set(lbl, []); groups.push(lbl); }
+    byLabel.get(lbl).push(e);
+  });
+
+  const fmtTime = (ts) => {
+    const d = new Date(ts);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  };
+
+  // Color the actor avatar by role to give the feed scannable structure.
+  const actorColorFor = (role) => {
+    if (role === 'driver') return C.accent;
+    if (role === 'hauler') return C.warn || C.accent;
+    return C.inkDim;
+  };
+  // Build a "name" string for the Avatar component to derive initials from.
+  // Avatar splits on whitespace and takes first letters â€” we feed it whatever
+  // the actor's display name is so it produces sensible initials.
+  const actorNameFor = (evt) => {
+    if (evt.actorRole === 'admin') return 'Admin User';
+    if (evt.actorRole === 'driver' && evt.actorId) {
+      const d = db.drivers.find(x => x.id === evt.actorId);
+      if (d) return d.name;
+    }
+    if (evt.actorRole === 'hauler' && evt.actorId) {
+      const h = db.haulers.find(x => x.id === evt.actorId);
+      if (h) return h.name;
+    }
+    return '?';
+  };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Activity' }]} navigate={navigate} />
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent} style={{ marginBottom: 6 }}>Activity</Label>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What's been happening.</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
+          {activity.length} event{activity.length === 1 ? '' : 's'} across your network.
+        </div>
+      </div>
+
+      {activity.length === 0 ? (
+        <EmptyState
+          icon={<ActivityIcon size={36} />}
+          title="No activity yet"
+          body="Events will appear here as drivers log loads, haulers approve, and admins assign requests."
+        />
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
+          {groups.map(label => (
+            <div key={label}>
+              <Label style={{ marginBottom: S[3] }}>{label}</Label>
+              <Card padding={0}>
+                {byLabel.get(label).map((evt, idx, arr) => {
+                  const hasRef = !!evt.refId;
+                  return (
+                    <div
+                      key={evt.id}
+                      onClick={hasRef ? () => goRef(evt) : undefined}
+                      style={{
+                        display: 'flex', alignItems: 'flex-start', gap: S[3],
+                        padding: `${S[3]}px ${S[4]}px`,
+                        borderBottom: idx < arr.length - 1 ? `1px solid ${C.rule}` : 'none',
+                        cursor: hasRef ? 'pointer' : 'default',
+                        transition: 'background 0.12s',
+                      }}
+                      onMouseEnter={e => { if (hasRef) e.currentTarget.style.background = C.surfaceHi; }}
+                      onMouseLeave={e => { if (hasRef) e.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <div style={{ ...T.monoSm, color: C.inkFaint, width: 44, flexShrink: 0, paddingTop: 6 }}>{fmtTime(evt.timestamp)}</div>
+                      <Avatar name={actorNameFor(evt)} color={actorColorFor(evt.actorRole)} size={32} />
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{evt.summary}</div>
+                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{evt.type}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </Card>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Shared admin sidebar nav (desktop) + drawer (mobile).
 // Renders the same nav items in both modes; parent controls visibility via CSS.
 function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', haulersExpanded, setHaulersExpanded }) {
   const requests = db.haulRequests || [];
   const pendingCount = requests.filter(r => r.status === 'pending').length;
+  const activity = db.activity || [];
+  const lastRead = db.activityLastReadAt || 0;
+  const unreadCount = activity.filter(a => a.timestamp > lastRead).length;
   const parts = (hash || '').split('/').filter(Boolean);
   const onOverview = parts.length === 1 && parts[0] === 'admin';
   const onRequests = parts[1] === 'requests';
+  const onActivity = parts[1] === 'activity';
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
@@ -5198,6 +5515,13 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         active={onRequests}
         badge={pendingCount}
         onClick={() => go('/admin/requests')}
+      />
+      <Item
+        icon={<ActivityIcon size={20} />}
+        label="Activity"
+        active={onActivity}
+        badge={unreadCount}
+        onClick={() => go('/admin/activity')}
       />
       <Item
         icon={<HaulerIcon size={20} />}
@@ -5278,6 +5602,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
+          {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks'  && parts[2] === 'new' && <AdminNewTruck  db={db} setDb={setDb} navigate={navigate} />}
@@ -5327,8 +5652,77 @@ function HaulerShell({ db, setDb, navigate, hash }) {
   );
 }
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 5;
-const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests'];
+const DB_SCHEMA_VERSION = 6;
+const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity'];
+
+// =====================================================================
+// Activity feed
+// =====================================================================
+// Append an activity event onto a db-like object. Use inside setDb composers:
+//   setDb(prev => appendActivity({ ...prev, loads: [...] }, { type, actorRole, actorId, summary, refId }))
+function appendActivity(state, evt) {
+  const event = {
+    id: 'act-' + Math.random().toString(36).substring(2, 7),
+    type: evt.type,
+    actorRole: evt.actorRole,
+    actorId: evt.actorId || null,
+    summary: evt.summary,
+    refId: evt.refId || null,
+    timestamp: Date.now(),
+  };
+  return { ...state, activity: [...(state.activity || []), event] };
+}
+
+// Small lookup helpers used to build activity summary strings.
+function driverName(state, id) {
+  const d = state && state.drivers ? state.drivers.find(x => x.id === id) : null;
+  return d ? d.name : 'A driver';
+}
+function haulerName(state, id) {
+  const h = state && state.haulers ? state.haulers.find(x => x.id === id) : null;
+  return h ? h.name : 'A hauler';
+}
+function projectName(state, id) {
+  const p = state && state.projects ? state.projects.find(x => x.id === id) : null;
+  return p ? p.name : 'a project';
+}
+function truckPlate(state, id) {
+  const t = state && state.trucks ? state.trucks.find(x => x.id === id) : null;
+  return t ? t.plate : '?';
+}
+function materialLabel(code) {
+  const m = MATERIALS.find(x => x.code === code);
+  return m ? m.label : code;
+}
+
+// Seeded activity events spread across the last few days. Real timestamps
+// (Date.now() minus offsets) so day grouping reflects wall-clock time.
+const ACTIVITY_SEED = (() => {
+  const now = Date.now();
+  const HOUR = 3600 * 1000;
+  const DAY = 24 * HOUR;
+  return [
+    // Today
+    { id: 'act-001', type: 'load.logged',       actorRole: 'driver', actorId: 'dr-001', summary: 'M. Ortega logged 18 CY of Clean Fill',                          refId: 'ld-1042', timestamp: now - 0.5*HOUR },
+    { id: 'act-002', type: 'shift.started',     actorRole: 'driver', actorId: 'dr-002', summary: 'J. Bui clocked in on #155',                                    refId: 'tk-155',  timestamp: now - 1*HOUR },
+    { id: 'act-003', type: 'load.approved',     actorRole: 'hauler', actorId: 'op-002', summary: 'Priya Sharma approved 22 CY of Topsoil on Winter Park',         refId: 'ld-1038', timestamp: now - 2*HOUR },
+    { id: 'act-004', type: 'haulRequest.matched', actorRole: 'admin', actorId: null,    summary: 'Matched 25 CY Clean Fill request to Marcus Lane / #447',        refId: 'hreq-001', timestamp: now - 3*HOUR },
+    { id: 'act-005', type: 'load.logged',       actorRole: 'driver', actorId: 'dr-003', summary: 'D. Kowalski logged 24 CY of Export / Spoils',                   refId: 'ld-1035', timestamp: now - 4*HOUR },
+    { id: 'act-006', type: 'shift.ended',       actorRole: 'driver', actorId: 'dr-004', summary: 'R. Singh ended shift on #92',                                   refId: 'tk-092',  timestamp: now - 5*HOUR },
+    // Yesterday
+    { id: 'act-007', type: 'hours.approved',    actorRole: 'hauler', actorId: 'op-005', summary: 'Oz Trucking approved 8.25 hrs for S. Park',                     refId: null,      timestamp: now - 1*DAY - 2*HOUR },
+    { id: 'act-008', type: 'invoice.sent',      actorRole: 'hauler', actorId: 'op-002', summary: 'Priya Sharma sent invoice INV-1042 to Pinnacle Construction',   refId: null,      timestamp: now - 1*DAY - 4*HOUR },
+    { id: 'act-009', type: 'load.rejected',     actorRole: 'hauler', actorId: 'op-001', summary: 'Marcus Lane rejected a 9 CY Sand load (photo unreadable)',      refId: null,      timestamp: now - 1*DAY - 6*HOUR },
+    { id: 'act-010', type: 'truck.created',     actorRole: 'admin',  actorId: null,     summary: 'Admin created truck #812 (Belly Dump)',                         refId: 'tk-812',  timestamp: now - 1*DAY - 8*HOUR },
+    // 2 days ago
+    { id: 'act-011', type: 'driver.created',    actorRole: 'admin',  actorId: null,     summary: 'Admin added driver H. Pratt',                                   refId: 'dr-015',  timestamp: now - 2*DAY - 1*HOUR },
+    { id: 'act-012', type: 'hauler.created',    actorRole: 'admin',  actorId: null,     summary: 'Admin onboarded hauler Front Range Logistics',                  refId: 'op-010',  timestamp: now - 2*DAY - 3*HOUR },
+    { id: 'act-013', type: 'load.logged',       actorRole: 'driver', actorId: 'dr-008', summary: 'S. Park logged 20 CY of Class 5 Road Base',                     refId: 'ld-1020', timestamp: now - 2*DAY - 5*HOUR },
+    // 3 days ago
+    { id: 'act-014', type: 'haulRequest.matched', actorRole: 'admin', actorId: null,    summary: 'Matched 18 CY Topsoil request to Oz Trucking / #503',           refId: 'hreq-002', timestamp: now - 3*DAY - 2*HOUR },
+    { id: 'act-015', type: 'project.created',   actorRole: 'admin',  actorId: null,     summary: 'Admin created project Capitol Hill Mixed-Use',                   refId: 'CH',      timestamp: now - 3*DAY - 4*HOUR },
+  ];
+})();
 
 function buildSeed() {
   return {
@@ -5341,6 +5735,8 @@ function buildSeed() {
     invoices: INVOICES_SEED,
     rates: RATES_INIT,
     haulRequests: HAUL_REQUESTS_SEED,
+    activity: ACTIVITY_SEED,
+    activityLastReadAt: 0,
     schemaVersion: DB_SCHEMA_VERSION,
   };
 }
@@ -5369,6 +5765,7 @@ function hydrateDb(raw) {
     //            rename `operatorId` field → `haulerId` on trucks + invoices.
     //   v4 → v5: load/hours `date` fields migrate from 'today'/'yesterday' label
     //            strings to ISO date strings (YYYY-MM-DD).
+    //   v5 → v6: add `activity` collection + `activityLastReadAt` mark-as-read pointer.
     const { operators: legacyOperators, ...rest } = parsed;
     const migratedHaulers = Array.isArray(rest.haulers)
       ? rest.haulers
@@ -5399,6 +5796,9 @@ function hydrateDb(raw) {
         ? rest.hours.map(h => h ? { ...h, date: isoBackfill(h.date) } : h)
         : rest.hours,
       haulRequests: Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED,
+      // v5 → v6: add activity collection + activityLastReadAt mark-as-read pointer.
+      activity: Array.isArray(rest.activity) ? rest.activity : ACTIVITY_SEED,
+      activityLastReadAt: typeof rest.activityLastReadAt === 'number' ? rest.activityLastReadAt : 0,
       schemaVersion: DB_SCHEMA_VERSION,
     };
   } catch (e) {
@@ -5458,6 +5858,7 @@ function App() {
     if (h === '/' || h === '') title = 'Jobsite Exchange';
     else if (h.startsWith('/admin/reports')) title = 'JSE â€” Reports';
     else if (h.startsWith('/admin/new')) title = 'JSE â€” New Project';
+    else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
     else if (h.startsWith('/admin/requests')) {
       title = parts[2] ? `JSE â€” Haul Request ${parts[2]}` : 'JSE â€” Haul Requests';
     }
