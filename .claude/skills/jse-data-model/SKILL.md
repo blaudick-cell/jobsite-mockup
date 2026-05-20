@@ -1,6 +1,6 @@
 ---
 name: jse-data-model
-description: The `db` shape for Jobsite Exchange. Nine collections, the relationships between them, ID conventions, the today/yesterday date convention on loads + hours, and the frozen `NOW_MIN` time.
+description: The `db` shape for Jobsite Exchange. Nine collections, the relationships between them, ID conventions, the ISO date convention on loads + hours, and the frozen `NOW_MIN` / `TODAY_ISO` references.
 ---
 
 # JSE Data Model
@@ -63,20 +63,28 @@ Truck uses truck.type   → rates[code]         (truck-type code keyed hourly ra
 
 ## The `date` field
 
-`loads` and `hours` records carry `date: 'today' | 'yesterday'` (string literals, not real dates — this is mock data).
+`loads` and `hours` records carry `date: 'YYYY-MM-DD'` — real ISO date strings. The whole demo is anchored to a frozen `TODAY_ISO = '2026-05-19'` so the page produces stable charts regardless of when it's opened. `YESTERDAY_ISO` and `isoDaysAgo(n)` derive everything else.
 
-- Seed loads: ~52 marked `today`, ~10 marked `yesterday`.
-- Seed hours: 4 short-haul shifts marked `today` (clocked out earlier); 20 full shifts marked `yesterday`.
-- New loads created via `DriverLogLoad` are stamped `date: 'today'`.
-- New live shifts (clock-in) are stamped `date: 'today'`.
+- Seed loads: ~52 stamped `TODAY_ISO`, ~10 stamped `YESTERDAY_ISO`, ~35 spread across `isoDaysAgo(2)`..`isoDaysAgo(7)` to give the reports bar chart real variance.
+- Seed hours: 4 short-haul shifts on `TODAY_ISO`, 20 on `YESTERDAY_ISO`, plus ~10 more spread across days 2-6.
+- New loads created via `DriverLogLoad` are stamped `date: TODAY_ISO`.
+- New live shifts (clock-in) are stamped `date: TODAY_ISO`.
 
-**Why:** without this field, "loads today vs yesterday" can't be computed (hours have no real timestamps and loads carry `time: 'HH:MM'` strings, not dates).
+**Helpers** (defined just above the seeds in `index.html`):
+- `isToday(iso)` — equivalent to `iso === TODAY_ISO`.
+- `isYesterday(iso)` — equivalent to `iso === YESTERDAY_ISO`.
+- `isInRange(iso, startIso, endIso)` — inclusive string compare on ISO dates (sorts lexically because YYYY-MM-DD is ISO 8601).
+- `isoDaysAgo(n)` — returns `TODAY_ISO` minus n days as `YYYY-MM-DD`.
+- `isoToWeekdayShort(iso)` — `'Mon'`, `'Tue'`, ... for chart axes.
+- `isoToShortDate(iso)` — `'May 19'` for headers/tooltips.
 
-**How to apply:** any new load/hours creation path must include `date: 'today'`. Any "today" filter is `db.loads.filter(l => l.date === 'today')`.
+**Why:** lets AdminReports filter by arbitrary date ranges (Today / Yesterday / Last 7 days / Last 30 days / Custom) instead of just today-vs-yesterday. Drives the 7-day bar chart + KPI sparklines.
+
+**How to apply:** any new load/hours creation path must include `date: TODAY_ISO`. Any "today" filter is `db.loads.filter(l => isToday(l.date))` (or `l.date === TODAY_ISO`). Any "in range" filter is `db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso))`.
 
 ## `NOW_MIN` = 11*60 + 5
 
-Defined at `index.html:487`. The frozen "current time" used by `calcHours` when `clockOut` is null (live shifts). Don't use `new Date()` for shift-duration math — it makes the mockup non-deterministic. Always go through `calcHours(clockIn, breakMin, clockOut)`.
+The frozen "current time" used by `calcHours` when `clockOut` is null (live shifts). Don't use `new Date()` for shift-duration math — it makes the mockup non-deterministic. Always go through `calcHours(clockIn, breakMin, clockOut)`. Defined in the helpers section of `index.html` right after `TODAY_ISO`.
 
 ## Truck `type` codes
 
@@ -99,5 +107,4 @@ See [[jse-design-system]] for how each status maps to a color/pill.
 - **No `users` collection.** Driver/hauler/admin "identity" is just a UI shell selection.
 - **No auth.**
 - **No real timestamps** (other than `clockedInAt`/`pausedAt`/`pausedMs` on live shifts, used for the live ticker).
-- **No multi-day history.** "Today" and "yesterday" are the only two buckets. Don't add `'two-days-ago'` unless you also build the UI to filter it.
-- **Schema versioning is in place** (v4 as of the Operator → Hauler rename). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.
+- **Schema versioning is in place** (v5 as of the ISO-date migration). `DB_SCHEMA_VERSION` lives at the bottom of `index.html`; `hydrateDb` migrates forward (v1→v2 backfills load/hour dates, v2→v3 seeds `haulRequests`, v3→v4 renames the `operators` collection to `haulers` and the `operatorId` field to `haulerId` on trucks + invoices, v4→v5 converts load/hours `date` from `'today'`/`'yesterday'` labels to ISO date strings) and reseeds on a future-version payload. See [[jse-ship-a-feature]] § Persistence semantics.
