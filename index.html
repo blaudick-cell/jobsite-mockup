@@ -3332,6 +3332,76 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
   );
 }
 
+// =====================================================================
+// WizardShell — shared chrome for multi-step creation flows (projects,
+// haulers, drivers, trucks). Renders breadcrumb + eyebrow/title + step
+// indicator + child card + Cancel/Back/Next/Submit footer.
+// Scrolls to top whenever currentStep changes.
+//
+// Single-step wizards: pass steps={['Details']} (or similar) — the step
+// indicator hides itself and only Cancel + Submit show in the footer.
+// =====================================================================
+function WizardShell({
+  steps, currentStep, onCancel, onBack, onNext, onSubmit,
+  nextDisabled, submitDisabled, submitLabel = 'Create',
+  crumbs, eyebrow, title, children, navigate,
+}) {
+  useEffect(() => { window.scrollTo(0, 0); }, [currentStep]);
+  const total = steps.length;
+  const showSteps = total > 1;
+  const isLast = currentStep === total;
+
+  const StepDot = ({ n, label }) => {
+    const active = currentStep === n;
+    const done = currentStep > n;
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flex: 1, minWidth: 0 }}>
+        <div style={{
+          ...T.mono, width: 28, height: 28, borderRadius: '50%',
+          background: active ? C.accent : (done ? C.accentSoft : C.surfaceHi),
+          color: active ? C.bg : (done ? C.accent : C.inkDim),
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0,
+          border: active ? 'none' : `1px solid ${C.ruleHi}`,
+        }}>{n}</div>
+        <div style={{ ...T.monoSm, color: active ? C.ink : C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 880, margin: '0 auto' }}>
+      {crumbs && <Crumbs items={crumbs} navigate={navigate} />}
+      {(eyebrow || title) && (
+        <div style={{ marginBottom: S[5] }}>
+          {eyebrow && <Label color={C.accent} style={{ marginBottom: 6 }}>{eyebrow}</Label>}
+          {title && <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>{title}</h1>}
+        </div>
+      )}
+      {showSteps && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[5], flexWrap: 'wrap' }}>
+          {steps.map((s, i) => <StepDot key={i} n={i + 1} label={s} />)}
+        </div>
+      )}
+      <Card>{children}</Card>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
+        <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
+        <div style={{ display: 'flex', gap: S[2] }}>
+          {showSteps && <Btn variant="secondary" onClick={onBack} disabled={currentStep === 1}>Back</Btn>}
+          {showSteps && !isLast && (
+            <Btn variant="primary" onClick={onNext} disabled={nextDisabled}>Next</Btn>
+          )}
+          {(isLast || !showSteps) && (
+            <Btn variant="primary" size="lg" onClick={onSubmit} disabled={submitDisabled}>{submitLabel}</Btn>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Shared input style used across all admin wizards.
+const WIZARD_INPUT_STYLE = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 14px', borderRadius: R.sm, fontFamily: F.body, fontSize: 15, width: '100%', boxSizing: 'border-box' };
+
 function AdminNewProject({ db, setDb, navigate }) {
   const [step, setStep] = useState(1);
   const [basics, setBasics] = useState({ name: '', code: '', gc: '', address: '', startDate: '', status: 'active', materials: [] });
@@ -3340,9 +3410,7 @@ function AdminNewProject({ db, setDb, navigate }) {
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
 
-  useEffect(() => { window.scrollTo(0, 0); }, [step]);
-
-  const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 14px', borderRadius: R.sm, fontFamily: F.body, fontSize: 15, width: '100%', boxSizing: 'border-box' };
+  const inputStyle = WIZARD_INPUT_STYLE;
 
   const deriveCode = (name) => {
     const words = (name || '').trim().split(/\s+/).filter(Boolean);
@@ -3404,23 +3472,6 @@ function AdminNewProject({ db, setDb, navigate }) {
     navigate('/admin/p/' + id);
   };
 
-  const StepDot = ({ n, label }) => {
-    const active = step === n;
-    const done = step > n;
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flex: 1, minWidth: 0 }}>
-        <div style={{
-          ...T.mono, width: 28, height: 28, borderRadius: '50%',
-          background: active ? C.accent : (done ? C.accentSoft : C.surfaceHi),
-          color: active ? C.bg : (done ? C.accent : C.inkDim),
-          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0,
-          border: active ? 'none' : `1px solid ${C.ruleHi}`,
-        }}>{n}</div>
-        <div style={{ ...T.monoSm, color: active ? C.ink : C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
-      </div>
-    );
-  };
-
   const Chip = ({ active, onClick, children, warn }) => (
     <button onClick={onClick} style={{
       ...T.bodySm, background: active ? C.accent : 'transparent',
@@ -3431,22 +3482,25 @@ function AdminNewProject({ db, setDb, navigate }) {
     }}>{children}</button>
   );
 
+  const nextDisabled = (step === 1 && !basicsValid) || (step === 2 && !haulersValid) || (step === 3 && !trucksValid);
+  const allValid = basicsValid && haulersValid && trucksValid;
+
   return (
-    <div style={{ padding: S[6], maxWidth: 880, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Projects', to: '/admin' }, { label: 'New project' }]} navigate={navigate} />
-      <div style={{ marginBottom: S[5] }}>
-        <Label color={C.accent} style={{ marginBottom: 6 }}>New project</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>Create a new project</h1>
-      </div>
-
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[5], flexWrap: 'wrap' }}>
-        <StepDot n={1} label="Basics" />
-        <StepDot n={2} label="Haulers" />
-        <StepDot n={3} label="Trucks" />
-        <StepDot n={4} label="Review" />
-      </div>
-
-      <Card>
+    <WizardShell
+      navigate={navigate}
+      steps={['Basics', 'Haulers', 'Trucks', 'Review']}
+      currentStep={step}
+      onCancel={cancel}
+      onBack={back}
+      onNext={next}
+      onSubmit={submit}
+      nextDisabled={nextDisabled}
+      submitDisabled={!allValid}
+      submitLabel="Create project"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Projects', to: '/admin' }, { label: 'New project' }]}
+      eyebrow="New project"
+      title="Create a new project"
+    >
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
             <Label>Step 1 â€” Project basics</Label>
@@ -3654,21 +3708,412 @@ function AdminNewProject({ db, setDb, navigate }) {
             </div>
           </div>
         )}
-      </Card>
+    </WizardShell>
+  );
+}
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
-        <Btn variant="ghost" onClick={cancel}>Cancel</Btn>
-        <div style={{ display: 'flex', gap: S[2] }}>
-          <Btn variant="secondary" onClick={back} disabled={step === 1}>Back</Btn>
-          {step < 4 && (
-            <Btn variant="primary" onClick={next} disabled={(step === 1 && !basicsValid) || (step === 2 && !haulersValid) || (step === 3 && !trucksValid)}>Next</Btn>
+// =====================================================================
+// AdminNewHauler — 3-step wizard. /admin/haulers/new
+//   1. Details (name, email, phone, optional company)
+//   2. Assignments (multi-select active/upcoming projects, optional)
+//   3. Review + Create
+// On submit, creates a new hauler record with id 'op-xxxxx'.
+// =====================================================================
+function AdminNewHauler({ db, setDb, navigate }) {
+  const [step, setStep] = useState(1);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
+  const [company, setCompany] = useState('');
+  const [projectIds, setProjectIds] = useState([]);
+
+  const inputStyle = WIZARD_INPUT_STYLE;
+  const emailValid = /.+@.+\..+/.test(email.trim());
+  const detailsValid = !!name.trim() && emailValid && !!phone.trim();
+
+  const eligibleProjects = db.projects.filter(p => p.status === 'active' || p.status === 'upcoming');
+  const toggleProject = (pid) =>
+    setProjectIds(prev => prev.includes(pid) ? prev.filter(x => x !== pid) : [...prev, pid]);
+
+  const cancel = () => navigate('/admin/haulers');
+  const back   = () => setStep(s => Math.max(1, s - 1));
+  const next   = () => setStep(s => Math.min(3, s + 1));
+  const submit = () => {
+    const newId = 'op-' + Math.random().toString(36).substring(2, 7);
+    setDb(prev => ({
+      ...prev,
+      haulers: [...prev.haulers, {
+        id: newId,
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        projectIds,
+        ...(company.trim() ? { company: company.trim() } : {}),
+      }],
+    }));
+    navigate('/admin/haulers/' + newId);
+  };
+
+  const nextDisabled = step === 1 && !detailsValid;
+
+  return (
+    <WizardShell
+      navigate={navigate}
+      steps={['Details', 'Assignments', 'Review']}
+      currentStep={step}
+      onCancel={cancel}
+      onBack={back}
+      onNext={next}
+      onSubmit={submit}
+      nextDisabled={nextDisabled}
+      submitDisabled={!detailsValid}
+      submitLabel="Create hauler"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New hauler' }]}
+      eyebrow="New hauler"
+      title="Add a hauler to your network"
+    >
+      {step === 1 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          <Label>Step 1 — Contact details</Label>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Name</div>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Jane Smith" style={inputStyle} autoFocus />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Email</div>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="e.g., jane@haulco.com" style={inputStyle} />
+              {email && !emailValid && <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>Please enter a valid email.</div>}
+            </div>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Phone</div>
+              <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g., (303) 555-0150" style={inputStyle} />
+            </div>
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Company (optional)</div>
+            <input value={company} onChange={e => setCompany(e.target.value)} placeholder="e.g., Haulco Transport, LLC" style={inputStyle} />
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+          <Label>Step 2 — Assign to projects</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick the active or upcoming projects this hauler will run. You can change this later.</div>
+          {eligibleProjects.length === 0 ? (
+            <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No active or upcoming projects yet.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+              {eligibleProjects.map(p => {
+                const selected = projectIds.includes(p.id);
+                return (
+                  <div key={p.id} onClick={() => toggleProject(p.id)} style={{
+                    display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
+                    background: selected ? C.accentSoft : C.surfaceHi,
+                    border: `1px solid ${selected ? C.accent : C.ruleHi}`,
+                    borderRadius: R.md, cursor: 'pointer', flexWrap: 'wrap',
+                  }}>
+                    <div style={{
+                      ...T.body, width: 22, height: 22, borderRadius: 6,
+                      background: selected ? C.accent : 'transparent',
+                      border: `2px solid ${selected ? C.accent : C.ruleHi}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0,
+                    }}>{selected ? '✓' : ''}</div>
+                    <div style={{ flex: 1, minWidth: 140 }}>
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{p.name}</div>
+                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{p.gc} · {p.address}</div>
+                    </div>
+                    <StatusPill status={p.status || 'active'} />
+                  </div>
+                );
+              })}
+            </div>
           )}
-          {step === 4 && (
-            <Btn variant="primary" size="lg" onClick={submit} disabled={!basicsValid || !haulersValid || !trucksValid}>Create project</Btn>
+          <div style={{ ...T.caption }}>{projectIds.length} project{projectIds.length === 1 ? '' : 's'} selected</div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          <Label>Step 3 — Review</Label>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Contact</Label>
+            <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Name</div><div style={{ fontFamily: F.body, color: C.ink }}>{name}</div></div>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Email</div><div style={{ fontFamily: F.mono, color: C.ink }}>{email}</div></div>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Phone</div><div style={{ fontFamily: F.mono, color: C.ink }}>{phone}</div></div>
+              {company.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Company</div><div style={{ fontFamily: F.body, color: C.ink }}>{company}</div></div>}
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Projects ({projectIds.length})</Label>
+            {projectIds.length === 0 ? (
+              <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No projects assigned yet — you can assign them later.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                {projectIds.map(pid => {
+                  const p = db.projects.find(x => x.id === pid);
+                  return p ? (
+                    <div key={pid} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink, flex: 1 }}>{p.name}</div>
+                      <div style={{ ...T.monoSm, color: C.inkDim }}>{p.gc}</div>
+                      <StatusPill status={p.status || 'active'} />
+                    </div>
+                  ) : null;
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </WizardShell>
+  );
+}
+
+// =====================================================================
+// AdminNewDriver — single-step wizard. /admin/drivers/new
+// Fields: name (required), licenseNumber (optional), phone (required),
+// default truck (optional — assigns this driver to a currently-unassigned
+// truck on submit).
+// =====================================================================
+function AdminNewDriver({ db, setDb, navigate }) {
+  const [name, setName] = useState('');
+  const [licenseNumber, setLicenseNumber] = useState('');
+  const [phone, setPhone] = useState('');
+  const [defaultTruckId, setDefaultTruckId] = useState('');
+
+  const inputStyle = WIZARD_INPUT_STYLE;
+  const detailsValid = !!name.trim() && !!phone.trim();
+  const unassignedTrucks = db.trucks.filter(t => !t.driverId);
+
+  const cancel = () => navigate('/admin/haulers');
+  const submit = () => {
+    const newId = 'dr-' + Math.random().toString(36).substring(2, 7);
+    setDb(prev => ({
+      ...prev,
+      drivers: [...prev.drivers, {
+        id: newId,
+        name: name.trim(),
+        phone: phone.trim(),
+        ...(licenseNumber.trim() ? { licenseNumber: licenseNumber.trim() } : {}),
+      }],
+      trucks: defaultTruckId
+        ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: newId } : t)
+        : prev.trucks,
+    }));
+    // If a truck was selected, land on that truck's hauler page when known;
+    // otherwise return to the haulers list (no flat driver index exists).
+    if (defaultTruckId) {
+      const t = db.trucks.find(x => x.id === defaultTruckId);
+      if (t && t.haulerId) { navigate('/admin/haulers/' + t.haulerId); return; }
+    }
+    navigate('/admin/haulers');
+  };
+
+  return (
+    <WizardShell
+      navigate={navigate}
+      steps={['Details']}
+      currentStep={1}
+      onCancel={cancel}
+      onSubmit={submit}
+      submitDisabled={!detailsValid}
+      submitLabel="Create driver"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New driver' }]}
+      eyebrow="New driver"
+      title="Add a driver to your network"
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+        <Label>Driver details</Label>
+        <div>
+          <div style={{ ...T.caption, marginBottom: 4 }}>Name</div>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Jane Smith" style={inputStyle} autoFocus />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Phone</div>
+            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g., (303) 555-0150" style={inputStyle} />
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>License number (optional)</div>
+            <input value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} placeholder="e.g., CDL-A 12345678" style={{ ...inputStyle, fontFamily: F.mono }} />
+          </div>
+        </div>
+        <div>
+          <div style={{ ...T.caption, marginBottom: 4 }}>Default truck (optional)</div>
+          <select value={defaultTruckId} onChange={e => setDefaultTruckId(e.target.value)} style={inputStyle}>
+            <option value="">— Leave unassigned —</option>
+            {unassignedTrucks.map(t => {
+              const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
+              return <option key={t.id} value={t.id}>#{t.plate} · {typeLabel} · {t.hauler || 'Bench'}</option>;
+            })}
+          </select>
+          {unassignedTrucks.length === 0 && (
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>No trucks are currently unassigned. You can assign this driver to a truck later.</div>
           )}
         </div>
       </div>
-    </div>
+    </WizardShell>
+  );
+}
+
+// =====================================================================
+// AdminNewTruck — 3-step wizard. /admin/trucks/new
+//   1. Details (plate, type, hauler-company text, optional make/model/cap)
+//   2. Assignments (optional project + hauler from existing records)
+//   3. Review + Create
+// =====================================================================
+function AdminNewTruck({ db, setDb, navigate }) {
+  const [step, setStep] = useState(1);
+  const [plate, setPlate] = useState('');
+  const [type, setType] = useState(TRUCK_TYPES[0].code);
+  const [haulerCompany, setHaulerCompany] = useState('');
+  const [make, setMake] = useState('');
+  const [model, setModel] = useState('');
+  const [capacityCY, setCapacityCY] = useState('');
+  const [projectId, setProjectId] = useState('');
+  const [haulerId, setHaulerId] = useState('');
+
+  const inputStyle = WIZARD_INPUT_STYLE;
+  const detailsValid = !!plate.trim() && !!type;
+
+  const eligibleProjects = db.projects.filter(p => p.status === 'active' || p.status === 'upcoming');
+
+  const cancel = () => navigate('/admin/haulers');
+  const back   = () => setStep(s => Math.max(1, s - 1));
+  const next   = () => setStep(s => Math.min(3, s + 1));
+  const submit = () => {
+    const newId = 'tk-' + Math.random().toString(36).substring(2, 7);
+    const capNum = parseFloat(capacityCY);
+    setDb(prev => ({
+      ...prev,
+      trucks: [...prev.trucks, {
+        id: newId,
+        plate: plate.trim(),
+        type,
+        hauler: haulerCompany.trim() || 'Bench (unassigned)',
+        projectId: projectId || null,
+        haulerId: haulerId || null,
+        driverId: null,
+        ...(make.trim() ? { make: make.trim() } : {}),
+        ...(model.trim() ? { model: model.trim() } : {}),
+        ...(Number.isFinite(capNum) && capNum > 0 ? { capacityCY: capNum } : {}),
+      }],
+    }));
+    navigate(haulerId ? '/admin/haulers/' + haulerId : '/admin/haulers');
+  };
+
+  const nextDisabled = step === 1 && !detailsValid;
+
+  return (
+    <WizardShell
+      navigate={navigate}
+      steps={['Details', 'Assignments', 'Review']}
+      currentStep={step}
+      onCancel={cancel}
+      onBack={back}
+      onNext={next}
+      onSubmit={submit}
+      nextDisabled={nextDisabled}
+      submitDisabled={!detailsValid}
+      submitLabel="Create truck"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New truck' }]}
+      eyebrow="New truck"
+      title="Add a truck to your fleet"
+    >
+      {step === 1 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          <Label>Step 1 — Truck details</Label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Plate</div>
+              <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g., 447" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={5} autoFocus />
+            </div>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Type</div>
+              <select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>
+                {TRUCK_TYPES.map(tt => <option key={tt.code} value={tt.code}>{tt.label} · {tt.cap}</option>)}
+              </select>
+            </div>
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Hauler company (optional, free text)</div>
+            <input value={haulerCompany} onChange={e => setHaulerCompany(e.target.value)} placeholder="e.g., Oz Trucking" style={inputStyle} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Make (optional)</div>
+              <input value={make} onChange={e => setMake(e.target.value)} placeholder="e.g., Mack" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Model (optional)</div>
+              <input value={model} onChange={e => setModel(e.target.value)} placeholder="e.g., Granite" style={inputStyle} />
+            </div>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Capacity (CY, optional)</div>
+              <input type="number" inputMode="numeric" value={capacityCY} onChange={e => setCapacityCY(e.target.value)} placeholder="e.g., 22" style={{ ...inputStyle, fontFamily: F.mono }} />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          <Label>Step 2 — Assignments</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>Optional — pick a project and hauler for this truck. Leave either blank to keep the truck on the bench.</div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Project</div>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={inputStyle}>
+              <option value="">— Leave unassigned —</option>
+              {eligibleProjects.map(p => <option key={p.id} value={p.id}>{p.name} · {p.gc}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Hauler</div>
+            <select value={haulerId} onChange={e => setHaulerId(e.target.value)} style={inputStyle}>
+              <option value="">— Leave unassigned —</option>
+              {db.haulers.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {step === 3 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          <Label>Step 3 — Review</Label>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Truck</Label>
+            <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Plate</div><div style={{ fontFamily: F.mono, color: C.ink }}>#{plate}</div></div>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Type</div><div style={{ fontFamily: F.body, color: C.ink }}>{(TRUCK_TYPES.find(x => x.code === type) || {}).label || type}</div></div>
+              {haulerCompany.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Hauler co.</div><div style={{ fontFamily: F.body, color: C.ink }}>{haulerCompany}</div></div>}
+              {make.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Make</div><div style={{ fontFamily: F.body, color: C.ink }}>{make}</div></div>}
+              {model.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Model</div><div style={{ fontFamily: F.body, color: C.ink }}>{model}</div></div>}
+              {capacityCY && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Capacity</div><div style={{ fontFamily: F.mono, color: C.ink }}>{capacityCY} CY</div></div>}
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Assignments</Label>
+            <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
+              <div>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Project</div>
+                <div style={{ fontFamily: F.body, color: projectId ? C.ink : C.inkDim }}>
+                  {projectId ? (db.projects.find(p => p.id === projectId) || {}).name : 'Unassigned (bench)'}
+                </div>
+              </div>
+              <div>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Hauler</div>
+                <div style={{ fontFamily: F.body, color: haulerId ? C.ink : C.inkDim }}>
+                  {haulerId ? (db.haulers.find(o => o.id === haulerId) || {}).name : 'Unassigned'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </WizardShell>
   );
 }
 
@@ -4524,10 +4969,13 @@ function AdminHaulers({ db, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
-      <div style={{ marginBottom: S[5] }}>
-        <Label color={C.accent} style={{ marginBottom: 6 }}>Haulers</Label>
-        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Haulers</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
+        </div>
+        <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ New hauler</Btn>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
         {haulers.map(h => (
@@ -4597,7 +5045,11 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
             <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
           </div>
         </div>
-        <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
+        <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/drivers/new')}>+ New driver</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/trucks/new')}>+ New truck</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -4767,6 +5219,14 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; }}
             >{op.name}</button>
           ))}
+          <button onClick={() => go('/admin/haulers/new')} style={{
+            ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+            padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.accent,
+            fontFamily: F.display, fontWeight: 600,
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+          >+ Add hauler</button>
         </div>
       )}
     </nav>
@@ -4818,8 +5278,11 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
-          {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} navigate={navigate} />}
-          {parts.length === 3 && parts[1] === 'haulers' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
+          {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'trucks'  && parts[2] === 'new' && <AdminNewTruck  db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'drivers' && parts[2] === 'new' && <AdminNewDriver db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'haulers' && parts[2] !== 'new' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
           {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 5 && parts[3] === 'o' && <AdminHaulerProject projectId={parts[2]} haulerId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} haulerId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
