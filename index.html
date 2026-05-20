@@ -225,7 +225,7 @@
       }
     }
 
-    /* OperatorLogLoadForm row: 90px / 1fr / 1fr / 100px / auto.
+    /* HaulerLogLoadForm row: 90px / 1fr / 1fr / 100px / auto.
        Default grid override collapses it to 1-col on ≤600 (still acceptable — inputs stack).
        At 700px window we keep the grid but reflow it so it doesn't horizontally squeeze. */
     @media (max-width: 900px) and (min-width: 601px) {
@@ -403,7 +403,7 @@ const PROJECTS_SEED = [
   { id: 'AS', code: 'AS-09', name: 'Aurora Square',  gc: 'Heritage Builders',   address: '7700 E Iliff Ave, Aurora, CO',    startDate: '2026-08-01', status: 'upcoming',  material: ['CF','CR'] },
 ];
 
-const OPERATORS_SEED = [
+const HAULERS_SEED = [
   { id: 'op-001', name: 'Marcus Lane',         phone: '(303) 555-0142', email: 'marcus@lakehomes.co',     projectIds: ['WP'] },
   { id: 'op-002', name: 'Priya Sharma',        phone: '(303) 555-0188', email: 'priya@avere.co',          projectIds: ['GW','RR','CH'] },
   { id: 'op-003', name: 'Eli Brennan',         phone: '(303) 555-0114', email: 'eli@heritagebld.com',     projectIds: ['AS'] },
@@ -417,24 +417,24 @@ const OPERATORS_SEED = [
 ];
 
 const TRUCKS_SEED = [
-  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'RB Trucking',          projectId: 'WP', operatorId: 'op-001', driverId: 'dr-001' },
-  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'WP', operatorId: 'op-005', driverId: 'dr-002' },
-  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: '5 Angels Transport',   projectId: 'WP', operatorId: 'op-006', driverId: 'dr-003' },
-  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',            projectId: 'WP', operatorId: 'op-007', driverId: 'dr-004' },
-  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Mountain Aggregate',   projectId: 'GW', operatorId: 'op-002', driverId: 'dr-005' },
-  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Mountain Aggregate',   projectId: 'GW', operatorId: 'op-004', driverId: 'dr-006' },
-  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: '5 Angels Transport',   projectId: 'GW', operatorId: 'op-006', driverId: 'dr-007' },
-  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling',          projectId: 'GW', operatorId: 'op-008', driverId: 'dr-001' },
-  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', operatorId: 'op-002', driverId: 'dr-008' },
-  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', operatorId: 'op-002', driverId: 'dr-009' },
-  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'Apex Hauling',         projectId: 'AS', operatorId: 'op-003', driverId: 'dr-010' },
-  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',            projectId: 'AS', operatorId: 'op-007', driverId: 'dr-011' },
-  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'AS', operatorId: 'op-005', driverId: 'dr-008' },
-  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'Cordillera Hauling',   projectId: 'CH', operatorId: 'op-009', driverId: 'dr-013' },
-  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Front Range Logistics', projectId: 'CH', operatorId: 'op-010', driverId: 'dr-014' },
-  { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
-  { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
-  { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, operatorId: null,     driverId: null },
+  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'RB Trucking',          projectId: 'WP', haulerId: 'op-001', driverId: 'dr-001' },
+  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'WP', haulerId: 'op-005', driverId: 'dr-002' },
+  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: '5 Angels Transport',   projectId: 'WP', haulerId: 'op-006', driverId: 'dr-003' },
+  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',            projectId: 'WP', haulerId: 'op-007', driverId: 'dr-004' },
+  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Mountain Aggregate',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-005' },
+  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Mountain Aggregate',   projectId: 'GW', haulerId: 'op-004', driverId: 'dr-006' },
+  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: '5 Angels Transport',   projectId: 'GW', haulerId: 'op-006', driverId: 'dr-007' },
+  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling',          projectId: 'GW', haulerId: 'op-008', driverId: 'dr-001' },
+  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', haulerId: 'op-002', driverId: 'dr-008' },
+  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', haulerId: 'op-002', driverId: 'dr-009' },
+  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'Apex Hauling',         projectId: 'AS', haulerId: 'op-003', driverId: 'dr-010' },
+  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',            projectId: 'AS', haulerId: 'op-007', driverId: 'dr-011' },
+  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'AS', haulerId: 'op-005', driverId: 'dr-008' },
+  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'Cordillera Hauling',   projectId: 'CH', haulerId: 'op-009', driverId: 'dr-013' },
+  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Front Range Logistics', projectId: 'CH', haulerId: 'op-010', driverId: 'dr-014' },
+  { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
+  { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
+  { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
 ];
 
 const DRIVERS_SEED = [
@@ -473,13 +473,13 @@ const HAUL_REQUESTS_SEED = [
 ];
 
 const INVOICES_SEED = [
-  { id: 'inv-9001', operatorId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes', status: 'paid',
+  { id: 'inv-9001', haulerId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes', status: 'paid',
     lineItems: [
       { id: 'li-a1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega', hours: 42.5, rate: 115, amount: 4887.5 },
       { id: 'li-a2', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',    hours: 38.0, rate: 115, amount: 4370.0 },
       { id: 'li-a3', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski', hours: 41.0, rate: 135, amount: 5535.0 },
     ], loadCount: 184, totalCY: 2760, notes: 'Includes Saturday work on 5/3.' },
-  { id: 'inv-9002', operatorId: 'op-002', projectId: 'GW', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction', status: 'sent',
+  { id: 'inv-9002', haulerId: 'op-002', projectId: 'GW', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction', status: 'sent',
     lineItems: [
       { id: 'li-b1', truckPlate: '301', truckType: 'TAN',  driverName: 'A. Reyes', hours: 36.0, rate: 95,  amount: 3420.0 },
       { id: 'li-b2', truckPlate: '318', truckType: 'SD',  driverName: 'T. Hall',  hours: 39.5, rate: 115, amount: 4542.5 },
@@ -613,12 +613,12 @@ const fmtMoney = (n) => '$' + n.toLocaleString('en-US', { maximumFractionDigits:
 // Hash router
 // =====================================================================
 function useHash() {
-  // Read + normalize. `#/hauler/...` is an alias for `#/operator/...` since the
-  // role was renamed from "Operator" to "Hauler" — old links keep working.
+  // Read + normalize. Canonical route is `#/hauler/...`; the legacy `#/operator/...`
+  // alias is rewritten so old shared links keep working after the v4 rename.
   const read = () => {
     let h = window.location.hash.replace(/^#/, '') || '/';
-    if (h === '/hauler' || h.startsWith('/hauler/')) {
-      h = '/operator' + h.slice('/hauler'.length);
+    if (h === '/operator' || h.startsWith('/operator/')) {
+      h = '/hauler' + h.slice('/operator'.length);
     }
     return h;
   };
@@ -912,7 +912,7 @@ function AdminIcon({ size = 28 }) {
     </svg>
   );
 }
-function OperatorIcon({ size = 28 }) {
+function HaulerIcon({ size = 28 }) {
   // Clipboard with rows — "oversight / roster"
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -1029,12 +1029,12 @@ function Landing({ navigate }) {
   };
   const cards = [
     { role: 'Admin',    to: '/admin',    blurb: 'Create projects, assign teams, and watch organization-wide KPIs.',           Icon: AdminIcon },
-    { role: 'Hauler',   to: '/operator', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: OperatorIcon },
+    { role: 'Hauler',   to: '/hauler', blurb: "Manage your projects, your trucks, and your team's day.",                    Icon: HaulerIcon },
     { role: 'Driver',   to: '/driver',   blurb: 'Clock in, log loads, and see your assignments at a glance.',                  Icon: DriverIcon },
   ];
   const audience = [
     { Icon: AdminIcon,    title: 'Project managers',         body: 'Spin up a project, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
-    { Icon: OperatorIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen — drill into any shift in two taps." },
+    { Icon: HaulerIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen — drill into any shift in two taps." },
     { Icon: DriverIcon,   title: 'Drivers & equipment ops',  body: 'Clock in, log loads, and know your assignments from your phone. Mobile-first, field-ready.' },
   ];
   const steps = [
@@ -1113,7 +1113,7 @@ function Landing({ navigate }) {
                   <path d="M14 10 L14 18 M10 12 L18 12 M10 16 L18 16" />
                 </g>
               </g>
-              {/* Hex node — Operator (top-right) */}
+              {/* Hex node — Hauler (top-right) */}
               <g>
                 <path d="M280 50 L315 70 L315 110 L280 130 L245 110 L245 70 Z" fill={C.bg} />
                 <g transform="translate(266 76)" strokeWidth="1.5">
@@ -1293,7 +1293,7 @@ function Landing({ navigate }) {
 function AdminProjects({ db, setDb, navigate }) {
   const updateProject = (id, patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === id ? { ...p, ...patch } : p) }));
   const projects = db.projects.map(p => {
-    const ops = db.operators.filter(o => o.projectIds.includes(p.id));
+    const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
     const trucks = db.trucks.filter(t => t.projectId === p.id);
     const trucksActive = trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
     const totalLoads = db.loads.filter(l => l.projectId === p.id && l.status === 'approved').length;
@@ -1437,14 +1437,14 @@ function AdminProject({ projectId, db, setDb, navigate }) {
   const [showAdd, setShowAdd] = useState(false);
   const project = db.projects.find(p => p.id === projectId);
   if (!project) return <NotFound navigate={navigate} />;
-  const operators = db.operators.filter(o => o.projectIds.includes(projectId));
+  const haulers = db.haulers.filter(o => o.projectIds.includes(projectId));
   const trucks = db.trucks.filter(t => t.projectId === projectId);
   const hours = db.hours.filter(h => h.projectId === projectId);
   const loads = db.loads.filter(l => l.projectId === projectId);
   const updateProject = (patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === project.id ? { ...p, ...patch } : p) }));
-  const addOperator = (form) => {
+  const addHauler = (form) => {
     const id = 'op-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, operators: [...prev.operators, { id, ...form, projectIds: [projectId] }] }));
+    setDb(prev => ({ ...prev, haulers: [...prev.haulers, { id, ...form, projectIds: [projectId] }] }));
     setShowAdd(false);
   };
 
@@ -1476,7 +1476,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
         </div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Haulers" value={operators.length} /></Card>
+        <Card padding={S[4]}><Stat label="Haulers" value={haulers.length} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} assigned`} /></Card>
         <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0))} /></Card>
@@ -1486,8 +1486,8 @@ function AdminProject({ projectId, db, setDb, navigate }) {
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><Th>Hauler</Th><Th>Contact</Th><Th align="right">Trucks managed</Th><Th align="right">Active now</Th><Th align="right">Total hours</Th><Th></Th></tr></thead>
           <tbody>
-            {operators.map(op => {
-              const opTrucks = trucks.filter(t => t.operatorId === op.id);
+            {haulers.map(op => {
+              const opTrucks = trucks.filter(t => t.haulerId === op.id);
               const opTruckIds = new Set(opTrucks.map(t => t.id));
               const opActive = opTrucks.filter(t => t.driverId && hours.some(h => h.truckId === t.id && h.status === 'open')).length;
               const opHours = hours.filter(h => opTruckIds.has(h.truckId)).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
@@ -1518,12 +1518,12 @@ function AdminProject({ projectId, db, setDb, navigate }) {
           </tbody>
         </table>
       </Card>
-      {showAdd && <AddOperatorForm onAdd={addOperator} onCancel={() => setShowAdd(false)} />}
+      {showAdd && <AddHaulerForm onAdd={addHauler} onCancel={() => setShowAdd(false)} />}
     </div>
   );
 }
 
-function AddOperatorForm({ onAdd, onCancel }) {
+function AddHaulerForm({ onAdd, onCancel }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
@@ -1544,21 +1544,21 @@ function AddOperatorForm({ onAdd, onCancel }) {
   );
 }
 
-function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
+function AdminHaulerProject({ projectId, haulerId, db, setDb, navigate }) {
   const [showAdd, setShowAdd] = useState(false);
   const project = db.projects.find(p => p.id === projectId);
-  const operator = db.operators.find(o => o.id === operatorId);
-  if (!project || !operator) return <NotFound navigate={navigate} />;
-  const trucks = db.trucks.filter(t => t.projectId === projectId && t.operatorId === operatorId);
+  const hauler = db.haulers.find(o => o.id === haulerId);
+  if (!project || !hauler) return <NotFound navigate={navigate} />;
+  const trucks = db.trucks.filter(t => t.projectId === projectId && t.haulerId === haulerId);
   const truckIds = new Set(trucks.map(t => t.id));
   const hours = db.hours.filter(h => h.projectId === projectId && truckIds.has(h.truckId));
   const loads = db.loads.filter(l => l.projectId === projectId && truckIds.has(l.truckId));
-  const updateOperator = (patch) => setDb(prev => ({ ...prev, operators: prev.operators.map(o => o.id === operator.id ? { ...o, ...patch } : o) }));
+  const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
   const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
   const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
   const addTruck = (form) => {
     const id = 'tk-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, operatorId, driverId: null }] }));
+    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId, driverId: null }] }));
     setShowAdd(false);
   };
   const typeOptions = TRUCK_TYPES.map(t => ({ value: t.code, label: t.label }));
@@ -1573,23 +1573,23 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: project.name, to: `/admin/p/${projectId}` }, { label: operator.name }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: project.name, to: `/admin/p/${projectId}` }, { label: hauler.name }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
-        <Avatar name={operator.name} size={56} color={C.accent} />
+        <Avatar name={hauler.name} size={56} color={C.accent} />
         <div style={{ flex: 1 }}>
           <Label color={C.accent}>Hauler on {project.name}</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
-            <EditableText value={operator.name} onSave={(v) => updateOperator({ name: v })} />
+            <EditableText value={hauler.name} onSave={(v) => updateHauler({ name: v })} />
           </h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            <EditableText value={operator.phone} onSave={(v) => updateOperator({ phone: v })} mono /> ·{' '}
-            <EditableText value={operator.email} onSave={(v) => updateOperator({ email: v })} mono />
+            <EditableText value={hauler.phone} onSave={(v) => updateHauler({ phone: v })} mono /> ·{' '}
+            <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
           </div>
         </div>
         <Btn variant="secondary" size="sm">Message</Btn>
       </div>
 
-      {/* Operator KPIs */}
+      {/* Hauler KPIs */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
         <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${pendingLoads} pending`} /></Card>
@@ -1615,7 +1615,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
               const rate = db.rates[t.type];
               const revenue = truckHours * rate;
               return (
-                <Tr key={t.id} onClick={() => navigate(`/admin/p/${projectId}/o/${operatorId}/t/${t.id}`)}>
+                <Tr key={t.id} onClick={() => navigate(`/admin/p/${projectId}/o/${haulerId}/t/${t.id}`)}>
                   <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
                   <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={typeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
                   <Td align="right" mono>$<EditableText value={String(rate || 0)} onSave={(v) => updateRate(t.type, v)} mono />/hr</Td>
@@ -1642,23 +1642,23 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
       {/* Approvals */}
       {(pendingLoads + pendingHrs > 0) && (
         <div style={{ marginTop: S[7] }}>
-          <OperatorApprovals projectId={projectId} hours={hours} loads={loads} db={db} setDb={setDb} />
+          <HaulerApprovals projectId={projectId} hours={hours} loads={loads} db={db} setDb={setDb} />
         </div>
       )}
 
       {/* Invoices */}
       <div style={{ marginTop: S[7] }}>
-        <OperatorInvoices operator={operator} projectId={projectId} project={project} trucks={trucks} hours={hours} db={db} setDb={setDb} />
+        <HaulerInvoices hauler={hauler} projectId={projectId} project={project} trucks={trucks} hours={hours} db={db} setDb={setDb} />
       </div>
     </div>
   );
 }
 
-function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
+function AdminTruck({ projectId, haulerId, truckId, db, setDb, navigate }) {
   const project = db.projects.find(p => p.id === projectId);
-  const operator = db.operators.find(o => o.id === operatorId);
+  const hauler = db.haulers.find(o => o.id === haulerId);
   const truck = db.trucks.find(t => t.id === truckId);
-  if (!project || !operator || !truck) return <NotFound navigate={navigate} />;
+  if (!project || !hauler || !truck) return <NotFound navigate={navigate} />;
   const driver = db.drivers.find(d => d.id === truck.driverId);
   const hr = db.hours.find(h => h.truckId === truckId);
   const truckLoads = db.loads.filter(l => l.truckId === truckId).sort((a, b) => a.time.localeCompare(b.time));
@@ -1693,7 +1693,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
       <Crumbs items={[
         { label: 'Admin', to: '/admin' },
         { label: project.name, to: `/admin/p/${projectId}` },
-        { label: operator.name, to: `/admin/p/${projectId}/o/${operatorId}` },
+        { label: hauler.name, to: `/admin/p/${projectId}/o/${haulerId}` },
         { label: `Truck #${truck.plate}` },
       ]} navigate={navigate} />
 
@@ -1853,9 +1853,9 @@ function NotFound({ navigate }) {
 // =====================================================================
 // OPERATOR
 // =====================================================================
-function OperatorLanding({ db, navigate }) {
-  const ops = db.operators.map(op => {
-    const trucks = db.trucks.filter(t => t.operatorId === op.id);
+function HaulerLanding({ db, navigate }) {
+  const ops = db.haulers.map(op => {
+    const trucks = db.trucks.filter(t => t.haulerId === op.id);
     return { ...op, trucks, projectCount: op.projectIds.length };
   });
   return (
@@ -1870,7 +1870,7 @@ function OperatorLanding({ db, navigate }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
         {ops.map(op => (
-          <button key={op.id} onClick={() => navigate(`/operator/o/${op.id}`)} style={{
+          <button key={op.id} onClick={() => navigate(`/hauler/o/${op.id}`)} style={{
             textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
             padding: S[5], cursor: 'pointer', color: C.ink,
           }}
@@ -1901,11 +1901,11 @@ function OperatorLanding({ db, navigate }) {
   );
 }
 
-function OperatorHome({ operatorId, db, navigate }) {
-  const op = db.operators.find(o => o.id === operatorId);
+function HaulerHome({ haulerId, db, navigate }) {
+  const op = db.haulers.find(o => o.id === haulerId);
   if (!op) return <NotFound navigate={navigate} />;
   const projects = db.projects.filter(p => op.projectIds.includes(p.id));
-  const myTrucks = db.trucks.filter(t => t.operatorId === op.id);
+  const myTrucks = db.trucks.filter(t => t.haulerId === op.id);
   const myTruckIds = new Set(myTrucks.map(t => t.id));
   const myLoads = db.loads.filter(l => myTruckIds.has(l.truckId));
   const myHours = db.hours.filter(h => myTruckIds.has(h.truckId));
@@ -1916,7 +1916,7 @@ function OperatorHome({ operatorId, db, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Hauler', to: '/operator' },
+        { label: 'Hauler', to: '/hauler' },
         { label: op.name },
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
@@ -1963,7 +1963,7 @@ function OperatorHome({ operatorId, db, navigate }) {
             const pTotalHours = pHours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
             const pPending = pLoads.filter(l => l.status === 'pending').length;
             return (
-              <button key={p.id} onClick={() => navigate(`/operator/o/${operatorId}/p/${p.id}`)} style={{
+              <button key={p.id} onClick={() => navigate(`/hauler/o/${haulerId}/p/${p.id}`)} style={{
                 textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
                 padding: S[5], cursor: 'pointer', color: C.ink,
               }}
@@ -1993,11 +1993,11 @@ function OperatorHome({ operatorId, db, navigate }) {
   );
 }
 
-function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
-  const op = db.operators.find(o => o.id === operatorId);
+function HaulerProject({ haulerId, projectId, db, setDb, navigate }) {
+  const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   if (!op || !project) return <NotFound navigate={navigate} />;
-  const trucks = db.trucks.filter(t => t.projectId === projectId && t.operatorId === operatorId);
+  const trucks = db.trucks.filter(t => t.projectId === projectId && t.haulerId === haulerId);
   const truckIds = new Set(trucks.map(t => t.id));
   const hours = db.hours.filter(h => truckIds.has(h.truckId));
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
@@ -2009,8 +2009,8 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Hauler', to: '/operator' },
-        { label: op.name, to: `/operator/o/${operatorId}` },
+        { label: 'Hauler', to: '/hauler' },
+        { label: op.name, to: `/hauler/o/${haulerId}` },
         { label: project.name },
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
@@ -2049,7 +2049,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
               const truckCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
               const truckHours = hours.filter(h => h.truckId === t.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
               return (
-                <Tr key={t.id} onClick={() => navigate(`/operator/o/${operatorId}/p/${projectId}/t/${t.id}`)}>
+                <Tr key={t.id} onClick={() => navigate(`/hauler/o/${haulerId}/p/${projectId}/t/${t.id}`)}>
                   <Td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
                       <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{t.plate}</span>
@@ -2074,8 +2074,8 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
   );
 }
 
-function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate }) {
-  const op = db.operators.find(o => o.id === operatorId);
+function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate }) {
+  const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   const truck = db.trucks.find(t => t.id === truckId);
   if (!op || !project || !truck) return <NotFound navigate={navigate} />;
@@ -2090,9 +2090,9 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Hauler', to: '/operator' },
-        { label: op.name, to: `/operator/o/${operatorId}` },
-        { label: project.name, to: `/operator/o/${operatorId}/p/${projectId}` },
+        { label: 'Hauler', to: '/hauler' },
+        { label: op.name, to: `/hauler/o/${haulerId}` },
+        { label: project.name, to: `/hauler/o/${haulerId}/p/${projectId}` },
         { label: `Truck #${truck.plate}` },
       ]} navigate={navigate} />
 
@@ -2182,12 +2182,12 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
         </table>
       </Card>
 
-      <OperatorLogLoadForm truck={truck} driver={driver} project={project} db={db} setDb={setDb} />
+      <HaulerLogLoadForm truck={truck} driver={driver} project={project} db={db} setDb={setDb} />
     </div>
   );
 }
 
-function OperatorLogLoadForm({ truck, driver, project, db, setDb }) {
+function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
   const defaultMat = (project && project.material && project.material[0]) || 'CF';
   const [material, setMaterial] = useState(defaultMat);
   const [cy, setCy] = useState('');
@@ -2257,11 +2257,11 @@ function OperatorLogLoadForm({ truck, driver, project, db, setDb }) {
   );
 }
 
-function OperatorTrucks({ projectId, opId, trucks, db, setDb }) {
+function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
   const [showAdd, setShowAdd] = useState(false);
   const addTruck = (form) => {
     const id = 'tk-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, operatorId: opId, driverId: null }] }));
+    setDb(prev => ({ ...prev, trucks: [...prev.trucks, { id, ...form, projectId, haulerId: opId, driverId: null }] }));
     setShowAdd(false);
   };
   const removeTruck = (id) => {
@@ -2329,7 +2329,7 @@ function AddTruckForm({ onAdd, onCancel }) {
   );
 }
 
-function OperatorDrivers({ projectId, trucks, db, setDb }) {
+function HaulerDrivers({ projectId, trucks, db, setDb }) {
   const assignedIds = new Set(trucks.filter(t => t.driverId).map(t => t.driverId));
   const available = db.drivers.filter(d => !assignedIds.has(d.id));
   const assign = (truckId, driverId) => {
@@ -2389,7 +2389,7 @@ function OperatorDrivers({ projectId, trucks, db, setDb }) {
   );
 }
 
-function OperatorApprovals({ projectId, hours, loads, db, setDb }) {
+function HaulerApprovals({ projectId, hours, loads, db, setDb }) {
   const pendingLoads = loads.filter(l => l.status === 'pending');
   const pendingHrs = hours.filter(h => h.status === 'pending');
   const updateLoad = (id, patch) => setDb(prev => ({ ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, ...patch } : l) }));
@@ -2467,9 +2467,9 @@ function OperatorApprovals({ projectId, hours, loads, db, setDb }) {
   );
 }
 
-function OperatorInvoices({ operator, projectId, project, trucks, hours, db, setDb }) {
+function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }) {
   const [showDraft, setShowDraft] = useState(false);
-  const invoices = (db.invoices || []).filter(i => i.operatorId === operator.id && i.projectId === projectId);
+  const invoices = (db.invoices || []).filter(i => i.haulerId === hauler.id && i.projectId === projectId);
 
   const buildDraft = () => {
     const today = new Date().toISOString().slice(0, 10);
@@ -2488,7 +2488,7 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
     const totalCY = db.loads.filter(l => l.projectId === projectId && l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
     return {
       id: 'inv-' + Date.now(),
-      operatorId: operator.id, projectId,
+      haulerId: hauler.id, projectId,
       number: 'INV-' + String(Math.floor(Math.random() * 9000) + 1000),
       periodStart: today, periodEnd: today,
       issuedDate: today,
@@ -2544,7 +2544,7 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
               <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>
                 <EditableText value={draft.billTo} onSave={(v) => updateDraft({ billTo: v })} />
               </div>
-              <div style={{ ...T.caption, marginTop: 2 }}>From {operator.name}</div>
+              <div style={{ ...T.caption, marginTop: 2 }}>From {hauler.name}</div>
             </div>
           </div>
 
@@ -3221,7 +3221,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
 function AdminNewProject({ db, setDb, navigate }) {
   const [step, setStep] = useState(1);
   const [basics, setBasics] = useState({ name: '', code: '', gc: '', address: '', startDate: '', status: 'active', materials: [] });
-  const [operatorIds, setOperatorIds] = useState([]);
+  const [haulerIds, setHaulerIds] = useState([]);
   const [trucks, setTrucks] = useState([]);
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
   const [codeTouched, setCodeTouched] = useState(false);
@@ -3244,23 +3244,23 @@ function AdminNewProject({ db, setDb, navigate }) {
   const codeValid = effectiveCode.length >= 2 && effectiveCode.length <= 4 && !codeDuplicate;
 
   const basicsValid = !!basics.name.trim() && codeValid && !!basics.gc.trim() && !!basics.address.trim() && !!basics.startDate && basics.materials.length > 0;
-  const operatorsValid = operatorIds.length > 0;
-  const trucksValid = trucks.every(t => t.operatorId && operatorIds.includes(t.operatorId));
+  const haulersValid = haulerIds.length > 0;
+  const trucksValid = trucks.every(t => t.haulerId && haulerIds.includes(t.haulerId));
 
   const toggleMaterial = (mcode) => setBasics(b => ({ ...b, materials: b.materials.includes(mcode) ? b.materials.filter(x => x !== mcode) : [...b.materials, mcode] }));
-  const toggleOperator = (opId) => {
-    const wasSelected = operatorIds.includes(opId);
-    setOperatorIds(prev => wasSelected ? prev.filter(x => x !== opId) : [...prev, opId]);
-    if (wasSelected) setTrucks(prev => prev.map(t => t.operatorId === opId ? { ...t, operatorId: '' } : t));
+  const toggleHauler = (opId) => {
+    const wasSelected = haulerIds.includes(opId);
+    setHaulerIds(prev => wasSelected ? prev.filter(x => x !== opId) : [...prev, opId]);
+    if (wasSelected) setTrucks(prev => prev.map(t => t.haulerId === opId ? { ...t, haulerId: '' } : t));
   };
   const toggleTruck = (truckId, defaultOpId) => {
     setTrucks(prev => {
       const exists = prev.find(t => t.truckId === truckId);
       if (exists) return prev.filter(t => t.truckId !== truckId);
-      return [...prev, { truckId, operatorId: defaultOpId || '' }];
+      return [...prev, { truckId, haulerId: defaultOpId || '' }];
     });
   };
-  const setTruckOperator = (truckId, opId) => setTrucks(prev => prev.map(t => t.truckId === truckId ? { ...t, operatorId: opId } : t));
+  const setTruckHauler = (truckId, opId) => setTrucks(prev => prev.map(t => t.truckId === truckId ? { ...t, haulerId: opId } : t));
 
   const cancel = () => navigate('/admin');
   const back = () => setStep(s => Math.max(1, s - 1));
@@ -3281,10 +3281,10 @@ function AdminNewProject({ db, setDb, navigate }) {
     setDb(prev => ({
       ...prev,
       projects: [...prev.projects, newProject],
-      operators: prev.operators.map(o => operatorIds.includes(o.id) ? { ...o, projectIds: [...o.projectIds, id] } : o),
+      haulers: prev.haulers.map(o => haulerIds.includes(o.id) ? { ...o, projectIds: [...o.projectIds, id] } : o),
       trucks: prev.trucks.map(t => {
         const sel = trucks.find(x => x.truckId === t.id);
-        return sel ? { ...t, projectId: id, operatorId: sel.operatorId } : t;
+        return sel ? { ...t, projectId: id, haulerId: sel.haulerId } : t;
       }),
     }));
     navigate('/admin/p/' + id);
@@ -3393,11 +3393,11 @@ function AdminNewProject({ db, setDb, navigate }) {
             <Label>Step 2 — Assign haulers</Label>
             <div style={{ ...T.bodySm, color: C.inkDim }}>Pick the haulers who will run this project. You'll assign trucks to them in the next step.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-              {db.operators.map(op => {
-                const selected = operatorIds.includes(op.id);
-                const trucksManaged = db.trucks.filter(t => t.operatorId === op.id).length;
+              {db.haulers.map(op => {
+                const selected = haulerIds.includes(op.id);
+                const trucksManaged = db.trucks.filter(t => t.haulerId === op.id).length;
                 return (
-                  <div key={op.id} onClick={() => toggleOperator(op.id)} style={{
+                  <div key={op.id} onClick={() => toggleHauler(op.id)} style={{
                     display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
                     background: selected ? C.accentSoft : C.surfaceHi,
                     border: `1px solid ${selected ? C.accent : C.ruleHi}`,
@@ -3422,7 +3422,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                 );
               })}
             </div>
-            <div style={{ ...T.caption }}>{operatorIds.length} hauler{operatorIds.length === 1 ? '' : 's'} selected</div>
+            <div style={{ ...T.caption }}>{haulerIds.length} hauler{haulerIds.length === 1 ? '' : 's'} selected</div>
           </div>
         )}
 
@@ -3438,7 +3438,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                 const sel = trucks.find(x => x.truckId === t.id);
                 const selected = !!sel;
                 const currentProj = t.projectId ? db.projects.find(p => p.id === t.projectId) : null;
-                const currentOp = t.operatorId ? db.operators.find(o => o.id === t.operatorId) : null;
+                const currentOp = t.haulerId ? db.haulers.find(o => o.id === t.haulerId) : null;
                 const reassign = !!t.projectId;
                 const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
                 return (
@@ -3463,10 +3463,10 @@ function AdminNewProject({ db, setDb, navigate }) {
                     </div>
                     {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
                     {selected && (
-                      <select value={sel.operatorId} onChange={e => setTruckOperator(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
+                      <select value={sel.haulerId} onChange={e => setTruckHauler(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
                         <option value="">Pick a hauler…</option>
-                        {operatorIds.map(opId => {
-                          const op = db.operators.find(o => o.id === opId);
+                        {haulerIds.map(opId => {
+                          const op = db.haulers.find(o => o.id === opId);
                           return op ? <option key={opId} value={opId}>{op.name}</option> : null;
                         })}
                       </select>
@@ -3502,10 +3502,10 @@ function AdminNewProject({ db, setDb, navigate }) {
               </div>
             </div>
             <div>
-              <Label style={{ marginBottom: S[2] }}>Haulers ({operatorIds.length})</Label>
+              <Label style={{ marginBottom: S[2] }}>Haulers ({haulerIds.length})</Label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-                {operatorIds.map(opId => {
-                  const op = db.operators.find(o => o.id === opId);
+                {haulerIds.map(opId => {
+                  const op = db.haulers.find(o => o.id === opId);
                   return op ? (
                     <div key={opId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>
                       <Avatar name={op.name} color={C.accent} />
@@ -3524,7 +3524,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
                   {trucks.map(sel => {
                     const t = db.trucks.find(x => x.id === sel.truckId);
-                    const op = db.operators.find(o => o.id === sel.operatorId);
+                    const op = db.haulers.find(o => o.id === sel.haulerId);
                     const typeLabel = t ? ((TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type) : '?';
                     return t ? (
                       <div key={sel.truckId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3], flexWrap: 'wrap' }}>
@@ -3547,10 +3547,10 @@ function AdminNewProject({ db, setDb, navigate }) {
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="secondary" onClick={back} disabled={step === 1}>Back</Btn>
           {step < 4 && (
-            <Btn variant="primary" onClick={next} disabled={(step === 1 && !basicsValid) || (step === 2 && !operatorsValid) || (step === 3 && !trucksValid)}>Next</Btn>
+            <Btn variant="primary" onClick={next} disabled={(step === 1 && !basicsValid) || (step === 2 && !haulersValid) || (step === 3 && !trucksValid)}>Next</Btn>
           )}
           {step === 4 && (
-            <Btn variant="primary" size="lg" onClick={submit} disabled={!basicsValid || !operatorsValid || !trucksValid}>Create project</Btn>
+            <Btn variant="primary" size="lg" onClick={submit} disabled={!basicsValid || !haulersValid || !trucksValid}>Create project</Btn>
           )}
         </div>
       </div>
@@ -3575,10 +3575,10 @@ function AdminReports({ db, navigate }) {
   const activeProjects = db.projects.filter(p => p.status === 'active');
   const openShifts = db.hours.filter(h => h.status === 'open');
   const onShiftNow = openShifts.length;
-  const distinctOperatorsOnShift = new Set(
+  const distinctHaulersOnShift = new Set(
     openShifts.map(h => {
       const t = db.trucks.find(t => t.id === h.truckId);
-      return t ? t.operatorId : null;
+      return t ? t.haulerId : null;
     }).filter(Boolean)
   ).size;
 
@@ -3603,7 +3603,7 @@ function AdminReports({ db, navigate }) {
 
   // ----- Project status rows -----
   const projectRows = db.projects.map(p => {
-    const ops = db.operators.filter(o => o.projectIds.includes(p.id));
+    const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
     const trucks = db.trucks.filter(t => t.projectId === p.id);
     const pLoadsToday = db.loads.filter(l => l.projectId === p.id && l.date === 'today');
     const pLoadsYesterday = db.loads.filter(l => l.projectId === p.id && l.date === 'yesterday').length;
@@ -3612,7 +3612,7 @@ function AdminReports({ db, navigate }) {
       id: p.id,
       name: p.name,
       status: p.status || 'active',
-      operators: ops.length,
+      haulers: ops.length,
       trucks: trucks.length,
       loadsToday: pLoadsToday.length,
       loadsYesterday: pLoadsYesterday,
@@ -3655,9 +3655,9 @@ function AdminReports({ db, navigate }) {
     completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
   };
 
-  // ----- Operator productivity -----
-  const operatorRows = db.operators.map(op => {
-    const opTrucks = db.trucks.filter(t => t.operatorId === op.id);
+  // ----- Hauler productivity -----
+  const haulerRows = db.haulers.map(op => {
+    const opTrucks = db.trucks.filter(t => t.haulerId === op.id);
     const opTruckIds = new Set(opTrucks.map(t => t.id));
     const ldsToday = db.loads.filter(l => l.date === 'today' && opTruckIds.has(l.truckId)).length;
     const hrsToday = db.hours
@@ -3730,7 +3730,7 @@ function AdminReports({ db, navigate }) {
           <Stat
             label="On shift now"
             value={onShiftNow}
-            sub={`${distinctOperatorsOnShift} hauler${distinctOperatorsOnShift === 1 ? '' : 's'}`}
+            sub={`${distinctHaulersOnShift} hauler${distinctHaulersOnShift === 1 ? '' : 's'}`}
           />
         </Card>
         <Card padding={S[4]}>
@@ -3784,7 +3784,7 @@ function AdminReports({ db, navigate }) {
             <tr>
               <SortTh label="Project" k="name" />
               <SortTh label="Status" k="status" />
-              <SortTh label="Haulers" k="operators" align="right" />
+              <SortTh label="Haulers" k="haulers" align="right" />
               <SortTh label="Trucks" k="trucks" align="right" />
               <SortTh label="Loads today" k="loadsToday" align="right" />
               <SortTh label="Loads yesterday" k="loadsYesterday" align="right" />
@@ -3798,7 +3798,7 @@ function AdminReports({ db, navigate }) {
                 <Tr key={r.id} onClick={() => navigate(`/admin/p/${r.id}`)}>
                   <Td><span style={{ fontWeight: 600 }}>{r.name}</span></Td>
                   <Td><Pill color={sc.color} soft={sc.soft}>{sc.label}</Pill></Td>
-                  <Td align="right" mono>{r.operators}</Td>
+                  <Td align="right" mono>{r.haulers}</Td>
                   <Td align="right" mono>{r.trucks}</Td>
                   <Td align="right" mono style={{ fontWeight: 600 }}>{r.loadsToday}</Td>
                   <Td align="right" mono dim>{r.loadsYesterday}</Td>
@@ -3814,18 +3814,18 @@ function AdminReports({ db, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.accent}>Top haulers today</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ ...T.monoSm, color: C.inkDim }}>{operatorRows.length} of {db.operators.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{haulerRows.length} of {db.haulers.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
-        {operatorRows.length === 0 ? (
+        {haulerRows.length === 0 ? (
           <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No haulers on the roster yet.</div>
         ) : (
           <div>
-            {operatorRows.map((op, i) => (
+            {haulerRows.map((op, i) => (
               <div key={op.id} style={{
                 display: 'flex', alignItems: 'center', gap: S[4],
                 padding: `${S[3]}px ${S[4]}px`,
-                borderBottom: i < operatorRows.length - 1 ? `1px solid ${C.rule}` : 'none',
+                borderBottom: i < haulerRows.length - 1 ? `1px solid ${C.rule}` : 'none',
               }}>
                 <div style={{
                   ...T.bodySm, width: 28, textAlign: 'center', fontFamily: F.mono,
@@ -3956,7 +3956,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
               {visible.map(req => {
                 const project = db.projects.find(p => p.id === req.projectId);
                 const material = MATERIALS.find(m => m.code === req.materialCode);
-                const hauler = req.matchedHaulerId ? db.operators.find(o => o.id === req.matchedHaulerId) : null;
+                const hauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
                 const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
                 return (
                   <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
@@ -3992,14 +3992,14 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   if (!req) return <NotFound navigate={navigate} />;
   const project = db.projects.find(p => p.id === req.projectId);
   const material = MATERIALS.find(m => m.code === req.materialCode);
-  const matchedHauler = req.matchedHaulerId ? db.operators.find(o => o.id === req.matchedHaulerId) : null;
+  const matchedHauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
   const matchedTruck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
 
   // Suggested haulers: any that have at least one truck on this project, or
   // unassigned trucks they could deploy.
-  const suggestedHaulers = db.operators.filter(op => {
-    const trucksHere     = db.trucks.filter(t => t.operatorId === op.id && t.projectId === req.projectId);
-    const trucksFloating = db.trucks.filter(t => t.operatorId === op.id && t.projectId == null);
+  const suggestedHaulers = db.haulers.filter(op => {
+    const trucksHere     = db.trucks.filter(t => t.haulerId === op.id && t.projectId === req.projectId);
+    const trucksFloating = db.trucks.filter(t => t.haulerId === op.id && t.projectId == null);
     return trucksHere.length + trucksFloating.length > 0;
   });
 
@@ -4063,7 +4063,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         ) : (
           <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {suggestedHaulers.map((op, i) => {
-              const opTrucks = db.trucks.filter(t => t.operatorId === op.id);
+              const opTrucks = db.trucks.filter(t => t.haulerId === op.id);
               const isMatched = req.matchedHaulerId === op.id;
               const showPicker = pickerHaulerId === op.id;
               return (
@@ -4113,8 +4113,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 }
 
 function AdminHaulers({ db, navigate }) {
-  const haulers = db.operators.map(op => {
-    const trucks = db.trucks.filter(t => t.operatorId === op.id);
+  const haulers = db.haulers.map(op => {
+    const trucks = db.trucks.filter(t => t.haulerId === op.id);
     return { ...op, truckCount: trucks.length, projectCount: op.projectIds.length };
   });
   return (
@@ -4159,14 +4159,14 @@ function AdminHaulers({ db, navigate }) {
 }
 
 function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
-  const hauler = db.operators.find(o => o.id === haulerId);
+  const hauler = db.haulers.find(o => o.id === haulerId);
   if (!hauler) return <NotFound navigate={navigate} />;
   const projects = db.projects.filter(p => hauler.projectIds.includes(p.id));
-  const trucks = db.trucks.filter(t => t.operatorId === hauler.id);
+  const trucks = db.trucks.filter(t => t.haulerId === hauler.id);
   const truckIds = new Set(trucks.map(t => t.id));
   const hours = db.hours.filter(h => truckIds.has(h.truckId));
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
-  const updateHauler = (patch) => setDb(prev => ({ ...prev, operators: prev.operators.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
+  const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const totalRevenue = hours.reduce((s, h) => {
     const t = trucks.find(x => x.id === h.truckId);
@@ -4316,7 +4316,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
     );
   };
 
-  const sortedHaulers = [...db.operators].sort((a, b) => a.name.localeCompare(b.name));
+  const sortedHaulers = [...db.haulers].sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <nav style={{ display: 'flex', flexDirection: 'column', gap: S[1] }}>
@@ -4344,7 +4344,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onClick={() => go('/admin/requests')}
       />
       <Item
-        icon={<OperatorIcon size={20} />}
+        icon={<HaulerIcon size={20} />}
         label="Haulers"
         active={onHaulers}
         expandable
@@ -4417,8 +4417,8 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
           {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 5 && parts[3] === 'o' && <AdminOperator projectId={parts[2]} operatorId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} operatorId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 5 && parts[3] === 'o' && <AdminHaulerProject projectId={parts[2]} haulerId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 7 && parts[5] === 't' && <AdminTruck projectId={parts[2]} haulerId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
         </main>
       </div>
       {drawerOpen && (
@@ -4433,12 +4433,12 @@ function AdminShell({ db, setDb, navigate, hash }) {
   );
 }
 
-function OperatorShell({ db, setDb, navigate, hash }) {
+function HaulerShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   // Build "current" label for topbar based on depth
   let current = 'All haulers';
   if (parts.length >= 3 && parts[1] === 'o') {
-    const op = db.operators.find(o => o.id === parts[2]);
+    const op = db.haulers.find(o => o.id === parts[2]);
     if (op) current = op.name;
     if (parts.length >= 5 && parts[3] === 'p') {
       const proj = db.projects.find(p => p.id === parts[4]);
@@ -4452,21 +4452,21 @@ function OperatorShell({ db, setDb, navigate, hash }) {
   return (
     <div>
       <Topbar navigate={navigate} role="Hauler" current={current} />
-      {parts.length === 1 && <OperatorLanding db={db} navigate={navigate} />}
-      {parts.length === 3 && parts[1] === 'o' && <OperatorHome operatorId={parts[2]} db={db} navigate={navigate} />}
-      {parts.length === 5 && parts[3] === 'p' && <OperatorProject operatorId={parts[2]} projectId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
-      {parts.length === 7 && parts[5] === 't' && <OperatorTruckView operatorId={parts[2]} projectId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
+      {parts.length === 1 && <HaulerLanding db={db} navigate={navigate} />}
+      {parts.length === 3 && parts[1] === 'o' && <HaulerHome haulerId={parts[2]} db={db} navigate={navigate} />}
+      {parts.length === 5 && parts[3] === 'p' && <HaulerProject haulerId={parts[2]} projectId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
+      {parts.length === 7 && parts[5] === 't' && <HaulerTruckView haulerId={parts[2]} projectId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
     </div>
   );
 }
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 3;
-const DB_REQUIRED_KEYS = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests'];
+const DB_SCHEMA_VERSION = 4;
+const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests'];
 
 function buildSeed() {
   return {
     projects: PROJECTS_SEED,
-    operators: OPERATORS_SEED,
+    haulers: HAULERS_SEED,
     trucks: TRUCKS_SEED,
     drivers: DRIVERS_SEED,
     hours: HOURS_SEED,
@@ -4486,26 +4486,43 @@ function hydrateDb(raw) {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return seed;
-    // The v3 required-keys list includes `haulRequests`, which v1/v2 payloads
+    // The required-keys list includes newer collections that older payloads
     // won't have. Check only the keys present in every schema version so we
     // can migrate forward instead of dropping a populated db on the floor.
-    const baselineKeys = ['projects', 'operators', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
-    const valid = baselineKeys.every(k => k in parsed);
+    // `haulers` (v4) was named `operators` in v1–v3, so we accept either.
+    const baselineKeys = ['projects', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
+    const valid = baselineKeys.every(k => k in parsed) && ('haulers' in parsed || 'operators' in parsed);
     if (!valid) return seed;
     if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
     if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
     // Schema migration. Apply each forward-step in order:
     //   v1 → v2: backfill missing date fields on loads/hours.
     //   v2 → v3: seed `haulRequests` if missing.
+    //   v3 → v4: rename `operators` collection → `haulers`,
+    //            rename `operatorId` field → `haulerId` on trucks + invoices.
+    const { operators: legacyOperators, ...rest } = parsed;
+    const migratedHaulers = Array.isArray(rest.haulers)
+      ? rest.haulers
+      : (Array.isArray(legacyOperators) ? legacyOperators : HAULERS_SEED);
+    const renameOpField = (rows) => Array.isArray(rows)
+      ? rows.map(r => {
+          if (!r || typeof r !== 'object' || !('operatorId' in r)) return r;
+          const { operatorId, ...restRow } = r;
+          return { ...restRow, haulerId: operatorId };
+        })
+      : rows;
     return {
-      ...parsed,
-      loads: Array.isArray(parsed.loads)
-        ? parsed.loads.map(l => l && l.date == null ? { ...l, date: 'yesterday' } : l)
-        : parsed.loads,
-      hours: Array.isArray(parsed.hours)
-        ? parsed.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
-        : parsed.hours,
-      haulRequests: Array.isArray(parsed.haulRequests) ? parsed.haulRequests : HAUL_REQUESTS_SEED,
+      ...rest,
+      haulers: migratedHaulers,
+      trucks: renameOpField(rest.trucks),
+      invoices: renameOpField(rest.invoices),
+      loads: Array.isArray(rest.loads)
+        ? rest.loads.map(l => l && l.date == null ? { ...l, date: 'yesterday' } : l)
+        : rest.loads,
+      hours: Array.isArray(rest.hours)
+        ? rest.hours.map(h => h && h.date == null ? { ...h, date: 'yesterday' } : h)
+        : rest.hours,
+      haulRequests: Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED,
       schemaVersion: DB_SCHEMA_VERSION,
     };
   } catch (e) {
@@ -4569,8 +4586,8 @@ function App() {
       title = parts[2] ? `JSE — Haul Request ${parts[2]}` : 'JSE — Haul Requests';
     }
     else if (h.startsWith('/admin/haulers')) {
-      if (parts[2] && db && db.operators) {
-        const op = db.operators.find(o => o.id === parts[2]);
+      if (parts[2] && db && db.haulers) {
+        const op = db.haulers.find(o => o.id === parts[2]);
         title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Haulers';
       } else {
         title = 'JSE — Haulers';
@@ -4579,15 +4596,15 @@ function App() {
     else if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) {
       const proj = db && db.projects ? db.projects.find(p => p.id === parts[2]) : null;
       if (proj && parts[3] === 'o' && parts[4]) {
-        const op = db.operators.find(o => o.id === parts[4]);
+        const op = db.haulers.find(o => o.id === parts[4]);
         title = op ? `JSE — Admin — ${proj.name} / ${op.name}` : `JSE — Admin — ${proj.name}`;
       } else {
         title = proj ? `JSE — Admin — ${proj.name}` : 'JSE — Admin';
       }
     }
     else if (h.startsWith('/admin')) title = 'JSE — Admin';
-    else if (parts[0] === 'operator' && parts[1] === 'o' && parts[2]) {
-      const op = db && db.operators ? db.operators.find(o => o.id === parts[2]) : null;
+    else if (parts[0] === 'hauler' && parts[1] === 'o' && parts[2]) {
+      const op = db && db.haulers ? db.haulers.find(o => o.id === parts[2]) : null;
       if (op && parts[3] === 'p' && parts[4]) {
         const proj = db.projects.find(p => p.id === parts[4]);
         title = proj ? `JSE — Hauler — ${op.name} / ${proj.name}` : `JSE — Hauler — ${op.name}`;
@@ -4595,7 +4612,7 @@ function App() {
         title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Hauler';
       }
     }
-    else if (h.startsWith('/operator')) title = 'JSE — Hauler';
+    else if (h.startsWith('/hauler')) title = 'JSE — Hauler';
     else if (parts[0] === 'driver' && parts[1] === 'log') {
       title = 'JSE — Driver — Log load';
     }
@@ -4612,7 +4629,7 @@ function App() {
       <div>
         {route === '' && <Landing navigate={navigate} />}
         {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-        {route === 'operator' && <OperatorShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+        {route === 'hauler' && <HaulerShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
       </div>
     </RemoteUpdateContext.Provider>
