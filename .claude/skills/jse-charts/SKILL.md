@@ -1,6 +1,6 @@
 ---
 name: jse-charts
-description: Hand-rolled inline-SVG charts for the JSE Reports view — Sparkline + BarChart + DateRangePicker. ISO date helpers. No chart libraries.
+description: Hand-rolled inline-SVG charts — Sparkline + BarChart + Donut + DateRangePicker. ISO date helpers. No chart libraries.
 ---
 
 # JSE Charts
@@ -43,6 +43,21 @@ Features:
 - X-axis weekday short names via `isoToWeekdayShort(iso)`.
 
 **Empty state:** chart returns null if `data.length === 0`. Caller renders an EmptyState card instead.
+
+## `Donut` component (Block 1)
+
+A compact completion ring with a percentage label in the middle. Used on `AdminHaulRequestDetail` per-truck assignment cards to show CY delivered against the request's `volumeCY`.
+
+```jsx
+<Donut pct={truckPct} size={72} stroke={8} label="optional caption" />
+```
+
+- `pct` is 0–100. Clamped internally.
+- Background ring is `C.surfaceHi`, filled arc is `C.accent`, `strokeLinecap="round"`.
+- Renders `{Math.round(clamped*100)}%` in `T.body` weight 700 in the center; optional `label` in `T.micro` `C.inkDim` underneath.
+- `flexShrink: 0` on the wrapper — safe to drop into a flex header without collapsing.
+
+Use it anywhere you'd otherwise reach for a progress bar AND need to read at a glance (KPI cards, item-detail rails). Don't use it for trend data (Sparkline) or comparisons over time (BarChart).
 
 ## `DateRangePicker` (Block 1, used by `AdminReports`)
 

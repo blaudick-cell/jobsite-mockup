@@ -962,16 +962,38 @@ const DRIVERS_SEED = [
 // `acceptedByDriver` set when the driver taps Accept (v7). `passedBy` tracks
 // driver IDs who passed on a pending request so we don't show it to them again.
 const HAUL_REQUESTS_SEED = [
-  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.' },
-  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
-  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.' },
-  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
-  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '' },
-  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.' },
-  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
-  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.' },
-  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '' },
-  { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', acceptedByDriver: null,    passedBy: [], notes: 'Stockpile at SW corner.' },
+  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [] },
+  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
+    assignments: [
+      { truckId: 'tk-611', haulerId: 'op-009', addedAt: 1716230000000,
+        days: [{ date: TODAY_ISO, startTime: '08:05', loads: [] }] },
+    ] },
+  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '',
+    assignments: [
+      { truckId: 'tk-119', haulerId: 'op-006', addedAt: 1716231000000,
+        days: [{ date: TODAY_ISO, startTime: '08:48', loads: [] }] },
+      { truckId: 'tk-220', haulerId: 'op-008', addedAt: 1716232500000,
+        days: [{ date: TODAY_ISO, startTime: '09:00', loads: [] }] },
+    ] },
+  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.', assignments: [] },
+  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.',
+    assignments: [
+      { truckId: 'tk-301', haulerId: 'op-002', addedAt: 1716220000000,
+        days: [{ date: TODAY_ISO, startTime: '09:50', loads: [
+          { id: 'hreq-load-h8a01', time: '10:15', cy: 9 },
+          { id: 'hreq-load-h8a02', time: '10:38', cy: 9 },
+          { id: 'hreq-load-h8a03', time: '11:05', cy: 10 },
+        ] }] },
+    ] },
+  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+  { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', acceptedByDriver: null,    passedBy: [], notes: 'Stockpile at SW corner.',
+    assignments: [
+      { truckId: 'tk-155', haulerId: 'op-002', addedAt: 1716233000000,
+        days: [{ date: TODAY_ISO, startTime: '10:18', loads: [] }] },
+    ] },
 ];
 
 const INVOICES_SEED = [
@@ -1154,7 +1176,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 7;
+const DB_SCHEMA_VERSION = 8;
 const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity'];
 
 // =====================================================================
@@ -1270,6 +1292,9 @@ function hydrateDb(raw) {
     //   v5 → v6: add `activity` collection + `activityLastReadAt` mark-as-read pointer.
     //   v6 → v7: backfill `acceptedByDriver` (null) + `passedBy` ([]) on haulRequests;
     //            new `accepted` status enum value for driver-opt-in flow.
+    //   v7 → v8: add `assignments[]` to every haulRequest. Multi-truck, multi-day,
+    //            per-truck load tracking. Legacy `matchedHaulerId`/`matchedTruckId`
+    //            preserved for compat; `assignments[]` is the new source of truth.
     const { operators: legacyOperators, ...rest } = parsed;
     const migratedHaulers = Array.isArray(rest.haulers)
       ? rest.haulers
@@ -1300,10 +1325,30 @@ function hydrateDb(raw) {
         ? rest.hours.map(h => h ? { ...h, date: isoBackfill(h.date) } : h)
         : rest.hours,
       // v6 → v7: backfill `acceptedByDriver` / `passedBy` defaults on existing
-      // haul requests. Spread `r` last so a v7+ payload preserves real values.
-      haulRequests: (Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED).map(r =>
-        r ? { acceptedByDriver: null, passedBy: [], ...r } : r
-      ),
+      // haul requests. v7 → v8: synthesize `assignments[]` from legacy
+      // `matchedTruckId` so old-shape rows behave like the new multi-truck model.
+      // Spread `r` last so a v8+ payload preserves real values (including a
+      // populated `assignments`); only the legacy path builds a synthesized one.
+      haulRequests: (Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED).map(r => {
+        if (!r) return r;
+        // Already on v8 shape? leave it (defaults still applied for safety).
+        if (Array.isArray(r.assignments)) return { acceptedByDriver: null, passedBy: [], ...r };
+        // Legacy single-truck row → synthesize a one-truck, one-day, zero-loads assignment.
+        if (r.matchedTruckId) {
+          const truck = (Array.isArray(rest.trucks) ? rest.trucks : []).find(t => t.id === r.matchedTruckId);
+          return {
+            acceptedByDriver: null, passedBy: [], ...r,
+            assignments: [{
+              truckId: r.matchedTruckId,
+              haulerId: r.matchedHaulerId || (truck ? truck.haulerId : null),
+              addedAt: Date.now(),
+              days: [{ date: TODAY_ISO, startTime: r.requestedAt || '08:00', loads: [] }],
+            }],
+          };
+        }
+        // Pending row, no truck matched yet → empty assignments.
+        return { acceptedByDriver: null, passedBy: [], assignments: [], ...r };
+      }),
       // v5 → v6: add activity collection + activityLastReadAt mark-as-read pointer.
       activity: Array.isArray(rest.activity) ? rest.activity : ACTIVITY_SEED,
       activityLastReadAt: typeof rest.activityLastReadAt === 'number' ? rest.activityLastReadAt : 0,
@@ -2691,6 +2736,39 @@ function Sparkline({ data, width = 120, height = 32, color = C.accent }) {
   );
 }
 
+// Progress donut. `pct` is 0-100. Hand-rolled SVG, two concentric circles —
+// surfaceHi rail + accent fill via stroke-dasharray. Used on AdminHaulRequestDetail
+// to show per-truck completion of a multi-truck haul.
+function Donut({ pct, size = 80, stroke = 8, label }) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(1, (pct || 0) / 100));
+  const filled = clamped * circumference;
+  const empty = circumference - filled;
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" style={{ display: 'block' }}>
+        <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={C.surfaceHi} strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={radius} fill="none"
+          stroke={C.accent} strokeWidth={stroke}
+          strokeDasharray={`${filled} ${empty}`}
+          strokeDashoffset={circumference / 4}
+          transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          strokeLinecap="round"
+        />
+      </svg>
+      <div style={{
+        position: 'absolute', inset: 0, display: 'flex',
+        alignItems: 'center', justifyContent: 'center', flexDirection: 'column',
+      }}>
+        <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{Math.round(clamped * 100)}%</div>
+        {label && <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{label}</div>}
+      </div>
+    </div>
+  );
+}
+
 // 7-day bar chart. `data` is an array of { iso, count }. Hover/focus a bar →
 // tooltip with date + count. SVG scales to its container via viewBox.
 function BarChart({ data, color = C.accent, height = 180 }) {
@@ -3400,43 +3478,104 @@ function AdminHaulRequests({ db, setDb, navigate }) {
 function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const requests = db.haulRequests || [];
   const req = requests.find(r => r.id === requestId);
-  // Inline truck-picker keyed by hauler id
   const [pickerHaulerId, setPickerHaulerId] = useState(null);
+  const [assigningTruck, setAssigningTruck] = useState(false);
+  const [addingDayFor, setAddingDayFor] = useState(null);
+  const [newDayDate, setNewDayDate] = useState(TODAY_ISO);
+  const [newDayStart, setNewDayStart] = useState('08:00');
+  const [addLoadForm, setAddLoadForm] = useState({ truckId: null, date: null, time: '', cy: '' });
   if (!req) return <NotFound navigate={navigate} />;
   const project = db.projects.find(p => p.id === req.projectId);
   const material = MATERIALS.find(m => m.code === req.materialCode);
-  const matchedHauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
-  const matchedTruck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
+  const matMaterial = material ? material.label : req.materialCode;
+  const assignments = req.assignments || [];
+  const alreadyAssignedIds = new Set(assignments.map(a => a.truckId));
+  const totalDeliveredCY = assignments.reduce((s, a) =>
+    s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
+  const overallPct = req.volumeCY > 0 ? (totalDeliveredCY / req.volumeCY) * 100 : 0;
 
-  // Suggested haulers: any that have at least one truck on this project, or
-  // unassigned trucks they could deploy.
+  // Suggested haulers (legacy picker, kept for grouped browse) — exclude haulers whose trucks are all assigned
   const suggestedHaulers = db.haulers.filter(op => {
-    const trucksHere     = db.trucks.filter(t => t.haulerId === op.id && t.projectId === req.projectId);
-    const trucksFloating = db.trucks.filter(t => t.haulerId === op.id && t.projectId == null);
-    return trucksHere.length + trucksFloating.length > 0;
+    const pickable = db.trucks.filter(t => t.haulerId === op.id && !alreadyAssignedIds.has(t.id));
+    return pickable.length > 0;
   });
 
-  const assign = (haulerId, truckId) => {
+  const updateReq = (mutator) => setDb(prev => ({
+    ...prev,
+    haulRequests: prev.haulRequests.map(r => r.id === req.id ? mutator(r) : r),
+  }));
+
+  const assignTruck = (haulerId, truckId) => {
     const assignedHauler = db.haulers.find(h => h.id === haulerId);
     const assignedTruck = db.trucks.find(t => t.id === truckId);
-    const matMaterial = material ? material.label : req.materialCode;
+    const newAssignment = {
+      truckId,
+      haulerId,
+      addedAt: Date.now(),
+      days: [{ date: TODAY_ISO, startTime: req.requestedAt || '08:00', loads: [] }],
+    };
     setDb(prev => appendActivity(
       {
         ...prev,
-        haulRequests: prev.haulRequests.map(r => r.id === req.id
-          ? { ...r, status: 'matched', matchedHaulerId: haulerId, matchedTruckId: truckId }
-          : r),
+        haulRequests: prev.haulRequests.map(r => r.id === req.id ? {
+          ...r,
+          status: r.status === 'pending' ? 'matched' : r.status,
+          matchedHaulerId: r.matchedHaulerId || haulerId,
+          matchedTruckId: r.matchedTruckId || truckId,
+          assignments: [...(r.assignments || []), newAssignment],
+        } : r),
       },
       {
-        type: 'haulRequest.matched',
+        type: 'haulRequest.truckAdded',
         actorRole: 'admin',
         actorId: null,
-        summary: `Matched ${req.volumeCY} CY ${matMaterial} request to ${assignedHauler ? assignedHauler.name : 'a hauler'} / #${assignedTruck ? assignedTruck.plate : '?'}`,
+        summary: `Admin added truck #${assignedTruck ? assignedTruck.plate : '?'} (${assignedHauler ? assignedHauler.name : 'unknown hauler'}) to ${req.id}`,
         refId: req.id,
       }
     ));
     setPickerHaulerId(null);
+    setAssigningTruck(false);
   };
+
+  const addDay = (truckId) => {
+    updateReq(r => ({
+      ...r,
+      assignments: r.assignments.map(a => a.truckId === truckId
+        ? { ...a, days: [...a.days, { date: newDayDate, startTime: newDayStart, loads: [] }] }
+        : a),
+    }));
+    setAddingDayFor(null);
+    setNewDayDate(TODAY_ISO);
+    setNewDayStart('08:00');
+  };
+
+  const addLoad = (truckId, date, time, cy) => {
+    const n = parseFloat(cy);
+    if (!time || !Number.isFinite(n) || n <= 0) return;
+    const newLoad = { id: 'hreq-load-' + Math.random().toString(36).substring(2, 7), time, cy: n };
+    updateReq(r => ({
+      ...r,
+      assignments: r.assignments.map(a => a.truckId === truckId
+        ? { ...a, days: a.days.map(d => d.date === date ? { ...d, loads: [...d.loads, newLoad] } : d) }
+        : a),
+    }));
+    setAddLoadForm({ truckId: null, date: null, time: '', cy: '' });
+  };
+
+  const removeLoad = (truckId, date, loadId) => {
+    updateReq(r => ({
+      ...r,
+      assignments: r.assignments.map(a => a.truckId === truckId
+        ? { ...a, days: a.days.map(d => d.date === date ? { ...d, loads: d.loads.filter(l => l.id !== loadId) } : d) }
+        : a),
+    }));
+  };
+
+  // Legacy assign (suggested-haulers list) — now routes through assignTruck for parity
+  const assign = (haulerId, truckId) => assignTruck(haulerId, truckId);
+
+  const matchedHauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
+  const matchedTruck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId)   : null;
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -3488,6 +3627,144 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         )}
       </Card>
 
+      {/* Assignments — multi-truck, multi-day per-truck loads with completion donuts */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label>Assignments</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+            {assignments.length === 0
+              ? 'No trucks assigned yet.'
+              : `${assignments.length} truck${assignments.length === 1 ? '' : 's'} assigned · ${totalDeliveredCY} of ${req.volumeCY} CY delivered (${Math.round(overallPct)}%)`}
+          </div>
+        </div>
+        <Btn variant="primary" size="sm" onClick={() => setAssigningTruck(v => !v)}>
+          {assigningTruck ? 'Cancel' : '+ Assign truck'}
+        </Btn>
+      </div>
+
+      {assigningTruck && (() => {
+        const pickableTrucks = db.trucks.filter(t => !alreadyAssignedIds.has(t.id));
+        return (
+          <Card style={{ marginBottom: S[4], padding: S[4], background: C.surfaceHi }}>
+            <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
+            {pickableTrucks.length === 0 ? (
+              <div style={{ ...T.bodySm, color: C.inkFaint }}>All trucks are already assigned to this haul.</div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
+                {pickableTrucks.map(t => {
+                  const tHauler = db.haulers.find(h => h.id === t.haulerId);
+                  return (
+                    <button key={t.id} onClick={() => assignTruck(t.haulerId, t.id)} style={{
+                      ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
+                      borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
+                    }}
+                      onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
+                    >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>{t.type}</span><span style={{ color: C.inkFaint, marginLeft: 6 }}>· {tHauler ? tHauler.name : 'unassigned'}</span></button>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        );
+      })()}
+
+      {assignments.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+          {assignments.map(a => {
+            const t = db.trucks.find(x => x.id === a.truckId);
+            const aHauler = db.haulers.find(h => h.id === a.haulerId);
+            const truckCY = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
+            const truckPct = req.volumeCY > 0 ? (truckCY / req.volumeCY) * 100 : 0;
+            const isAddingDay = addingDayFor === a.truckId;
+            return (
+              <Card key={a.truckId} padding={S[4]}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>
+                      #{t ? t.plate : a.truckId} <span style={{ ...T.bodySm, color: C.inkFaint, marginLeft: 4, fontWeight: 500 }}>{t ? t.type : ''}</span>
+                    </div>
+                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>{aHauler ? aHauler.name : 'unknown hauler'}</div>
+                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{truckCY} CY delivered</div>
+                  </div>
+                  <Donut pct={truckPct} size={72} stroke={8} />
+                </div>
+
+                {a.days.map(d => {
+                  const dailyCY = d.loads.reduce((s, l) => s + (l.cy || 0), 0);
+                  const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
+                  return (
+                    <div key={d.date} style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
+                        <div>
+                          <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>
+                            {isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date)}
+                            <span style={{ ...T.monoSm, color: C.inkFaint, marginLeft: 6, fontWeight: 500 }}>· start {d.startTime}</span>
+                          </div>
+                        </div>
+                        <div style={{ ...T.monoSm, color: C.inkDim }}>{dailyCY} CY</div>
+                      </div>
+
+                      {d.loads.length === 0 ? (
+                        <div style={{ ...T.caption, color: C.inkFaint, padding: `${S[2]}px 0` }}>No loads yet today.</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                          {d.loads.map(l => (
+                            <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: S[2], ...T.bodySm }}>
+                              <span style={{ ...T.monoSm, color: C.inkDim, minWidth: 48 }}>{l.time}</span>
+                              <span style={{ flex: 1, color: C.ink }}>{l.cy} CY</span>
+                              <button onClick={() => removeLoad(a.truckId, d.date, l.id)} style={{
+                                background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
+                                ...T.caption, padding: '2px 6px', borderRadius: R.xs,
+                              }}
+                                onMouseEnter={e => { e.currentTarget.style.color = C.warn; }}
+                                onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; }}
+                              >remove</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {isAddingLoad ? (
+                        <div style={{ marginTop: S[2], display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
+                          <input type="time" value={addLoadForm.time} onChange={e => setAddLoadForm(f => ({ ...f, time: e.target.value }))}
+                            style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                          <input type="number" min="0" step="0.5" placeholder="CY" value={addLoadForm.cy} onChange={e => setAddLoadForm(f => ({ ...f, cy: e.target.value }))}
+                            style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, width: 80 }} />
+                          <Btn variant="primary" size="sm" onClick={() => addLoad(a.truckId, d.date, addLoadForm.time, addLoadForm.cy)}>Add</Btn>
+                          <Btn variant="ghost" size="sm" onClick={() => setAddLoadForm({ truckId: null, date: null, time: '', cy: '' })}>Cancel</Btn>
+                        </div>
+                      ) : (
+                        <button onClick={() => setAddLoadForm({ truckId: a.truckId, date: d.date, time: '', cy: '' })} style={{
+                          marginTop: S[2], background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
+                          ...T.caption, padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
+                        }}>+ Add load</button>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {isAddingDay ? (
+                  <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input type="date" value={newDayDate} onChange={e => setNewDayDate(e.target.value)}
+                      style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                    <input type="time" value={newDayStart} onChange={e => setNewDayStart(e.target.value)}
+                      style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                    <Btn variant="primary" size="sm" onClick={() => addDay(a.truckId)}>Add day</Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => { setAddingDayFor(null); setNewDayDate(TODAY_ISO); setNewDayStart('08:00'); }}>Cancel</Btn>
+                  </div>
+                ) : (
+                  <button onClick={() => setAddingDayFor(a.truckId)} style={{
+                    marginTop: S[3], width: '100%', background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
+                    ...T.bodySm, padding: '8px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
+                  }}>+ Add day</button>
+                )}
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
       {/* Suggested haulers */}
       <div style={{ marginBottom: S[3] }}>
         <Label>{req.status === 'pending' ? 'Suggested haulers' : 'Other haulers'}</Label>
@@ -3500,7 +3777,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         ) : (
           <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
             {suggestedHaulers.map((op, i) => {
-              const opTrucks = db.trucks.filter(t => t.haulerId === op.id);
+              const opTrucks = db.trucks.filter(t => t.haulerId === op.id && !alreadyAssignedIds.has(t.id));
               const isMatched = req.matchedHaulerId === op.id;
               const showPicker = pickerHaulerId === op.id;
               return (

@@ -19,7 +19,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 | `loads` | `LOADS_SEED` | `{ id, driverId, truckId, projectId, material, cy, ticketNo?, time, date, status }` |
 | `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, ..., lineItems: [] }` |
 | `rates` | `RATES_INIT` | `{ [truckType]: hourlyRate }` |
-| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?, passedBy: [], notes? }` |
+| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?, passedBy: [], notes?, assignments: [{ truckId, haulerId, addedAt, days: [{ date, startTime, loads: [{ id, time, cy }] }] }] }` |
 | `activity` | `ACTIVITY_SEED` | `{ id, type, actorRole, actorId, summary, refId?, timestamp }` |
 
 ## Relationships
@@ -76,6 +76,24 @@ Frozen "current time" used by `calcHours` when `clockOut` is null. Don't use `ne
 
 State machine for haul requests: `pending → matched` (admin assigns hauler+truck) `→ accepted` (driver opts in via [[jse-realtime]]'s [[jse-activity-feed]]-instrumented accept) `→ completed`. `passedBy[]` tracks drivers who declined; request stays pending.
 
+## `haulRequests.assignments[]` (v8)
+
+The source of truth for multi-truck per-request execution. Each entry tracks one truck's day-by-day load list:
+
+```
+assignments: [
+  { truckId: 'tk-301', haulerId: 'op-002', addedAt: <ms epoch>,
+    days: [
+      { date: '2026-05-19', startTime: '09:50',
+        loads: [{ id: 'hreq-load-xxxxx', time: '10:15', cy: 9 }, ...] },
+      { date: '2026-05-20', startTime: '07:30', loads: [] },
+    ] },
+  ...
+]
+```
+
+Legacy `matchedHaulerId` / `matchedTruckId` are preserved for backward compat but are no longer the primary key — `assignments[0]` is the first truck assigned, and a request can have N. The v7 → v8 migration synthesizes a one-truck, one-day, zero-loads `assignments` from `matchedTruckId` for old payloads. Completion percent is `sum(all loads.cy) / volumeCY`, rendered by `Donut` ([[jse-charts]]).
+
 See [[jse-design-system]] § Status color story.
 
 ## Activity event vocabulary
@@ -92,8 +110,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v4 → v5 | `loads.date` / `hours.date` from `'today'`/`'yesterday'` labels → ISO strings |
 | v5 → v6 | Added `activity` collection + `activityLastReadAt` scalar |
 | v6 → v7 | Added `acceptedByDriver` + `passedBy` to every haul request; new `accepted` status |
+| v7 → v8 | Added `assignments[]` to every haul request — multi-truck, multi-day, per-truck load lists. Legacy `matchedTruckId` synthesizes a one-truck zero-loads assignment for old payloads. |
 
-`DB_SCHEMA_VERSION = 7`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 8`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 
