@@ -884,6 +884,18 @@ function PaymentsIcon({ size = 24 }) {
     </svg>
   );
 }
+function ActiveTruckIcon({ size = 24 }) {
+  // Truck silhouette with a small "live" dot
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="2" y="7" width="11" height="9" rx="1" />
+      <path d="M13 10 H17 L21 13 V16 H13 Z" />
+      <circle cx="7" cy="18" r="1.6" />
+      <circle cx="17" cy="18" r="1.6" />
+      <circle cx="19" cy="6" r="1.8" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
 function ActivityIcon({ size = 24, color = 'currentColor' }) {
   // Pulse-line shape â€” left-to-right zigzag suggesting heartbeat / activity
   return (
@@ -4311,6 +4323,151 @@ function AdminPayments({ db, navigate }) {
 }
 
 // =====================================================================
+// AdminActiveTrucks — live grid of driver widgets at /admin/trucks/active.
+// Reuses DriverHome (and DriverMultiTruckHome) inside a smaller phone-frame
+// wrapper so the admin sees exactly what the driver sees, and the same
+// clock-in / clock-out / pause / log-load buttons mutate the same db state.
+// Cross-tab sync ([[jse-realtime]]) means a real driver's actions reflect
+// here instantly and vice versa.
+// =====================================================================
+function MiniPhone({ children, label, badge, badgeColor = C.accent }) {
+  // 320x600 scaled phone widget for embedding in the admin grid.
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: S[2] }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+        {label && <Label>{label}</Label>}
+        {badge && <Pill color={badgeColor} soft={badgeColor === C.accent ? C.accentSoft : (badgeColor === C.warn ? C.warnSoft : 'rgba(255,255,255,0.06)')}>{badge}</Pill>}
+      </div>
+      <div style={{ width: 280, background: '#000', borderRadius: 32, padding: 8, boxShadow: '0 12px 32px rgba(0,0,0,0.45), 0 0 0 1.5px #1a1a1a' }}>
+        <div style={{ width: '100%', background: C.bg, borderRadius: 26, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 540 }}>
+          <div style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', width: 88, height: 20, background: '#000', borderRadius: R.md, zIndex: 100 }} />
+          <div style={{ ...T.caption, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 22px 4px', color: C.ink, fontWeight: 600, fontSize: 9 }}>
+            <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
+          </div>
+          {children}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AdminActiveTrucks({ db, setDb, navigate }) {
+  // Group: every truck that has a driver assigned. Sort by status:
+  // currently clocked-in first, then idle drivers, then no-driver trucks.
+  const all = db.trucks.slice();
+  const openShifts = (db.hours || []).filter(h => h.status === 'open');
+  const truckHrMap = new Map(openShifts.map(h => [h.truckId, h]));
+
+  const withDriver = all.filter(t => t.driverId).map(t => {
+    const driver = db.drivers.find(d => d.id === t.driverId);
+    const hr = truckHrMap.get(t.id);
+    const isPaused = !!(hr && hr.pausedAt);
+    return { truck: t, driver, hr, status: hr ? (isPaused ? 'paused' : 'active') : 'idle' };
+  }).filter(x => x.driver);
+
+  // Sort: active > paused > idle, then plate
+  const order = { active: 0, paused: 1, idle: 2 };
+  withDriver.sort((a, b) => order[a.status] - order[b.status] || a.truck.plate.localeCompare(b.truck.plate));
+
+  const benchedTrucks = all.filter(t => !t.driverId);
+
+  // For embedded DriverHome we navigate back to admin after a log-load,
+  // not to the driver portal. We do this by injecting a returnTo via the
+  // /driver/<id>/log/<truckId> path which DriverShell handles natively.
+  const navigateForDriver = (driverId) => (to) => {
+    if (to === '/driver/log') {
+      // legacy single-truck DriverHome → bake in driver + truck via the canonical route
+      navigate(`/driver/${driverId}`);
+      return;
+    }
+    navigate(to);
+  };
+
+  const activeCount = withDriver.filter(w => w.status === 'active').length;
+  const pausedCount = withDriver.filter(w => w.status === 'paused').length;
+  const idleCount   = withDriver.filter(w => w.status === 'idle').length;
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Active Trucks' }]} navigate={navigate} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Active Trucks</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What every driver sees, right now.</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any widget action to clock in/out, log a load, or pause on behalf of the driver. Changes flow back to their phone via cross-tab sync.</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
+        <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="clocked in, not paused" /></Card>
+        <Card padding={S[4]}><Stat label="Paused" value={pausedCount} sub="on break" /></Card>
+        <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not clocked in" /></Card>
+        <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
+      </div>
+
+      {withDriver.length === 0 ? (
+        <Card padding={S[5]} style={{ textAlign: 'center' }}>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>No drivers assigned to any trucks. Assign a driver from a hauler page to see their widget here.</div>
+        </Card>
+      ) : (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(296px, 1fr))',
+          gap: S[5],
+          justifyItems: 'center',
+        }}>
+          {withDriver.map(({ truck, driver, hr, status }) => {
+            const project = db.projects.find(p => p.id === truck.projectId);
+            const driverTrucks = db.trucks.filter(t => t.driverId === driver.id);
+            const badge = status === 'active' ? 'On the clock' : status === 'paused' ? 'Paused' : 'Idle';
+            const badgeColor = status === 'active' ? C.accent : status === 'paused' ? C.warn : C.inkDim;
+            return (
+              <MiniPhone
+                key={truck.id}
+                label={`${driver.name} · #${truck.plate}`}
+                badge={badge}
+                badgeColor={badgeColor}
+              >
+                {driverTrucks.length === 1
+                  ? <DriverHome driver={driver} truck={truck} db={db} setDb={setDb} navigate={navigateForDriver(driver.id)} />
+                  : <DriverTruckDetail driver={driver} truck={truck} trucks={driverTrucks} db={db} setDb={setDb} navigate={navigateForDriver(driver.id)} />}
+              </MiniPhone>
+            );
+          })}
+        </div>
+      )}
+
+      {benchedTrucks.length > 0 && (
+        <div style={{ marginTop: S[6] }}>
+          <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
+          <Card padding={0}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
+              <tbody>
+                {benchedTrucks.map(t => {
+                  const h = db.haulers.find(x => x.id === t.haulerId);
+                  const p = db.projects.find(x => x.id === t.projectId);
+                  return (
+                    <Tr key={t.id}>
+                      <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
+                      <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
+                      <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
+                      <Td>{h ? h.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                      <Td>{p ? p.name : <span style={{ color: C.inkFaint }}>— bench</span>}</Td>
+                      <Td align="right"><Btn variant="secondary" size="xs" onClick={() => navigate(h ? `/admin/haulers/${h.id}` : '/admin/haulers')}>Assign driver</Btn></Td>
+                    </Tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </Card>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
 // AdminActivity â€” reverse-chrono event feed at /admin/activity
 // =====================================================================
 // Reads db.activity (appended via appendActivity() on every mutation).
@@ -4473,6 +4630,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onActivity = parts[1] === 'activity';
   const onReporting = parts[1] === 'reporting';
   const onPayments  = parts[1] === 'payments';
+  const onActiveTrucks = parts[1] === 'trucks' && parts[2] === 'active';
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
@@ -4570,6 +4728,12 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onClick={() => go('/admin/payments')}
       />
       <Item
+        icon={<ActiveTruckIcon size={20} />}
+        label="Active Trucks"
+        active={onActiveTrucks}
+        onClick={() => go('/admin/trucks/active')}
+      />
+      <Item
         icon={<HaulerIcon size={20} />}
         label="Haulers"
         active={onHaulers}
@@ -4648,6 +4812,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
@@ -6417,6 +6582,7 @@ function App() {
     else if (h.startsWith('/admin/reporting')) title = 'JSE — Reports';
     else if (h.startsWith('/admin/reports')) title = 'JSE — Live stats';
     else if (h.startsWith('/admin/payments')) title = 'JSE — Payments';
+    else if (h.startsWith('/admin/trucks/active')) title = 'JSE — Active Trucks';
     else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
     else if (h.startsWith('/admin/requests')) {
