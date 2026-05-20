@@ -112,8 +112,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v6 → v7 | Added `acceptedByDriver` + `passedBy` to every haul request; new `accepted` status |
 | v7 → v8 | Added `assignments[]` to every haul request — multi-truck, multi-day, per-truck load lists. Legacy `matchedTruckId` synthesizes a one-truck zero-loads assignment for old payloads. |
 | v8 → v9 | Backfilled `attachments: []` on every hauler (W-9, Insurance, MSA, Other docs). Backfilled missing `rates` keys from TRUCK_TYPES defaults (e.g. HS at $140). |
+| v9 → v10 | Restored seeded attachments by hauler id (v8→v9 over-blanked them). Bumped rates whose stored value still matches a `RATES_PREV_DEFAULTS` entry but not the current TRUCK_TYPES default — preserves user edits, refreshes unedited defaults. |
 
-`DB_SCHEMA_VERSION = 9`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 10`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 
