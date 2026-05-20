@@ -1,66 +1,73 @@
 ---
 name: jse-ship-a-feature
-description: Workflow for shipping a change to the Jobsite Exchange mockup. Covers the 4-agent pipeline (explorer → builder → reviewer → deployer), the single-file constraint, persistence semantics, Netlify auto-deploy, and the verification step.
+description: Workflow for shipping a change to the Jobsite Exchange mockup. 4-agent pipeline, deployer protocol, schema migration cascade, 7-block script layout, single-file constraint, deploy target.
 ---
 
 # JSE Ship a Feature
 
-This project ships every feature through a fixed pipeline. Follow it.
+Every change goes through this pipeline. Follow it.
 
-## The 4-agent pipeline
+## 4-agent pipeline (`.claude/agents/`)
 
-Definitions in `.claude/agents/`. Run them serially:
+Run them serially:
 
-1. **explorer** — read-only. Maps the relevant code so the builder doesn't guess. Give it specific questions with file paths; ask for line citations. Don't let it propose designs — that's the builder's job.
-2. **builder** — single-file edits to `index.html`. Brief it with explorer findings inline (don't make it re-explore). State priorities, conventions to match, and what's out of scope.
-3. **reviewer** — checks correctness, consistency, mobile, persistence, and that existing flows aren't broken. Reads the actual diff, not the builder summary. Returns blocking / should-fix / nits.
-4. **deployer** — commits and pushes to `main`. Verifies the Netlify deploy is live by fetching the URL and grepping for marker strings.
+1. **explorer** — read-only. Maps the relevant code so the builder doesn't guess. Give it specific questions with file paths; ask for line citations. Don't let it propose designs.
+2. **builder** — single-file edits to `index.html` (+ skill md when schema/UX conventions change). Brief inline with explorer findings; state priorities and what's out of scope.
+3. **reviewer** — reads the actual diff, not the builder summary. Returns blocking / should-fix / nits.
+4. **deployer** — commits + pushes + verifies live. Follows the strict deployer protocol below.
 
-**Why:** parallel work and unclear handoffs caused conflicts early on (see [[jse-design-system]] for the persistence-PR collision story). Serial agents with explicit context don't drift.
+When the reviewer flags 1-2 trivial fixes, apply them inline (Read + Edit) rather than spinning a new builder.
 
-**How to apply:** when a reviewer flags 1-2 trivial fixes, apply them inline (Read + Edit) rather than spinning up another builder agent. Spawn another builder only when fixes are substantial.
+## Deployer protocol (load-bearing)
+
+After `git push`:
+- MUST run a fresh `curl -sI https://jobsite-mockup-demo.netlify.app/` in this turn and quote the literal `Etag` / `Age` / `Content-Length` / `X-Nf-Request-Id` verbatim. No values from memory.
+- MUST run a fresh `curl -s ... | grep -E -c "<markers>"` to confirm the new bundle ships expected strings.
+- **Stale-etag self-check.** If the reported etag matches ANY prior deploy etag in this conversation, STOP, re-curl, check `Age` (>120s means edge serving stale), wait 30-60s and re-fetch. Never report a cached value as proof of deploy.
+- Sanity check `Content-Length` against `git diff --stat` — a multi-line diff that produces a 0-byte delta is suspicious.
 
 ## Hard constraints
 
-- **Single-file edit.** Everything lives in `index.html`. No new source files. No new directories. The skills + agents under `.claude/` are dev-only.
-- **No new dependencies.** React 18 + Babel via CDN. No bundler. No npm. No build step.
-- **No new className hooks.** Use existing tokens + inline styles. Extend the existing `<style>` block at `index.html:12-240` for CSS-only concerns.
-- **Don't touch persistence wiring.** The lazy `useState` init reading `localStorage.getItem('jse_db_v1')` and the `useEffect` that writes on every db change are stable. New mutations via `setDb` persist automatically.
-- **Don't break desktop when adding mobile.** Always test at both viewport sizes (the responsive CSS rules at `index.html:12-240` cover most of it).
+- **Deploy target is `https://jobsite-mockup-demo.netlify.app` ONLY.** `https://www.jobsiteexchange.com/` is a SEPARATE PRODUCT with its own locked/restored deploy and ~1.7KB real-site bundle. **NEVER deploy mockup commits there.** Always include the apex domain in deploy verification as a sanity check (Content-Length should stay at 1,711; etag should stay stable across mockup deploys).
+- **Single-file edits to `index.html`** + the corresponding `.claude/skills/*/SKILL.md` when schema/UX conventions change.
+- **No new deps. No build step. No chart libs** — hand-roll SVG ([[jse-charts]]).
+- **Don't break existing flows.** Mobile responsive intact ([[jse-design-system]]). Cross-tab sync intact ([[jse-realtime]]). Reset still works.
+- Git credentials cached in `.git-credentials` — pushes go through silently.
+- Never force-push, never `--no-verify`, never push to a non-`main` target branch (push your feature branch with `branch:main` refspec).
 
-## Persistence semantics
+## 7-block script layout
 
-- Key: `jse_db_v1`. Lazy hydrate on mount with a structural sanity check. Writes via `useEffect` on every `db` change.
-- **`DB_SCHEMA_VERSION` is currently `7`.** Bump it when adding required collections or fields, or when renaming an existing collection / field. `hydrateDb` walks forward-migrations in the same function; the structural sanity check only looks at baseline keys present in every schema version so old payloads aren't dropped on the floor. Anything stored at a higher schema version than the running bundle is reseeded. (v6→v7 example: added `acceptedByDriver` + `passedBy` fields to every `haulRequests` record by mapping the array with `{ acceptedByDriver: null, passedBy: [], ...r }` so a v7+ payload keeps real values while a v6 payload picks up defaults.)
-- **Activity feed composer:** any new tracked mutation should pipe its `setDb` updater through `appendActivity(state, evt)` to write to `db.activity`. Pattern: `setDb(prev => appendActivity({ ...prev, loads: [...prev.loads, newLoad] }, { type: 'load.logged', actorRole: 'driver', actorId, summary, refId }))`. See [[jse-data-model]] § Activity events for the event shape and the canonical type list.
-- When you add a new collection (like `haulRequests` in v3), do all three: add the seed constant, list the key in `buildSeed()`, and seed it in the migration block of `hydrateDb` if missing.
-- When you rename a collection or field (like v3 → v4 renamed `operators` → `haulers` and `operatorId` → `haulerId`), update `DB_REQUIRED_KEYS`, the `baselineKeys` inside `hydrateDb`, and add a forward-migration branch that destructures the legacy key and re-emits under the new name.
-- "Reset demo data" lives in the AdminShell Topbar `right` slot. Don't add another reset elsewhere.
+`index.html` is split into 7 `<script type="text/babel" data-presets="react">` blocks (no `data-type="module"` — classic-script globals share scope). New code goes in the right block:
 
-## Deploy
+1. **Tokens + Shared Components** — `C/T/F/R/S`, helpers (`calcHours`, `isToday`, `useHash`), all shared components (`Btn`/`Card`/`Topbar`/`StatusPill`/`EmptyState`/`WizardShell`/`Sparkline`/`BarChart`), all icons.
+2. **Seeds + Persistence** — `*_SEED` constants, `DB_STORAGE_KEY`, `DB_SCHEMA_VERSION`, `DB_REQUIRED_KEYS`, `buildSeed`, `hydrateDb`, `appendActivity` + name helpers, `ACTIVITY_SEED`.
+3. **Landing** — `Landing` only.
+4. **Admin + Wizards** — every `Admin*` component, all four wizards, `AdminSidebar`, `AdminShell`.
+5. **Hauler** — every `Hauler*` component + `HaulerShell`.
+6. **Driver** — `Phone`, `DriverShell`, `DriverHome`/`DriverMultiTruckHome`/`DriverTruckDetail`, `DriverIncomingRequests`, `DriverLogLoad`.
+7. **App + Mount** — `RemoteUpdateContext`, `App`, `ReactDOM.createRoot(...).render(<App />)`.
 
-- Push to `main` on `https://github.com/blaudick-cell/jobsite-mockup.git`. Netlify auto-deploys.
-- Custom domain: `https://www.jobsiteexchange.com`. Netlify subdomain: `https://jobsite-mockup.netlify.app`. Both serve the same bundle.
-- Verify the deploy is live by `curl -s https://www.jobsiteexchange.com/ | grep -c "<unique-marker-from-your-change>"` — at least one occurrence confirms the new bundle is being served. Netlify usually rebuilds within 5-15s of push.
-- Etag rotates on every deploy. `curl -sI` will show the change.
+## Schema migration
 
-## Conflict resolution
+**`DB_SCHEMA_VERSION` is currently 7.** Migration cascade in `hydrateDb` — every step forward-only, idempotent, wrapped in try/catch, falls back to seed on failure. See [[jse-data-model]] § Schema version log for the full history.
 
-If the push is rejected as non-fast-forward, someone shipped to `main` in parallel. Rebase onto `origin/main`, resolve conflicts deferring to whatever's already on `main` for shared features (you don't get to "win"), then push. Don't force-push to `main`.
+To bump:
+1. Increment `DB_SCHEMA_VERSION`.
+2. Add the new key/field to `DB_REQUIRED_KEYS` if it's load-bearing, but NOT to `baselineKeys` inside `hydrateDb` (so older payloads still pass structural sanity and migrate forward).
+3. Add a forward-migration branch that destructures + remaps stale data.
+4. Update `buildSeed()` to emit the new shape.
 
-## What out-of-scope looks like
+## Verification recipe
 
-- "While you're in there, also refactor X."
-- "Add a build step."
-- "Move to TypeScript / a bundler / a separate state library."
-- "Add an API."
+- Netlify deploy is `ready` (fresh etag; `Age: 0-30`).
+- Live HTML contains marker strings introduced by the change.
+- Shells intact: `AdminShell|HaulerShell|DriverShell` ≥3 hits.
+- jobsiteexchange.com Content-Length still 1,711 (untouched).
 
-Push back on any of these. The mockup's value is in being a single static file that runs anywhere with no setup.
+## Out of scope
 
-## Gotchas worth knowing
+Push back on: "while you're in there, refactor X", "add a build step", "move to TypeScript/bundler", "add an API". The mockup's value is being one static file that runs anywhere.
 
-- **`NOW_MIN` + `TODAY_ISO`** (defined in the Helpers section of `index.html`, right above the seeds): `NOW_MIN` is the frozen "now" minute used by `calcHours`; `TODAY_ISO` is the frozen anchor date (`'2026-05-19'`) used for load/hours `date` fields and reports range filtering. Live shifts compute against `NOW_MIN`, not real time, so timing math stays deterministic.
-- **`window.matchMedia('(hover: hover)')`** isn't used yet — touch-device hover-sticking on Landing cards is a known followup.
-- **`.claude/launch.json`** is a preview-server config that should stay untracked (it's in `.gitignore`).
-- **`.claude/worktrees/`** is where Claude Code creates ephemeral worktrees — also gitignored.
-- Schema has a version field (`DB_SCHEMA_VERSION`, currently `7`). When bumping, add a forward-migration branch in `hydrateDb`.
+## Cross-refs
+
+[[jse-design-system]] · [[jse-data-model]] · [[jse-routing]] · [[jse-realtime]] · [[jse-wizards]] · [[jse-charts]] · [[jse-activity-feed]]
