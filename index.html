@@ -864,6 +864,17 @@ function HaulRequestIcon({ size = 24 }) {
     </svg>
   );
 }
+function ReportingIcon({ size = 24 }) {
+  // Stacked bar chart — "reports / analytics"
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 20 H20" />
+      <rect x="6" y="11" width="3" height="7" />
+      <rect x="11" y="7" width="3" height="11" />
+      <rect x="16" y="13" width="3" height="5" />
+    </svg>
+  );
+}
 function ActivityIcon({ size = 24, color = 'currentColor' }) {
   // Pulse-line shape â€” left-to-right zigzag suggesting heartbeat / activity
   return (
@@ -4118,6 +4129,80 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
 }
 
 // =====================================================================
+// AdminReporting — placeholder financial / payout / period reports shell
+// at /admin/reporting. Distinct from /admin/reports (live KPIs / loads-per-day);
+// this view is for accounting + statements rather than operational stats.
+// =====================================================================
+function AdminReporting({ db, navigate }) {
+  // Cheap derived totals from existing data — gives the placeholders something
+  // realistic-looking until the real reports get wired up.
+  const invoices = db.invoices || [];
+  const paidTotal = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+  const openTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+  const openCount = invoices.filter(i => i.status !== 'paid').length;
+  const totalCY = (db.loads || []).filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+
+  const placeholderCards = [
+    { label: 'Hauler payouts', value: fmtMoney(paidTotal), sub: `${invoices.filter(i => i.status === 'paid').length} invoices paid YTD`, hint: 'Weekly + monthly disbursement statements per hauler.' },
+    { label: 'Outstanding A/R', value: fmtMoney(openTotal), sub: `${openCount} invoice${openCount === 1 ? '' : 's'} unpaid`, hint: 'Aging buckets (0–30 / 30–60 / 60+) and GC follow-up.' },
+    { label: 'Tonnage hauled', value: totalCY.toLocaleString() + ' CY', sub: 'all-time approved loads', hint: 'Period-over-period change by material + project.' },
+    { label: 'Margin estimate', value: '— coming soon', sub: 'rate × hours minus payouts', hint: 'Per-haul gross margin + cost-plus markup math.' },
+  ];
+
+  const reportRows = [
+    { title: 'Weekly payout statement', range: 'Mon → Sun, per hauler', status: 'placeholder' },
+    { title: 'Monthly GC billing summary', range: '1st → last of month, per project', status: 'placeholder' },
+    { title: 'Per-haul margin report', range: 'Selectable period', status: 'placeholder' },
+    { title: 'Material tonnage by GC', range: 'Last 30 days', status: 'placeholder' },
+    { title: 'Year-end 1099 packet', range: 'Calendar year, per hauler', status: 'placeholder' },
+  ];
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Reports</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Financial &amp; payout reporting.</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Statements, payouts, and period summaries. Live KPIs still live under <a href="#/admin/reports" style={{ color: C.accent, textDecoration: 'none' }}>Live stats</a>.</div>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+        {placeholderCards.map(c => (
+          <Card key={c.label} padding={S[4]}>
+            <Stat label={c.label} value={c.value} sub={c.sub} />
+            <div style={{ ...T.caption, color: C.inkFaint, marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>{c.hint}</div>
+          </Card>
+        ))}
+      </div>
+
+      <div style={{ marginBottom: S[3] }}><Label>Available reports</Label></div>
+      <Card padding={0}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><Th>Report</Th><Th>Period / scope</Th><Th align="right">Status</Th><Th></Th></tr></thead>
+          <tbody>
+            {reportRows.map(r => (
+              <Tr key={r.title}>
+                <Td><span style={{ fontWeight: 600, color: C.ink }}>{r.title}</span></Td>
+                <Td dim>{r.range}</Td>
+                <Td align="right"><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">Coming soon</Pill></Td>
+                <Td align="right" style={{ color: C.inkFaint }}>—</Td>
+              </Tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+
+      <div style={{ marginTop: S[6], padding: S[5], background: C.surfaceHi, borderRadius: R.md, ...T.bodySm, color: C.inkDim }}>
+        <Label style={{ marginBottom: S[2] }}>What's here vs. Live stats</Label>
+        This view is for accountants and ops leads — statements you print, send, or attach to a payout. The <a href="#/admin/reports" style={{ color: C.accent, textDecoration: 'none' }}>Live stats</a> view is for the dispatcher checking what's happening right now.
+      </div>
+    </div>
+  );
+}
+
+// =====================================================================
 // AdminActivity â€” reverse-chrono event feed at /admin/activity
 // =====================================================================
 // Reads db.activity (appended via appendActivity() on every mutation).
@@ -4278,6 +4363,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onOverview = parts.length === 1 && parts[0] === 'admin';
   const onRequests = parts[1] === 'requests';
   const onActivity = parts[1] === 'activity';
+  const onReporting = parts[1] === 'reporting';
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
@@ -4363,6 +4449,12 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onClick={() => go('/admin/activity')}
       />
       <Item
+        icon={<ReportingIcon size={20} />}
+        label="Reports"
+        active={onReporting}
+        onClick={() => go('/admin/reporting')}
+      />
+      <Item
         icon={<HaulerIcon size={20} />}
         label="Haulers"
         active={onHaulers}
@@ -4415,7 +4507,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
         className="admin-mobile-nav-trigger"
         onClick={() => setDrawerOpen(true)}
       ><MenuIcon size={18} /></button>
-      <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/reports')}>Reports</Btn>
+      <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/reports')}>Live stats</Btn>
       {resetBtn}
     </div>
   );
@@ -4439,6 +4531,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
@@ -6205,8 +6298,9 @@ function App() {
     const parts = h.split('/').filter(Boolean);
     let title = 'Jobsite Exchange';
     if (h === '/' || h === '') title = 'Jobsite Exchange';
-    else if (h.startsWith('/admin/reports')) title = 'JSE â€” Reports';
-    else if (h.startsWith('/admin/new')) title = 'JSE â€” New Haul';
+    else if (h.startsWith('/admin/reporting')) title = 'JSE — Reports';
+    else if (h.startsWith('/admin/reports')) title = 'JSE — Live stats';
+    else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
     else if (h.startsWith('/admin/requests')) {
       title = parts[2] ? `JSE â€” Haul Request ${parts[2]}` : 'JSE â€” Haul Requests';
