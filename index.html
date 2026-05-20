@@ -1,13 +1,13 @@
-<!-- Jobsite Exchange â€” single-file React mockup. See README.md. -->
+<!-- Jobsite Exchange — single-file React mockup. See README.md. -->
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Jobsite Exchange â€” Role Dashboards</title>
-  <meta name="description" content="Admin / Hauler / Driver dashboards for hourly hauling â€” Jobsite Exchange." />
-  <meta property="og:title" content="Jobsite Exchange â€” Role Dashboards" />
-  <meta property="og:description" content="Hierarchy: Admin â†’ Hauls â†’ Haulers â†’ Trucks â†’ Drivers." />
+  <title>Jobsite Exchange — Role Dashboards</title>
+  <meta name="description" content="Admin / Hauler / Driver dashboards for hourly hauling — Jobsite Exchange." />
+  <meta property="og:title" content="Jobsite Exchange — Role Dashboards" />
+  <meta property="og:description" content="Hierarchy: Admin → Hauls → Haulers → Trucks → Drivers." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z' fill='%23B3E635'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='sans-serif' font-size='34' font-weight='800' fill='%230A0A0A'%3EJ%3C/text%3E%3C/svg%3E" />
   <style>
@@ -60,7 +60,7 @@
     }
 
 
-    /* === Tier 2: tables â†’ cards on mobile === */
+    /* === Tier 2: tables → cards on mobile === */
     @media (max-width: 700px) {
       /* Tables become vertical card stacks */
       body table, body thead, body tbody, body tr, body td {
@@ -101,13 +101,13 @@
         margin-right: 14px !important;
         vertical-align: middle !important;
       }
-      /* The trailing chevron/arrow cell â€” push to the right and dim */
+      /* The trailing chevron/arrow cell — push to the right and dim */
       body td[align="right"]:last-child {
         float: right;
         margin-right: 0 !important;
         color: #5a5a5a;
       }
-      /* The + Add row (uses colspan) â†’ full-width accent button-style */
+      /* The + Add row (uses colspan) → full-width accent button-style */
       body tr td[colspan] {
         display: block !important;
         text-align: center !important;
@@ -133,7 +133,7 @@
       [style*="padding: 32px"] { padding: 16px !important; }
       [style*="padding: 24px"] { padding: 14px !important; }
       h1 { font-size: 32px !important; line-height: 1.15 !important; }
-      /* 4-col KPI grids â†’ 2-col on tablet */
+      /* 4-col KPI grids → 2-col on tablet */
       [style*="repeat(4, 1fr)"] {
         grid-template-columns: repeat(2, 1fr) !important;
       }
@@ -150,7 +150,7 @@
       [style*="padding: 32px"] { padding: 12px !important; }
       [style*="padding: 24px"] { padding: 10px !important; }
       h1 { font-size: 26px !important; line-height: 1.15 !important; letter-spacing: -0.6px !important; }
-      /* All multi-col grids â†’ single column on phone */
+      /* All multi-col grids → single column on phone */
       [style*="display: grid"] {
         grid-template-columns: 1fr !important;
       }
@@ -193,7 +193,7 @@
       .phone-frame-outer .phone-notch { display: none !important; }
     }
 
-    /* === Mobile responsiveness pass â€” 2026-05 === */
+    /* === Mobile responsiveness pass — 2026-05 === */
     /* Tap-target floor: inputs/selects/textareas inside the shells must be at least 44px tall under 700px. */
     @media (max-width: 700px) {
       input:not([type="file"]):not([type="checkbox"]):not([type="radio"]),
@@ -203,7 +203,7 @@
         padding: 12px 14px !important;
         box-sizing: border-box !important;
       }
-      /* Btn size="sm" (height:32) and size="xs" (height:26) â†’ bump to 44px on mobile.
+      /* Btn size="sm" (height:32) and size="xs" (height:26) → bump to 44px on mobile.
          The Btn component renders inline height in the style attribute; match it. */
       button[style*="height: 32px"],
       button[style*="height: 26px"] {
@@ -226,7 +226,7 @@
     }
 
     /* HaulerLogLoadForm row: 90px / 1fr / 1fr / 100px / auto.
-       Default grid override collapses it to 1-col on â‰¤600 (still acceptable â€” inputs stack).
+       Default grid override collapses it to 1-col on â‰¤600 (still acceptable — inputs stack).
        At 700px window we keep the grid but reflow it so it doesn't horizontally squeeze. */
     @media (max-width: 900px) and (min-width: 601px) {
       [style*="90px 1fr 1fr 100px auto"] {
@@ -236,7 +236,7 @@
     }
 
     /* DriverLogLoad photo placeholder: on very narrow phones, switch from fixed 140px height
-       to aspect-ratio so the icon+labels never feel cramped at 320â€“360px viewports. */
+       to aspect-ratio so the icon+labels never feel cramped at 320–360px viewports. */
     @media (max-width: 600px) {
       button[style*="height: 140px"][style*="dashed"] {
         height: auto !important;
@@ -332,7 +332,7 @@
         <text x="32" y="44" text-anchor="middle" font-family="sans-serif" font-size="34" font-weight="800" fill="#0A0A0A">J</text>
       </svg>
       <div class="spinner"></div>
-      <div>Loading prototypeâ€¦</div>
+      <div>Loading prototype…</div>
     </div>
   </div>
 
@@ -345,7 +345,7 @@
 const { useState, useEffect, useMemo, useRef, useContext } = React;
 
 // =====================================================================
-// Design tokens â€” preserved from Phase 1 mockup
+// Design tokens — preserved from Phase 1 mockup
 // =====================================================================
 const C = {
   bg: '#0A0A0A', bgDeep: '#000000',
@@ -367,7 +367,7 @@ const F = {
 const R = { xs: 4, sm: 8, md: 12, lg: 16, pill: 999 };
 const S = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 48, 8: 64 };
 
-// Typography tokens â€” single source of truth for type. Inline `fontSize:` values
+// Typography tokens — single source of truth for type. Inline `fontSize:` values
 // throughout the app should spread from these tokens instead of using raw numbers.
 const T = {
   h1:        { fontFamily: F.display, fontSize: 44, fontWeight: 700, lineHeight: 1.1, letterSpacing: -1 },
@@ -680,14 +680,14 @@ function EditableText({ value, onSave, multiline, mono, placeholder, style = {} 
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       title="Click to edit">
-      {value || <span style={{ color: C.inkFaint }}>{placeholder || 'â€”'}</span>}
+      {value || <span style={{ color: C.inkFaint }}>{placeholder || '—'}</span>}
     </span>
   );
 }
 
 function EditableSelect({ value, options, onSave, style = {} }) {
   const [editing, setEditing] = useState(false);
-  const opt = options.find(o => o.value === value) || { label: value || 'â€”' };
+  const opt = options.find(o => o.value === value) || { label: value || '—' };
   if (editing) {
     return (
       <select value={value || ''} onChange={e => { onSave(e.target.value); setEditing(false); }} onBlur={() => setEditing(false)} autoFocus
@@ -756,11 +756,11 @@ function Topbar({ navigate, role, current, right }) {
 }
 
 // =====================================================================
-// Icons â€” small reusable inline SVG set. Single-color, currentColor stroke
+// Icons — small reusable inline SVG set. Single-color, currentColor stroke
 // so they inherit from parent text color. Match HexLogo's thin-line weight.
 // =====================================================================
 function AdminIcon({ size = 28 }) {
-  // Hex outline + inner grid â€” "org structure / dashboard"
+  // Hex outline + inner grid — "org structure / dashboard"
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M14 2.5 L24 8 L24 20 L14 25.5 L4 20 L4 8 Z" />
@@ -769,7 +769,7 @@ function AdminIcon({ size = 28 }) {
   );
 }
 function HaulerIcon({ size = 28 }) {
-  // Clipboard with rows â€” "oversight / roster"
+  // Clipboard with rows — "oversight / roster"
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="6" y="5" width="16" height="20" rx="2" />
@@ -779,7 +779,7 @@ function HaulerIcon({ size = 28 }) {
   );
 }
 function DriverIcon({ size = 28 }) {
-  // Steering wheel â€” "vehicle / behind the wheel"
+  // Steering wheel — "vehicle / behind the wheel"
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="14" cy="14" r="10" />
@@ -810,7 +810,7 @@ function ProjectIcon({ size = 28 }) {
   );
 }
 function GitHubIcon({ size = 18 }) {
-  // GitHub mark â€” uses fill (silhouette) rather than stroke, easier than stroking
+  // GitHub mark — uses fill (silhouette) rather than stroke, easier than stroking
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
       <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
@@ -818,7 +818,7 @@ function GitHubIcon({ size = 18 }) {
   );
 }
 function EyeIcon({ size = 24 }) {
-  // Visibility â€” eye outline
+  // Visibility — eye outline
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M2 14 C5 8 9 5.5 14 5.5 C19 5.5 23 8 26 14 C23 20 19 22.5 14 22.5 C9 22.5 5 20 2 14 Z" />
@@ -827,7 +827,7 @@ function EyeIcon({ size = 24 }) {
   );
 }
 function PhoneIcon({ size = 24 }) {
-  // Mobile phone outline â€” path scaled to fill 28x28 viewBox so visual weight matches sibling icons.
+  // Mobile phone outline — path scaled to fill 28x28 viewBox so visual weight matches sibling icons.
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <rect x="6" y="1" width="16" height="26" rx="3" />
@@ -836,7 +836,7 @@ function PhoneIcon({ size = 24 }) {
   );
 }
 function BoltIcon({ size = 24 }) {
-  // Lightning bolt â€” speed/real-time
+  // Lightning bolt — speed/real-time
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M15 2 L5 16 L13 16 L11 26 L21 12 L13 12 Z" />
@@ -844,7 +844,7 @@ function BoltIcon({ size = 24 }) {
   );
 }
 function FlowIcon({ size = 24 }) {
-  // Three nodes connected â€” unified workflow
+  // Three nodes connected — unified workflow
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <circle cx="6" cy="6" r="3" />
@@ -855,7 +855,7 @@ function FlowIcon({ size = 24 }) {
   );
 }
 function HaulRequestIcon({ size = 24 }) {
-  // Inbox tray with a down-arrow â€” "incoming request"
+  // Inbox tray with a down-arrow — "incoming request"
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M4 16 L4 22 A2 2 0 0 0 6 24 L22 24 A2 2 0 0 0 24 22 L24 16" />
@@ -897,7 +897,7 @@ function ActiveTruckIcon({ size = 24 }) {
   );
 }
 function ActivityIcon({ size = 24, color = 'currentColor' }) {
-  // Pulse-line shape â€” left-to-right zigzag suggesting heartbeat / activity
+  // Pulse-line shape — left-to-right zigzag suggesting heartbeat / activity
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
       <path d="M3 12 H7 L9 6 L13 18 L15 9 L17 12 H21" />
@@ -1020,9 +1020,9 @@ const DRIVERS_SEED = [
   { id: 'dr-016', name: 'W. Stenberg', phone: '(303) 555-2116' },
 ];
 
-// Haul requests (v3 collection) â€” incoming material-hauling needs that admins
-// match to a hauler + truck. Status flows: pending â†’ accepted (driver opted in) /
-// matched (admin assigned, awaiting driver) â†’ completed.
+// Haul requests (v3 collection) — incoming material-hauling needs that admins
+// match to a hauler + truck. Status flows: pending → accepted (driver opted in) /
+// matched (admin assigned, awaiting driver) → completed.
 // `matchedHaulerId` / `matchedTruckId` only populated for matched/accepted/completed.
 // `acceptedByDriver` set when the driver taps Accept (v7). `passedBy` tracks
 // driver IDs who passed on a pending request so we don't show it to them again.
@@ -1118,7 +1118,7 @@ const HOURS_SEED = [
 ];
 
 const LOADS_SEED = [
-  // Yesterday's loads (10 entries spread across drivers â€” for reporting context)
+  // Yesterday's loads (10 entries spread across drivers — for reporting context)
   { id: 'ld-1001', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44721', time: '07:14', date: YESTERDAY_ISO, status: 'approved' },
   { id: 'ld-1002', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 13, ticketNo: 'T-44731', time: '08:02', date: YESTERDAY_ISO, status: 'approved' },
   { id: 'ld-1006', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44735', time: '08:11', date: YESTERDAY_ISO, status: 'approved' },
@@ -1135,7 +1135,7 @@ const LOADS_SEED = [
   { id: 'ld-1004', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44760', time: '08:38', date: TODAY_ISO, status: 'approved' },
   { id: 'ld-1005', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 13, ticketNo: 'T-44781', time: '09:22', date: TODAY_ISO, status: 'pending' },
   { id: 'ld-1031', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44801', time: '10:08', date: TODAY_ISO, status: 'pending' },
-  // dr-001 also has tk-220 (multi-truck) â€” today's loads on tk-220 / GW
+  // dr-001 also has tk-220 (multi-truck) — today's loads on tk-220 / GW
   { id: 'ld-1101', driverId: 'dr-001', truckId: 'tk-220', projectId: 'GW', material: 'EX', cy: 18, ticketNo: 'G-22101', time: '07:35', date: TODAY_ISO, status: 'approved' },
   { id: 'ld-1102', driverId: 'dr-001', truckId: 'tk-220', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-22108', time: '08:22', date: TODAY_ISO, status: 'approved' },
 
@@ -1347,7 +1347,7 @@ function hydrateDb(raw) {
     // The required-keys list includes newer collections that older payloads
     // won't have. Check only the keys present in every schema version so we
     // can migrate forward instead of dropping a populated db on the floor.
-    // `haulers` (v4) was named `operators` in v1â€“v3, so we accept either.
+    // `haulers` (v4) was named `operators` in v1–v3, so we accept either.
     const baselineKeys = ['projects', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
     const valid = baselineKeys.every(k => k in parsed) && ('haulers' in parsed || 'operators' in parsed);
     if (!valid) return seed;
@@ -1477,11 +1477,11 @@ function Landing({ navigate }) {
     if (el) el.scrollIntoView({ behavior: 'smooth' });
   };
   const cards = [
-    { role: 'Admin', to: '/admin', blurb: 'Enter as Admin. From the org tree you can drill into any hauler dash or driver widget â€” the same view those users see in production.', Icon: AdminIcon },
+    { role: 'Admin', to: '/admin', blurb: 'Enter as Admin. From the org tree you can drill into any hauler dash or driver widget — the same view those users see in production.', Icon: AdminIcon },
   ];
   const audience = [
     { Icon: AdminIcon,    title: 'Haul managers',         body: 'Spin up a haul, assign teams, and see org-wide KPIs without chasing spreadsheets.' },
-    { Icon: HaulerIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen â€” drill into any shift in two taps." },
+    { Icon: HaulerIcon, title: 'Haulers / fleet managers', body: "Manage your trucks and your team's day from one screen — drill into any shift in two taps." },
     { Icon: DriverIcon,   title: 'Drivers & equipment ops',  body: 'Clock in, log loads, and know your assignments from your phone. Mobile-first, field-ready.' },
   ];
   const steps = [
@@ -1491,7 +1491,7 @@ function Landing({ navigate }) {
   ];
   const pillars = [
     { Icon: EyeIcon,   title: 'Real-time visibility',       body: 'Loads logged in the field land on the admin dashboard the moment they happen.' },
-    { Icon: FlowIcon,  title: 'One workflow across roles',  body: 'Admin, hauler, and driver views share the same data model â€” no double entry.' },
+    { Icon: FlowIcon,  title: 'One workflow across roles',  body: 'Admin, hauler, and driver views share the same data model — no double entry.' },
     { Icon: PhoneIcon, title: 'Mobile-first for the field', body: "Driver shell is built for a phone in a work glove. Big tap targets, no menus to dig through." },
     { Icon: BoltIcon,  title: 'Zero setup',                 body: 'Open the URL and start assigning work. Demo data persists locally; reset anytime.' },
   ];
@@ -1526,7 +1526,7 @@ function Landing({ navigate }) {
       {/* === 1. Hero === */}
       <section id="hero" style={{ borderBottom: `1px solid ${C.rule}` }}>
         <div style={{ ...sectionShell, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[8], alignItems: 'center' }}>
-          {/* Left â€” copy + CTAs */}
+          {/* Left — copy + CTAs */}
           <div>
             <Label color={C.accent}>Operational visibility</Label>
             <h1 style={{ ...T.h1, fontSize: 64, lineHeight: 1.05, letterSpacing: -2, marginTop: S[3], marginBottom: S[4], color: C.ink }}>
@@ -1534,25 +1534,25 @@ function Landing({ navigate }) {
               <span data-hero-line="break">on the same page.</span>
             </h1>
             <p style={{ ...T.bodyLg, fontSize: 19, color: C.inkDim, lineHeight: 1.5, maxWidth: 540, margin: 0 }}>
-              Jobsite Exchange coordinates haul managers, haulers, and drivers in real time â€” so loads, hours, and truck assignments stay tight across every shift.
+              Jobsite Exchange coordinates haul managers, haulers, and drivers in real time — so loads, hours, and truck assignments stay tight across every shift.
             </p>
             <div style={{ display: 'flex', gap: S[3], marginTop: S[5], flexWrap: 'wrap' }}>
               <Btn size="lg" variant="primary" onClick={() => scrollTo('demo')}>
-                Try the live demo â†’
+                Try the live demo →
               </Btn>
               <Btn size="lg" variant="secondary" onClick={() => scrollTo('how-it-works')}>
                 How it works
               </Btn>
             </div>
           </div>
-          {/* Right â€” stylized visual */}
+          {/* Right — stylized visual */}
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', color: C.accent }}>
             <svg viewBox="0 0 400 320" width="100%" style={{ maxWidth: 460 }} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              {/* Connection lines (dashed) â€” drawn first so nodes sit on top */}
+              {/* Connection lines (dashed) — drawn first so nodes sit on top */}
               <path d="M120 90 L280 90"  strokeDasharray="4 6" opacity="0.55" />
               <path d="M120 90 L200 230" strokeDasharray="4 6" opacity="0.55" />
               <path d="M280 90 L200 230" strokeDasharray="4 6" opacity="0.55" />
-              {/* Hex node â€” Admin (top-left) */}
+              {/* Hex node — Admin (top-left) */}
               <g>
                 <path d="M120 50 L155 70 L155 110 L120 130 L85 110 L85 70 Z" fill={C.bg} />
                 <g transform="translate(106 76)" strokeWidth="1.5">
@@ -1560,7 +1560,7 @@ function Landing({ navigate }) {
                   <path d="M14 10 L14 18 M10 12 L18 12 M10 16 L18 16" />
                 </g>
               </g>
-              {/* Hex node â€” Hauler (top-right) */}
+              {/* Hex node — Hauler (top-right) */}
               <g>
                 <path d="M280 50 L315 70 L315 110 L280 130 L245 110 L245 70 Z" fill={C.bg} />
                 <g transform="translate(266 76)" strokeWidth="1.5">
@@ -1569,7 +1569,7 @@ function Landing({ navigate }) {
                   <path d="M10 11 H18 M10 15 H18 M10 19 H15" />
                 </g>
               </g>
-              {/* Hex node â€” Driver (bottom) */}
+              {/* Hex node — Driver (bottom) */}
               <g>
                 <path d="M200 190 L235 210 L235 250 L200 270 L165 250 L165 210 Z" fill={C.bg} />
                 <g transform="translate(186 216)" strokeWidth="1.5">
@@ -1669,7 +1669,7 @@ function Landing({ navigate }) {
             Try it in your browser.
           </h2>
           <p style={{ ...T.bodyLg, color: C.inkDim, maxWidth: 720, marginTop: 0, marginBottom: S[6] }}>
-            Enter as Admin and click through the org tree to reach every hauler dash and driver widget â€” all three role experiences from one entry point. Demo data persists locally and updates in real time as you click. Hit Reset on the Admin shell anytime to start over.
+            Enter as Admin and click through the org tree to reach every hauler dash and driver widget — all three role experiences from one entry point. Demo data persists locally and updates in real time as you click. Hit Reset on the Admin shell anytime to start over.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[4] }}>
             {cards.map(c => {
@@ -1692,7 +1692,7 @@ function Landing({ navigate }) {
                   </div>
                   <div style={{ ...T.bodySm, color: C.inkDim }}>{c.blurb}</div>
                   <div style={{ ...T.monoSm, marginTop: S[4], color: C.inkFaint }}>
-                    {'â†’'} #{c.to}
+                    {'→'} #{c.to}
                   </div>
                 </button>
               );
@@ -1720,7 +1720,7 @@ function Landing({ navigate }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
             <HexLogo size={16} />
-            <span>Jobsite Exchange â€” single-file React mockup. Working prototype, not a shipping product.</span>
+            <span>Jobsite Exchange — single-file React mockup. Working prototype, not a shipping product.</span>
           </div>
           <a href={GH_URL} target="_blank" rel="noopener noreferrer" style={{
             display: 'inline-flex', alignItems: 'center', gap: S[2], color: C.inkDim,
@@ -1853,7 +1853,7 @@ function AdminProjects({ db, setDb, navigate }) {
       <Td align="right">{p.ops.length}</Td>
       <Td align="right" mono>{p.trucksActive} <span style={{ color: C.inkFaint }}>/ {p.trucks.length}</span></Td>
       <Td align="right" mono>{p.totalLoads}</Td>
-      <Td align="right">{p.pendingLoads > 0 ? <Pill color={C.warn} soft={C.warnSoft}>{p.pendingLoads}</Pill> : <span style={{ color: C.inkFaint }}>â€”</span>}</Td>
+      <Td align="right">{p.pendingLoads > 0 ? <Pill color={C.warn} soft={C.warnSoft}>{p.pendingLoads}</Pill> : <span style={{ color: C.inkFaint }}>—</span>}</Td>
       <Td align="right" mono>{fmtHours(p.totalHours)}</Td>
       <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(p.totalRevenue)}</Td>
       <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
@@ -1880,7 +1880,7 @@ function AdminProjects({ db, setDb, navigate }) {
       <Crumbs items={[{ label: 'Admin' }, { label: 'Hauls' }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Active hauls Â· {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Active hauls · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Overview</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a haul between sections.</div>
         </div>
@@ -1985,7 +1985,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
             <StatusPill status={project.status || 'active'} />
           </div>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            <EditableText value={project.gc} onSave={(v) => updateProject({ gc: v })} /> Â· <EditableText value={project.address} onSave={(v) => updateProject({ address: v })} />
+            <EditableText value={project.gc} onSave={(v) => updateProject({ gc: v })} /> · <EditableText value={project.address} onSave={(v) => updateProject({ address: v })} />
           </div>
           {project.material && project.material.length > 0 && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2], marginTop: S[3] }}>
@@ -2020,7 +2020,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
                       <Avatar name={op.name} color={C.accent} />
                       <div>
                         <div style={{ fontWeight: 600 }}>{op.name}</div>
-                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler Â· {op.projectIds.length > 1 ? `${op.projectIds.length} hauls` : '1 haul'}</div>
+                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} hauls` : '1 haul'}</div>
                       </div>
                     </div>
                   </Td>
@@ -2069,7 +2069,7 @@ function AddHaulerForm({ onAdd, onCancel }) {
 function NotFound({ navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 600, margin: '60px auto' }}>
-      <EmptyState icon="x" title="Not found" body="That page doesn't exist or you don't have permission." action={<Btn onClick={() => navigate('/')}>{'â†'} Back to start</Btn>} />
+      <EmptyState icon="x" title="Not found" body="That page doesn't exist or you don't have permission." action={<Btn onClick={() => navigate('/')}>{'←'} Back to start</Btn>} />
     </div>
   );
 }
@@ -2183,14 +2183,14 @@ function AdminNewProject({ db, setDb, navigate }) {
     >
         {step === 1 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-            <Label>Step 1 â€” Haul basics</Label>
+            <Label>Step 1 — Haul basics</Label>
             <div>
               <div style={{ ...T.caption, marginBottom: 4 }}>Haul name</div>
               <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="e.g., West Side Phase 2" style={inputStyle} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
               <div>
-                <div style={{ ...T.caption, marginBottom: 4 }}>Code (2â€“4 chars)</div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>Code (2–4 chars)</div>
                 <input value={effectiveCode} onChange={e => {
                   const v = e.target.value;
                   setCodeTouched(v.length > 0);
@@ -2238,7 +2238,7 @@ function AdminNewProject({ db, setDb, navigate }) {
 
         {step === 2 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-            <Label>Step 2 â€” Assign haulers</Label>
+            <Label>Step 2 — Assign haulers</Label>
             <div style={{ ...T.bodySm, color: C.inkDim }}>Pick the haulers who will run this haul. You'll assign trucks to them in the next step.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
               {db.haulers.map(op => {
@@ -2264,7 +2264,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
                     </div>
                     <div style={{ ...T.monoSm, color: C.inkDim }}>
-                      {op.projectIds.length} {op.projectIds.length === 1 ? 'haul' : 'hauls'} Â· {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
+                      {op.projectIds.length} {op.projectIds.length === 1 ? 'haul' : 'hauls'} · {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
                     </div>
                   </div>
                 );
@@ -2276,7 +2276,7 @@ function AdminNewProject({ db, setDb, navigate }) {
 
         {step === 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-            <Label>Step 3 â€” Assign trucks</Label>
+            <Label>Step 3 — Assign trucks</Label>
             <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this haul and assign each to one of the haulers you selected.</div>
             <div>
               <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
@@ -2304,15 +2304,15 @@ function AdminNewProject({ db, setDb, navigate }) {
                       color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
                     }}>{selected ? 'âœ“' : ''}</div>
                     <div onClick={() => toggleTruck(t.id)} style={{ flex: 1, minWidth: 180, cursor: 'pointer' }}>
-                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} Â· {typeLabel}</div>
+                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                        {t.hauler} Â· {currentProj ? `On ${currentProj.name}${currentOp ? ' / ' + currentOp.name : ''}` : 'Unassigned'}
+                        {t.hauler} · {currentProj ? `On ${currentProj.name}${currentOp ? ' / ' + currentOp.name : ''}` : 'Unassigned'}
                       </div>
                     </div>
                     {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
                     {selected && (
                       <select value={sel.haulerId} onChange={e => setTruckHauler(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
-                        <option value="">Pick a haulerâ€¦</option>
+                        <option value="">Pick a hauler…</option>
                         {haulerIds.map(opId => {
                           const op = db.haulers.find(o => o.id === opId);
                           return op ? <option key={opId} value={opId}>{op.name}</option> : null;
@@ -2324,14 +2324,14 @@ function AdminNewProject({ db, setDb, navigate }) {
               })}
             </div>
             <div style={{ ...T.caption }}>
-              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' Â· pick a hauler for each' : ''}
+              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick a hauler for each' : ''}
             </div>
           </div>
         )}
 
         {step === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-            <Label>Step 4 â€” Review</Label>
+            <Label>Step 4 — Review</Label>
             <div>
               <Label style={{ marginBottom: S[2] }}>Basics</Label>
               <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
@@ -2367,7 +2367,7 @@ function AdminNewProject({ db, setDb, navigate }) {
             <div>
               <Label style={{ marginBottom: S[2] }}>Trucks ({trucks.length})</Label>
               {trucks.length === 0 ? (
-                <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No trucks assigned yet â€” you can add them later.</div>
+                <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No trucks assigned yet — you can add them later.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
                   {trucks.map(sel => {
@@ -2376,10 +2376,10 @@ function AdminNewProject({ db, setDb, navigate }) {
                     const typeLabel = t ? ((TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type) : '?';
                     return t ? (
                       <div key={sel.truckId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3], flexWrap: 'wrap' }}>
-                        <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} Â· {typeLabel}</div>
+                        <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
                         <div style={{ ...T.monoSm, color: C.inkDim }}>{t.hauler}</div>
                         <div style={{ flex: 1 }} />
-                        <div style={{ ...T.caption }}>â†’ {op ? op.name : 'No hauler'}</div>
+                        <div style={{ ...T.caption }}>→ {op ? op.name : 'No hauler'}</div>
                       </div>
                     ) : null;
                   })}
@@ -3488,7 +3488,7 @@ function AdminReports({ db, navigate }) {
 }
 
 // =====================================================================
-// Haul Requests â€” admin views (v3)
+// Haul Requests — admin views (v3)
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate }) {
   const [filter, setFilter] = useState('all'); // all | pending | matched | accepted | completed
@@ -3556,7 +3556,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
                 return (
                   <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
                     <Td mono><span style={{ color: C.accent }}>{req.id}</span></Td>
-                    <Td>{project ? project.name : 'â€”'}</Td>
+                    <Td>{project ? project.name : '—'}</Td>
                     <Td>{material ? material.label : req.materialCode}</Td>
                     <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
                     <Td mono dim>{req.requestedAt}</Td>
@@ -3573,7 +3573,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
                         <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
                       ) : hauler && truck ? (
                         <span style={{ ...T.caption }}>{hauler.name} / #{truck.plate}</span>
-                      ) : <span style={{ color: C.inkFaint }}>â€”</span>}
+                      ) : <span style={{ color: C.inkFaint }}>—</span>}
                     </Td>
                   </Tr>
                 );
@@ -3738,7 +3738,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               {req.volumeCY} CY of {material ? material.label : req.materialCode}
             </h1>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-              {project ? project.name : 'â€”'} Â· requested at {req.requestedAt}
+              {project ? project.name : '—'} · requested at {req.requestedAt}
             </div>
             {req.notes && (
               <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
@@ -3934,7 +3934,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{op.name}</div>
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                        {op.projectIds.length} project{op.projectIds.length === 1 ? '' : 's'} Â· {opTrucks.length} truck{opTrucks.length === 1 ? '' : 's'}
+                        {op.projectIds.length} project{op.projectIds.length === 1 ? '' : 's'} · {opTrucks.length} truck{opTrucks.length === 1 ? '' : 's'}
                       </div>
                     </div>
                     {isMatched
@@ -4037,7 +4037,16 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   }, 0);
 
   const beginEdit = () => { setDraft({ name: hauler.name, phone: hauler.phone, email: hauler.email }); setEditing(true); };
-  const saveEdit = () => { updateHauler({ name: draft.name.trim() || hauler.name, phone: draft.phone.trim(), email: draft.email.trim() }); setEditing(false); };
+  // Match the new-hauler wizard's email validator. Empty is allowed (some
+  // haulers in the seed don't have an email); a non-empty value must look like
+  // one. Save is disabled and an inline error renders below the input.
+  const emailDraft = (draft.email || '').trim();
+  const emailValid = emailDraft === '' || /.+@.+\..+/.test(emailDraft);
+  const saveEdit = () => {
+    if (!emailValid) return;
+    updateHauler({ name: draft.name.trim() || hauler.name, phone: draft.phone.trim(), email: emailDraft });
+    setEditing(false);
+  };
   const cancelEdit = () => { setEditing(false); };
 
   // Attachments: 4 doc categories. Each entry shows current upload state or empty placeholder.
@@ -4050,7 +4059,10 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   ];
   const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'hauler';
   const uploadAttachment = (typeCode) => {
-    const filename = `${slug(hauler.name)}-${typeCode}-${TODAY_ISO}.pdf`;
+    // Suffix disambiguates same-day re-uploads of the same doc type so the
+    // file list reads like distinct versions instead of one filename twice.
+    const suffix = Math.random().toString(36).slice(2, 6);
+    const filename = `${slug(hauler.name)}-${typeCode}-${TODAY_ISO}-${suffix}.pdf`;
     const newAtt = { id: 'att-' + Math.random().toString(36).substring(2, 7), type: typeCode, filename, uploadedAt: TODAY_ISO };
     const existing = attachments.filter(a => a.type !== typeCode);
     updateHauler({ attachments: [...existing, newAtt] });
@@ -4084,12 +4096,15 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
             <div>
               <Label style={{ marginBottom: 4 }}>Email</Label>
               <input type="email" value={draft.email} onChange={e => setDraft(d => ({ ...d, email: e.target.value }))}
-                style={{ ...T.body, width: '100%', padding: '8px 10px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, boxSizing: 'border-box', fontFamily: F.mono }} />
+                style={{ ...T.body, width: '100%', padding: '8px 10px', borderRadius: R.sm, border: `1px solid ${emailValid ? C.ruleHi : C.warn}`, background: C.surface, color: C.ink, boxSizing: 'border-box', fontFamily: F.mono }} />
+              {!emailValid && (
+                <div style={{ ...T.caption, color: C.warn, marginTop: 4 }}>Doesn't look like an email — e.g. name@company.com</div>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={cancelEdit}>Cancel</Btn>
-            <Btn variant="primary" size="sm" onClick={saveEdit}>Save changes</Btn>
+            <Btn variant="primary" size="sm" onClick={saveEdit} disabled={!emailValid}>Save changes</Btn>
           </div>
         </Card>
       ) : (
@@ -4320,9 +4335,10 @@ function AdminPayments({ db, navigate }) {
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauler payouts &amp; GC billing.</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Who's owed money, who owes us, and when the next batch goes out.</div>
         </div>
-        <div style={{ display: 'flex', gap: S[2] }}>
-          <Btn variant="secondary" size="sm" onClick={() => alert('Coming soon — ACH batch run placeholder')}>Run payout batch</Btn>
-          <Btn variant="primary"   size="sm" onClick={() => alert('Coming soon — send GC invoice statements')}>Send GC statements</Btn>
+        <div style={{ display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
+          <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">Coming soon</Pill>
+          <Btn variant="ghost" size="sm" disabled>Run payout batch</Btn>
+          <Btn variant="ghost" size="sm" disabled>Send GC statements</Btn>
         </div>
       </div>
 
@@ -4579,7 +4595,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
 }
 
 // =====================================================================
-// AdminActivity â€” reverse-chrono event feed at /admin/activity
+// AdminActivity — reverse-chrono event feed at /admin/activity
 // =====================================================================
 // Reads db.activity (appended via appendActivity() on every mutation).
 // On first render, advances db.activityLastReadAt to the latest event timestamp
@@ -4596,7 +4612,7 @@ function AdminActivity({ db, setDb, navigate }) {
       if (latest <= lastRead) return prev;
       return { ...prev, activityLastReadAt: latest };
     });
-    // Only run once on mount â€” mark-as-read fires on first view, not on every
+    // Only run once on mount — mark-as-read fires on first view, not on every
     // re-render that follows new events arriving while the page is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -4618,7 +4634,7 @@ function AdminActivity({ db, setDb, navigate }) {
       return;
     }
     if (id.startsWith('dr-')) {
-      // No flat drivers index â€” fall back to haulers list.
+      // No flat drivers index — fall back to haulers list.
       navigate('/admin/haulers'); return;
     }
     // Project codes are uppercase letters/digits without a known prefix.
@@ -4655,7 +4671,7 @@ function AdminActivity({ db, setDb, navigate }) {
     return C.inkDim;
   };
   // Build a "name" string for the Avatar component to derive initials from.
-  // Avatar splits on whitespace and takes first letters â€” we feed it whatever
+  // Avatar splits on whitespace and takes first letters — we feed it whatever
   // the actor's display name is so it produces sensible initials.
   const actorNameFor = (evt) => {
     if (evt.actorRole === 'admin') return 'Admin User';
@@ -4729,7 +4745,7 @@ function AdminActivity({ db, setDb, navigate }) {
 
 // Shared admin sidebar nav (desktop) + drawer (mobile).
 // Renders the same nav items in both modes; parent controls visibility via CSS.
-function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', haulersExpanded, setHaulersExpanded }) {
+function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', haulersExpanded, setHaulersExpanded, reportsExpanded, setReportsExpanded }) {
   const requests = db.haulRequests || [];
   const pendingCount = requests.filter(r => r.status === 'pending').length;
   const activity = db.activity || [];
@@ -4740,8 +4756,11 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onRequests = parts[1] === 'requests';
   const onActivity = parts[1] === 'activity';
   const onReporting = parts[1] === 'reporting';
+  const onLiveStats = parts[1] === 'reports';
   const onPayments  = parts[1] === 'payments';
   const onActiveTrucks = parts[1] === 'trucks' && parts[2] === 'active';
+  // Reports section covers both /admin/reporting AND /admin/reports (live stats sublink)
+  const onReportsAny = onReporting || onLiveStats;
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
@@ -4786,7 +4805,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
               ...T.monoSm, background: 'transparent', color: C.inkFaint, border: 'none',
               padding: '0 10px', cursor: 'pointer',
             }}
-          ><span aria-hidden="true">{expanded ? 'â–¾' : 'â–¸'}</span></button>
+          ><span aria-hidden="true">{expanded ? '▾' : '▸'}</span></button>
         )}
       </div>
     );
@@ -4829,9 +4848,32 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       <Item
         icon={<ReportingIcon size={20} />}
         label="Reports"
-        active={onReporting}
+        active={onReportsAny}
+        expandable
+        expanded={reportsExpanded}
+        onToggleExpand={() => setReportsExpanded(v => !v)}
         onClick={() => go('/admin/reporting')}
       />
+      {reportsExpanded && (
+        <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
+          <button onClick={() => go('/admin/reporting')} style={{
+            ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+            padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer',
+            color: onReporting ? C.accent : C.inkDim, fontWeight: onReporting ? 600 : 500,
+          }}
+            onMouseEnter={e => { if (!onReporting) { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; } }}
+            onMouseLeave={e => { if (!onReporting) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; } }}
+          >Financial reports</button>
+          <button onClick={() => go('/admin/reports')} style={{
+            ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+            padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer',
+            color: onLiveStats ? C.accent : C.inkDim, fontWeight: onLiveStats ? 600 : 500,
+          }}
+            onMouseEnter={e => { if (!onLiveStats) { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; } }}
+            onMouseLeave={e => { if (!onLiveStats) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; } }}
+          >Live stats</button>
+        </div>
+      )}
       <Item
         icon={<PaymentsIcon size={20} />}
         label="Payments"
@@ -4882,7 +4924,8 @@ function AdminShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [haulersExpanded, setHaulersExpanded] = useState(false);
-  const sidebarProps = { db, navigate, hash, haulersExpanded, setHaulersExpanded };
+  const [reportsExpanded, setReportsExpanded] = useState(() => parts[1] === 'reports' || parts[1] === 'reporting');
+  const sidebarProps = { db, navigate, hash, haulersExpanded, setHaulersExpanded, reportsExpanded, setReportsExpanded };
   const resetDemoData = () => {
     if (!window.confirm('Reset all demo data? This will reload the page.')) return;
     try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) {}
@@ -4897,7 +4940,6 @@ function AdminShell({ db, setDb, navigate, hash }) {
         className="admin-mobile-nav-trigger"
         onClick={() => setDrawerOpen(true)}
       ><MenuIcon size={18} /></button>
-      <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/reports')}>Live stats</Btn>
       {resetBtn}
     </div>
   );
@@ -5029,7 +5071,7 @@ function HaulerHome({ haulerId, db, navigate }) {
           <Label color={C.accent}>Hauler dashboard</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{op.name}</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>
-            <span style={{ fontFamily: F.mono }}>{op.phone}</span> Â· <span style={{ fontFamily: F.mono }}>{op.email}</span>
+            <span style={{ fontFamily: F.mono }}>{op.phone}</span> · <span style={{ fontFamily: F.mono }}>{op.email}</span>
           </div>
         </div>
       </div>
@@ -5135,7 +5177,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
         <div>
           <Label color={C.accent}>Haul</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>{project.name}</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>{project.gc} Â· {project.address}</div>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>{project.gc} · {project.address}</div>
         </div>
         <StatusPill status={project.status || 'active'} />
       </div>
@@ -5175,13 +5217,13 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
                     </div>
                     <div style={{ ...T.micro, color: C.inkDim, marginTop: S[1] }}>{t.hauler}</div>
                   </Td>
-                  <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>â€” unassigned</span>}</Td>
-                  <Td mono>{hr ? hr.clockIn : 'â€”'}</Td>
+                  <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                  <Td mono>{hr ? hr.clockIn : '—'}</Td>
                   <Td align="right" mono>{fmtHours(truckHours)}</Td>
                   <Td align="right" mono>{truckLoads.filter(l => l.status === 'approved').length}{truckLoads.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: S[1] }}>+{truckLoads.filter(l => l.status === 'pending').length}p</span>}</Td>
                   <Td align="right" mono>{truckCY}</Td>
                   <Td>{hr ? <StatusPill status={hr.status} /> : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off</Pill>}</Td>
-                  {isAdmin && <Td align="right">{driver ? <button onClick={(e) => { e.stopPropagation(); navigate(`/driver/${driver.id}`); }} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '4px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase' }}>Widget {'â†—'}</button> : <span style={{ color: C.inkFaint }}>â€”</span>}</Td>}
+                  {isAdmin && <Td align="right">{driver ? <button onClick={(e) => { e.stopPropagation(); navigate(`/driver/${driver.id}`); }} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '4px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase' }}>Widget {'↗'}</button> : <span style={{ color: C.inkFaint }}>—</span>}</Td>}
                   <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
                 </Tr>
               );
@@ -5233,7 +5275,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
             Truck <span style={{ color: C.accent }}>#{truck.plate}</span>
           </h1>
           <div style={{ ...T.bodySm, color: C.inkDim }}>
-            {truckType.label} Â· {truckType.cap} Â· ${rate}/hr
+            {truckType.label} · {truckType.cap} · ${rate}/hr
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
@@ -5245,7 +5287,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                 <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim }}>{driver.phone}</div>
               </div>
               {isAdmin && (
-                <button onClick={() => navigate(`/driver/${driver.id}`)} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase', marginLeft: S[2] }}>Widget {'â†—'}</button>
+                <button onClick={() => navigate(`/driver/${driver.id}`)} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase', marginLeft: S[2] }}>Widget {'↗'}</button>
               )}
             </div>
           ) : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">No driver</Pill>}
@@ -5277,7 +5319,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
               return (
                 <Tr key={l.id}>
                   <Td mono>{l.time}</Td>
-                  <Td mono dim>{l.ticketNo || 'â€”'}</Td>
+                  <Td mono dim>{l.ticketNo || '—'}</Td>
                   <Td>{m ? m.label : l.material}</Td>
                   <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{l.cy} CY</span></Td>
                   <Td><StatusPill status={l.status} /></Td>
@@ -5302,9 +5344,9 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
               const d = db.drivers.find(dr => dr.id === h.driverId);
               return (
                 <Tr key={h.id}>
-                  <Td>{d ? d.name : <span style={{ color: C.inkFaint }}>â€”</span>}</Td>
+                  <Td>{d ? d.name : <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td mono>{h.clockIn}</Td>
-                  <Td mono>{h.clockOut || <span style={{ color: C.inkFaint }}>â€”</span>}</Td>
+                  <Td mono>{h.clockOut || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td align="right" mono>{h.breakMin} min</Td>
                   <Td align="right" mono>{fmtHours(calcHours(h.clockIn, h.breakMin, h.clockOut))}</Td>
                   <Td><StatusPill status={h.status} /></Td>
@@ -5366,7 +5408,7 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
 
   return (
     <div style={{ marginBottom: S[3] }}>
-      <Label style={{ marginBottom: S[3] }}>Log new load Â· #{truck.plate}</Label>
+      <Label style={{ marginBottom: S[3] }}>Log new load · #{truck.plate}</Label>
       <Card>
         <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 1fr 100px auto', gap: S[3], alignItems: 'flex-end' }}>
           <div>
@@ -5392,7 +5434,7 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
           </div>
         </div>
         <div style={{ ...T.micro, color: C.inkFaint, marginTop: S[3] }}>
-          Driver: {driver ? driver.name : 'unassigned'} Â· Submits as pending for review.
+          Driver: {driver ? driver.name : 'unassigned'} · Submits as pending for review.
         </div>
       </Card>
     </div>
@@ -5544,7 +5586,7 @@ function HaulerDrivers({ projectId, trucks, db, setDb }) {
                     </select>
                     {driver && <span style={{ marginLeft: S[2] }}><EditableText value={driver.name} onSave={(v) => updateDriver(driver.id, { name: v })} /></span>}
                   </Td>
-                  <Td mono dim>{driver ? <EditableText value={driver.phone} onSave={(v) => updateDriver(driver.id, { phone: v })} mono /> : 'â€”'}</Td>
+                  <Td mono dim>{driver ? <EditableText value={driver.phone} onSave={(v) => updateDriver(driver.id, { phone: v })} mono /> : '—'}</Td>
                   <Td align="right">{driver && <Btn variant="ghost" size="xs" onClick={() => assign(t.id, null)}>Unassign</Btn>}</Td>
                 </Tr>
               );
@@ -5648,7 +5690,7 @@ function HaulerApprovals({ projectId, hours, loads, hauler, db, setDb }) {
                     <Td>{d.name}</Td>
                     <Td><EditableSelect value={l.material} options={materialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
                     <Td mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
-                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ ...T.micro, color: C.inkFaint}}>â€”</span>}</Td>
+                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ ...T.micro, color: C.inkFaint}}>—</span>}</Td>
                     <Td align="right">
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <Btn variant="ghost" size="xs" onClick={() => rejectLoad(l.id)}>Reject</Btn>
@@ -5705,7 +5747,7 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
       const rate = db.rates[t.type];
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
-        truckPlate: t.plate, truckType: t.type, driverName: driver ? driver.name : 'â€”',
+        truckPlate: t.plate, truckType: t.type, driverName: driver ? driver.name : '—',
         hours: parseFloat(truckHours.toFixed(2)), rate, amount: parseFloat((truckHours * rate).toFixed(2)),
       };
     });
@@ -5765,12 +5807,12 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
         <div className="invoice-print" style={{ marginBottom: S[5], border: `1px solid ${C.accent}`, background: C.surface, borderRadius: R.lg, padding: S[5] }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
             <div>
-              <Label color={C.accent} style={{ marginBottom: 6 }}>Draft invoice Â· click any value to edit</Label>
+              <Label color={C.accent} style={{ marginBottom: 6 }}>Draft invoice · click any value to edit</Label>
               <div style={{ ...T.statValue, fontWeight: 700, color: C.ink }}>
                 <EditableText value={draft.number} onSave={(v) => updateDraft({ number: v })} mono />
               </div>
               <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>
-                For period <EditableText value={draft.periodStart} onSave={(v) => updateDraft({ periodStart: v })} mono /> {'â†’'} <EditableText value={draft.periodEnd} onSave={(v) => updateDraft({ periodEnd: v })} mono />
+                For period <EditableText value={draft.periodStart} onSave={(v) => updateDraft({ periodStart: v })} mono /> {'→'} <EditableText value={draft.periodEnd} onSave={(v) => updateDraft({ periodEnd: v })} mono />
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
@@ -5811,7 +5853,7 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
 
           <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
             <div style={{ ...T.caption }}>
-              {draft.lineItems.length} line item{draft.lineItems.length === 1 ? '' : 's'} Â· {draft.loadCount} loads Â· {draft.totalCY} CY
+              {draft.lineItems.length} line item{draft.lineItems.length === 1 ? '' : 's'} · {draft.loadCount} loads · {draft.totalCY} CY
             </div>
             <div style={{ display: 'flex', gap: S[2] }}>
               <Btn variant="ghost" onClick={() => { setShowDraft(false); setDraft(null); }}>Cancel</Btn>
@@ -5838,7 +5880,7 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
                 return (
                   <Tr key={inv.id}>
                     <Td mono><span style={{ color: C.accent }}>{inv.number}</span></Td>
-                    <Td mono dim>{inv.periodStart} {'â†’'} {inv.periodEnd}</Td>
+                    <Td mono dim>{inv.periodStart} {'→'} {inv.periodEnd}</Td>
                     <Td>{inv.billTo}</Td>
                     <Td align="right" mono>{inv.lineItems.length}</Td>
                     <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(total)}</Td>
@@ -5862,10 +5904,10 @@ function HaulerShell({ db, setDb, navigate, hash }) {
     if (op) current = op.name;
     if (parts.length >= 5 && parts[3] === 'p') {
       const proj = db.projects.find(p => p.id === parts[4]);
-      if (proj) current = `${op ? op.name : '?'} Â· ${proj.name}`;
+      if (proj) current = `${op ? op.name : '?'} · ${proj.name}`;
       if (parts.length >= 7 && parts[5] === 't') {
         const tr = db.trucks.find(t => t.id === parts[6]);
-        if (tr) current = `${op ? op.name : '?'} Â· ${proj ? proj.name : '?'} Â· #${tr.plate}`;
+        if (tr) current = `${op ? op.name : '?'} · ${proj ? proj.name : '?'} · #${tr.plate}`;
       }
     }
   }
@@ -5886,7 +5928,7 @@ function HaulerShell({ db, setDb, navigate, hash }) {
 function Phone({ children }) {
   return (
     <div className="phone-frame-outer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: S[5], minHeight: '100vh', background: C.bgDeep }}>
-      <div className="phone-frame-caption" style={{ ...T.caption, marginBottom: S[3], textAlign: 'center'}}>Driver view â€” what a field user sees in the field.</div>
+      <div className="phone-frame-caption" style={{ ...T.caption, marginBottom: S[3], textAlign: 'center'}}>Driver view — what a field user sees in the field.</div>
       <div className="brand-frame-chrome" style={{ marginBottom: S[3] }}><Brand size="sm" /></div>
       <div className="phone-bezel" style={{ width: 360, minHeight: 760, background: '#000', borderRadius: 48, padding: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
         <div className="phone-screen" style={{ width: '100%', height: '100%', minHeight: 740, background: C.bg, borderRadius: 40, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -5987,7 +6029,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
   const isPaused = !!(hr && hr.pausedAt);
   const isOpen = !!(hr && hr.status === 'open');
 
-  // Live ticker â€” re-render every second while clocked in (and not paused)
+  // Live ticker — re-render every second while clocked in (and not paused)
   const [, force] = useState(0);
   useEffect(() => {
     if (!isOpen) return;
@@ -6091,10 +6133,12 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px` }}>
-      <div style={{ marginBottom: S[3] }}>
-        <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
-        <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
-      </div>
+      {!embedded && (
+        <div style={{ marginBottom: S[3] }}>
+          <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
+          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
+        </div>
+      )}
 
       {/* Truck card */}
       <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
@@ -6106,7 +6150,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
           {hr && hr.status !== 'open' && <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">Shift ended</Pill>}
         </div>
         <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType.label} Â· {truckType.cap} Â· {truck.hauler}</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType.label} · {truckType.cap} · {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
           <Label style={{ marginBottom: 4 }}>On haul</Label>
           <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project.name}</div>
@@ -6119,7 +6163,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
         <div style={{ background: isPaused ? C.warnSoft : C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3], border: isPaused ? `1px solid ${C.warn}` : 'none' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: S[2] }}>
             <Label color={isPaused ? C.warn : C.accent}>{isPaused ? 'Paused' : (isOpen ? 'On the clock' : 'Shift submitted')}</Label>
-            <span style={{ ...T.monoSm, color: C.inkDim }}>started {hr.clockIn}{hr.clockOut ? ' Â· ended ' + hr.clockOut : ''}</span>
+            <span style={{ ...T.monoSm, color: C.inkDim }}>started {hr.clockIn}{hr.clockOut ? ' · ended ' + hr.clockOut : ''}</span>
           </div>
           <div style={{ ...T.h1, fontFamily: F.mono, fontWeight: 700, color: isPaused ? C.warn : C.accent, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
             {fmtElapsed(elapsedMs)}
@@ -6169,9 +6213,9 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
             return (
               <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>ðŸ“·</div>}
+                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
                   <div>
-                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} Â· {m.label}</div>
+                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m.label}</div>
                     <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
                   </div>
                 </div>
@@ -6192,12 +6236,12 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Hours</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : 'â€”'}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : '—'}</div>
             {!hr && <div style={{ fontFamily: F.body, fontSize: 10, color: C.inkFaint, marginTop: 4 }}>Not clocked in</div>}
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Last load</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length > 0 ? todayLoads[todayLoads.length - 1].time : 'â€”'}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length > 0 ? todayLoads[todayLoads.length - 1].time : '—'}</div>
           </div>
         </div>
       </div>
@@ -6250,7 +6294,7 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo, onSubmitt
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
       <button onClick={goBack} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← Back</button>
-      <Label color={C.accent} style={{ marginBottom: 6 }}>New load Â· #{truck.plate} Â· {proj ? proj.name : ''}</Label>
+      <Label color={C.accent} style={{ marginBottom: 6 }}>New load · #{truck.plate} · {proj ? proj.name : ''}</Label>
       <div style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, letterSpacing: -0.6, marginBottom: S[4] }}>Log a load</div>
 
       <Label style={{ marginBottom: 6 }}>Material</Label>
@@ -6272,7 +6316,7 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo, onSubmitt
           color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontWeight: 600,
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: S[4],
         }}>
-          <span style={{ fontSize: 32 }}>ðŸ“·</span>
+          <span style={{ fontSize: 32 }}>📷</span>
           <span>Take photo of load</span>
           <span style={{ ...T.micro, color: C.inkFaint, fontWeight: 500 }}>Required to submit</span>
         </button>
@@ -6430,10 +6474,10 @@ function DriverMultiTruckHome({ driver, trucks, db, setDb, navigate }) {
               {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
               {!isOpen && <StatusPill status="idle" />}
             </div>
-            <div style={{ ...T.caption, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} Â· {truck.hauler}</div>
+            <div style={{ ...T.caption, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} · {truck.hauler}</div>
             <div style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[3] }}>
               <Label style={{ marginBottom: 4 }}>On haul</Label>
-              <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : 'â€”'}</div>
+              <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
               <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -6575,10 +6619,10 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
           {!isOpen && <StatusPill status="idle" />}
         </div>
         <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} Â· {truckType ? truckType.cap : ''} Â· {truck.hauler}</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} · {truckType ? truckType.cap : ''} · {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
           <Label style={{ marginBottom: 4 }}>On haul</Label>
-          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project ? project.name : 'â€”'}</div>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
           <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
           <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.address : ''}</div>
         </div>
@@ -6596,7 +6640,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
         </Card>
         <Card padding={S[3]}>
           <Label style={{ marginBottom: 4 }}>Shift</Label>
-          <div style={{ ...T.statValue, fontWeight: 700, color: isOpen ? C.accent : C.inkDim, lineHeight: 1 }}>{isOpen ? (elapsedMs / 3600000).toFixed(1) + 'h' : 'â€”'}</div>
+          <div style={{ ...T.statValue, fontWeight: 700, color: isOpen ? C.accent : C.inkDim, lineHeight: 1 }}>{isOpen ? (elapsedMs / 3600000).toFixed(1) + 'h' : '—'}</div>
         </Card>
       </div>
 
@@ -6625,9 +6669,9 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
             return (
               <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>ðŸ“·</div>}
+                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
                   <div>
-                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} Â· {m ? m.label : l.material}</div>
+                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m ? m.label : l.material}</div>
                     <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
                   </div>
                 </div>
@@ -6659,7 +6703,7 @@ function App() {
   });
   const [remoteUpdateNonce, setRemoteUpdateNonce] = useState(0);
   // Track the last serialized payload we wrote (or received) so we can skip
-  // redundant writes â€” including the write that would otherwise echo back the
+  // redundant writes — including the write that would otherwise echo back the
   // value we just received from another tab.
   const lastSerializedRef = useRef(null);
   useEffect(() => {
@@ -6669,12 +6713,12 @@ function App() {
       lastSerializedRef.current = serialized;
       window.localStorage.setItem(DB_STORAGE_KEY, serialized);
     } catch (e) {
-      // localStorage unavailable / quota exceeded â€” silently no-op
+      // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
   // Cross-tab sync: when another tab writes to jse_db_v1, hydrate the new value
   // here. `storage` events do not fire in the originating tab, so no loop.
-  // newValue === null means a sibling tab cleared the key (Reset demo data) â€”
+  // newValue === null means a sibling tab cleared the key (Reset demo data) —
   // hydrateDb(null) returns a fresh seed, so peer tabs reseed too.
   useEffect(() => {
     const onStorage = (e) => {
@@ -6698,47 +6742,52 @@ function App() {
     else if (h.startsWith('/admin/reports')) title = 'JSE — Live stats';
     else if (h.startsWith('/admin/payments')) title = 'JSE — Payments';
     else if (h.startsWith('/admin/trucks/active')) title = 'JSE — Active Trucks';
+    else if (h.startsWith('/admin/trucks/new/for/') && parts[4] && db && db.haulers) {
+      const op = db.haulers.find(o => o.id === parts[4]);
+      title = op ? `JSE — New truck for ${op.name}` : 'JSE — New truck';
+    }
+    else if (h.startsWith('/admin/trucks/new')) title = 'JSE — New truck';
     else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
-    else if (h.startsWith('/admin/activity')) title = 'JSE â€” Activity';
+    else if (h.startsWith('/admin/activity')) title = 'JSE — Activity';
     else if (h.startsWith('/admin/requests')) {
-      title = parts[2] ? `JSE â€” Haul Request ${parts[2]}` : 'JSE â€” Haul Requests';
+      title = parts[2] ? `JSE — Haul Request ${parts[2]}` : 'JSE — Haul Requests';
     }
     else if (h.startsWith('/admin/haulers')) {
       if (parts[2] && db && db.haulers) {
         const op = db.haulers.find(o => o.id === parts[2]);
-        title = op ? `JSE â€” Hauler â€” ${op.name}` : 'JSE â€” Haulers';
+        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Haulers';
       } else {
-        title = 'JSE â€” Haulers';
+        title = 'JSE — Haulers';
       }
     }
     else if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) {
       const proj = db && db.projects ? db.projects.find(p => p.id === parts[2]) : null;
       if (proj && parts[3] === 'o' && parts[4]) {
         const op = db.haulers.find(o => o.id === parts[4]);
-        title = op ? `JSE â€” Admin â€” ${proj.name} / ${op.name}` : `JSE â€” Admin â€” ${proj.name}`;
+        title = op ? `JSE — Admin — ${proj.name} / ${op.name}` : `JSE — Admin — ${proj.name}`;
       } else {
-        title = proj ? `JSE â€” Admin â€” ${proj.name}` : 'JSE â€” Admin';
+        title = proj ? `JSE — Admin — ${proj.name}` : 'JSE — Admin';
       }
     }
-    else if (h.startsWith('/admin')) title = 'JSE â€” Admin';
+    else if (h.startsWith('/admin')) title = 'JSE — Admin';
     else if (parts[0] === 'hauler' && parts[1] === 'o' && parts[2]) {
       const op = db && db.haulers ? db.haulers.find(o => o.id === parts[2]) : null;
       if (op && parts[3] === 'p' && parts[4]) {
         const proj = db.projects.find(p => p.id === parts[4]);
-        title = proj ? `JSE â€” Hauler â€” ${op.name} / ${proj.name}` : `JSE â€” Hauler â€” ${op.name}`;
+        title = proj ? `JSE — Hauler — ${op.name} / ${proj.name}` : `JSE — Hauler — ${op.name}`;
       } else {
-        title = op ? `JSE â€” Hauler â€” ${op.name}` : 'JSE â€” Hauler';
+        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Hauler';
       }
     }
-    else if (h.startsWith('/hauler')) title = 'JSE â€” Hauler';
+    else if (h.startsWith('/hauler')) title = 'JSE — Hauler';
     else if (parts[0] === 'driver' && parts[1] === 'log') {
-      title = 'JSE â€” Driver â€” Log load';
+      title = 'JSE — Driver — Log load';
     }
     else if (parts[0] === 'driver' && parts[1] === 'truck' && parts[2]) {
       const tr = db && db.trucks ? db.trucks.find(t => t.id === parts[2]) : null;
-      title = tr ? `JSE â€” Driver â€” Truck #${tr.plate}` : 'JSE â€” Driver';
+      title = tr ? `JSE — Driver — Truck #${tr.plate}` : 'JSE — Driver';
     }
-    else if (h.startsWith('/driver')) title = 'JSE â€” Driver';
+    else if (h.startsWith('/driver')) title = 'JSE — Driver';
     document.title = title;
   }, [hash, db]);
   const route = (hash || '/').split('/')[1] || '';
