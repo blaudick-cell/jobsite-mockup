@@ -28,18 +28,27 @@ The reason: background Coworks shouldn't push to `main` because the orchestrator
    - Run `git diff main` (and `git diff main..HEAD` if there's a local commit) to confirm a non-empty diff.
    - If both diffs are empty, STOP and report: "Nothing to propose — worktree matches `main`." Do not create any folder.
 
-2. **Determine the OUTPUT location.**
+2. **Sync against `origin/main` BEFORE generating the patch.** The proposing Cowork's worktree may have diverged from the orchestrator's `main` while you were working. Without this step, patches frequently fail `git apply --check` on the orchestrator side due to stale base offsets — that's been the #1 cause of manual-fallback application on prior proposals.
+   - `git fetch origin main` (always safe — fetch is read-only, no push).
+   - Compare your worktree base to `origin/main`:
+     - If `git merge-base HEAD origin/main` equals the current `origin/main` SHA → no drift, proceed.
+     - Otherwise, the worktree base is behind. **Preferred:** rebase the worktree onto `origin/main` (`git rebase origin/main`) and re-run the pipeline's relevant tests if anything looks off after rebase.
+     - **Alternative (no rebase):** generate the diff against `origin/main` instead of the local `main` ref in step 3 below. This avoids rebasing but means the resulting patch context is anchored to `origin/main`, which is what the orchestrator will apply against.
+     - **If rebase introduces conflicts:** STOP and report. Flag the conflicting files in the report. The orchestrator will need to resolve manually anyway — better to surface this now than to ship a patch that doesn't apply cleanly.
+   - Do not `git push` anything during this step. Fetch + local rebase only.
+
+3. **Determine the OUTPUT location.**
    - Use the proposing Cowork's OWN outputs folder (the standard Cowork output location every session has — the agent already has Write access without permission prompts).
    - Inside that folder, create a subfolder: `proposal-<short-slug>-<unix-timestamp>/` where `<short-slug>` is 3-5 hyphenated lowercase words summarizing the change (e.g., `proposal-driver-tooltip-fix-1716234567`, `proposal-reports-export-csv-1716234999`). The unix timestamp avoids collisions across pipeline runs.
    - Do NOT write to any absolute path outside the Cowork's outputs — earlier proposals used a shared agent-proposals dir which required per-folder approval and was unreachable from the orchestrator. The Cowork outputs folder is the only safe target.
 
-3. **Write the patch.**
-   - Preferred: `git diff --unified=10 main > <folder>/changes.patch` — wide context for easier review.
+4. **Write the patch.**
+   - Preferred: `git diff --unified=10 origin/main > <folder>/changes.patch` — wide context for easier review, and anchored to the orchestrator's actual main (not the local `main` ref, which may be stale even after step 2).
    - If shell redirect from the worktree's git state is awkward, capture the diff into a variable and use the Write tool to write the file. Either path is fine; the goal is a clean `changes.patch` file in the proposal folder.
    - Verify the patch is non-empty (`wc -c` or equivalent).
    - Verify it re-applies cleanly: `git apply --check <folder>/changes.patch` against the same worktree. If `--check` fails, STOP and report: "Patch does not re-apply cleanly — investigate before proposing." Do not write the proposal file.
 
-4. **Write `<folder>/proposal.md`** with this exact structure (markdown headings):
+5. **Write `<folder>/proposal.md`** with this exact structure (markdown headings):
 
    ```markdown
    # <Title — one-line summary>
@@ -51,7 +60,7 @@ The reason: background Coworks shouldn't push to `main` because the orchestrator
 
    ## Files touched
    ```
-   <output of `git diff --stat main`>
+   <output of `git diff --stat origin/main`>
    ```
 
    ## Pipeline summary
@@ -76,11 +85,11 @@ The reason: background Coworks shouldn't push to `main` because the orchestrator
    - [ ] <any change-specific check>
    ```
 
-5. **Write `<folder>/ready.txt`** containing a single line: the ISO 8601 timestamp of completion (`date -u +"%Y-%m-%dT%H:%M:%SZ"`). The user can use this to confirm the proposal is fresh when forwarding.
+6. **Write `<folder>/ready.txt`** containing a single line: the ISO 8601 timestamp of completion (`date -u +"%Y-%m-%dT%H:%M:%SZ"`). The user can use this to confirm the proposal is fresh when forwarding.
 
-6. **Surface the artifacts in the chat.** If the `present_files` MCP tool (or equivalent attachment-card tool) is available in this Cowork session, call it with the three file paths (`changes.patch`, `proposal.md`, `ready.txt`). This renders them as download cards so the user (Robert) can attach them in one click when forwarding to the orchestrator. If the tool isn't available, just include the absolute paths in your report — the user can grab them manually.
+7. **Surface the artifacts in the chat.** If the `present_files` MCP tool (or equivalent attachment-card tool) is available in this Cowork session, call it with the three file paths (`changes.patch`, `proposal.md`, `ready.txt`). This renders them as download cards so the user (Robert) can attach them in one click when forwarding to the orchestrator. If the tool isn't available, just include the absolute paths in your report — the user can grab them manually.
 
-7. **Hard prohibitions.** Do NOT:
+8. **Hard prohibitions.** Do NOT:
    - Push to GitHub (no `git push`).
    - Commit to remote anywhere.
    - Touch Netlify (no API calls, no curl to deploy URLs except for read-only verification noted in the proposal).
@@ -88,7 +97,9 @@ The reason: background Coworks shouldn't push to `main` because the orchestrator
    - Write outside the Cowork's outputs folder (other than the worktree files the pipeline already touched).
    - Write to any absolute path that requires permission approval — stick to the Cowork outputs the session already owns.
 
-8. **Report back to the Cowork's user** with these elements:
+   `git fetch origin main` and local `git rebase origin/main` are explicitly ALLOWED — they're read-only against the remote and don't change `main` anywhere. The push prohibition only applies to writes back to GitHub.
+
+9. **Report back to the Cowork's user** with these elements:
    - **Proposal folder:** `<absolute path to the proposal folder inside Cowork outputs>`
    - **Files:**
      - `<absolute path>/changes.patch`
@@ -103,9 +114,10 @@ Before finalizing the proposal, sanity-check: does the change ONLY affect the mo
 
 ## Rules
 
-- Never amend commits or rewrite history in the worktree without explicit user instruction.
+- `git fetch origin main` and local `git rebase origin/main` are required (step 2) and explicitly safe. They don't push or mutate the remote.
+- Never amend commits or rewrite history in the worktree without explicit user instruction — except a clean `git rebase origin/main` per step 2, which is the standard sync.
 - Never skip hooks.
-- Never `--force` anything.
+- Never `--force` anything (including `--force-with-lease` — if the rebase needs force, stop and report).
 - `.claude/launch.json` stays untracked (it's a personal dev-server config, in `.gitignore`).
 - If `git apply --check` fails, that's a hard stop — the orchestrator can't push a patch that doesn't apply.
 
