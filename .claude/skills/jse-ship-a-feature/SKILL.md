@@ -49,7 +49,7 @@ After `git push`:
 
 ## Schema migration
 
-**`DB_SCHEMA_VERSION` is currently 8.** Migration cascade in `hydrateDb` — every step forward-only, idempotent, wrapped in try/catch, falls back to seed on failure. See [[jse-data-model]] § Schema version log for the full history.
+**`DB_SCHEMA_VERSION` is currently 9.** Migration cascade in `hydrateDb` — every step forward-only, idempotent, wrapped in try/catch, falls back to seed on failure. See [[jse-data-model]] § Schema version log for the full history.
 
 To bump:
 1. Increment `DB_SCHEMA_VERSION`.

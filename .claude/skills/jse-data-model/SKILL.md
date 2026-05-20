@@ -12,7 +12,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 | key | seed | shape |
 |---|---|---|
 | `projects` | `PROJECTS_SEED` | `{ id, code, name, gc, address, startDate, status, material: [] }` |
-| `haulers` | `HAULERS_SEED` | `{ id, name, phone, email, projectIds: [], company? }` |
+| `haulers` | `HAULERS_SEED` | `{ id, name, phone, email, projectIds: [], company?, attachments: [{ id, type: 'w9'\|'insurance'\|'msa'\|'other', filename, uploadedAt }] }` |
 | `drivers` | `DRIVERS_SEED` | `{ id, name, phone, licenseNumber? }` |
 | `trucks` | `TRUCKS_SEED` | `{ id, plate, type, hauler, projectId, haulerId, driverId?, make?, model?, capacityCY? }` |
 | `hours` | `HOURS_SEED` | `{ id, driverId, truckId, projectId, clockIn, clockOut?, breakMin, status, date }` |
@@ -111,8 +111,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v5 → v6 | Added `activity` collection + `activityLastReadAt` scalar |
 | v6 → v7 | Added `acceptedByDriver` + `passedBy` to every haul request; new `accepted` status |
 | v7 → v8 | Added `assignments[]` to every haul request — multi-truck, multi-day, per-truck load lists. Legacy `matchedTruckId` synthesizes a one-truck zero-loads assignment for old payloads. |
+| v8 → v9 | Backfilled `attachments: []` on every hauler (W-9, Insurance, MSA, Other docs). Backfilled missing `rates` keys from TRUCK_TYPES defaults (e.g. HS at $140). |
 
-`DB_SCHEMA_VERSION = 8`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 9`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 

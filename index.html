@@ -433,7 +433,7 @@ const TRUCK_TYPES = [
   { code: 'SD',  label: 'Side Dump',  axles: 'Semi',   cap: '20-24 yd', rate: 125 },
   { code: 'ED',  label: 'End Dump',   axles: 'Semi',   cap: '20-24 yd', rate: 125 },
   { code: 'BD',  label: 'Belly Dump', axles: 'Semi',   cap: '22-26 yd', rate: 125 },
-  { code: 'HS',  label: 'High Side',  axles: 'Semi',   cap: '24-28 yd', rate: 125 },
+  { code: 'HS',  label: 'High Side',  axles: 'Semi',   cap: '24-28 yd', rate: 140 },
 ];
 const RATES_INIT = Object.fromEntries(TRUCK_TYPES.map(t => [t.code, t.rate]));
 
@@ -903,16 +903,49 @@ const PROJECTS_SEED = [
 ];
 
 const HAULERS_SEED = [
-  { id: 'op-001', name: 'Marcus Lane',         phone: '(303) 555-0142', email: 'marcus@lakehomes.co',     projectIds: ['WP'] },
-  { id: 'op-002', name: 'Priya Sharma',        phone: '(303) 555-0188', email: 'priya@avere.co',          projectIds: ['GW','RR','CH'] },
-  { id: 'op-003', name: 'Eli Brennan',         phone: '(303) 555-0114', email: 'eli@heritagebld.com',     projectIds: ['AS'] },
-  { id: 'op-004', name: 'Dana Whitaker',       phone: '(720) 555-0166', email: 'dana@avere.co',           projectIds: ['GW'] },
-  { id: 'op-005', name: 'Oz Trucking',         phone: '(303) 555-0210', email: 'dispatch@oztrucking.co',  projectIds: ['WP','GW','RR','AS','CH'] },
-  { id: 'op-006', name: '5 Angels Transport, LLC', phone: '(720) 555-0211', email: 'ops@5angels.co',      projectIds: ['WP','GW','RR','AS','CH'] },
-  { id: 'op-007', name: 'Dominguez',           phone: '(303) 555-0212', email: 'jorge@dominguezhauling.com', projectIds: ['WP','GW','RR','AS'] },
-  { id: 'op-008', name: 'Z&Z Hauling',         phone: '(720) 555-0213', email: 'dispatch@zandz.co',       projectIds: ['WP','GW','RR','AS'] },
-  { id: 'op-009', name: 'Cordillera Hauling',  phone: '(720) 555-0224', email: 'rachel@cordillerahaul.com', projectIds: ['CH'] },
-  { id: 'op-010', name: 'Front Range Logistics', phone: '(303) 555-0231', email: 'dispatch@frontrangelogistics.com', projectIds: ['WP','CH'] },
+  { id: 'op-001', name: 'Marcus Lane',         phone: '(303) 555-0142', email: 'marcus@lakehomes.co',     projectIds: ['WP'],
+    attachments: [
+      { id: 'att-001', type: 'w9',        filename: 'lakehomes-w9-2026.pdf',      uploadedAt: '2026-01-12' },
+      { id: 'att-002', type: 'insurance', filename: 'lakehomes-coi-2026.pdf',     uploadedAt: '2026-04-03' },
+      { id: 'att-003', type: 'msa',       filename: 'lakehomes-msa-signed.pdf',   uploadedAt: '2025-11-08' },
+    ] },
+  { id: 'op-002', name: 'Priya Sharma',        phone: '(303) 555-0188', email: 'priya@avere.co',          projectIds: ['GW','RR','CH'],
+    attachments: [
+      { id: 'att-004', type: 'w9',        filename: 'avere-w9-2026.pdf',          uploadedAt: '2026-02-21' },
+      { id: 'att-005', type: 'insurance', filename: 'avere-coi-2026Q2.pdf',       uploadedAt: '2026-04-15' },
+      { id: 'att-006', type: 'msa',       filename: 'avere-msa-v3-signed.pdf',    uploadedAt: '2025-09-14' },
+      { id: 'att-007', type: 'other',     filename: 'avere-safety-cert.pdf',      uploadedAt: '2026-03-02' },
+    ] },
+  { id: 'op-003', name: 'Eli Brennan',         phone: '(303) 555-0114', email: 'eli@heritagebld.com',     projectIds: ['AS'],
+    attachments: [
+      { id: 'att-008', type: 'w9',        filename: 'heritage-w9.pdf',            uploadedAt: '2026-03-30' },
+      { id: 'att-009', type: 'insurance', filename: 'heritage-coi.pdf',           uploadedAt: '2026-03-30' },
+    ] },
+  { id: 'op-004', name: 'Dana Whitaker',       phone: '(720) 555-0166', email: 'dana@avere.co',           projectIds: ['GW'], attachments: [] },
+  { id: 'op-005', name: 'Oz Trucking',         phone: '(303) 555-0210', email: 'dispatch@oztrucking.co',  projectIds: ['WP','GW','RR','AS','CH'],
+    attachments: [
+      { id: 'att-010', type: 'w9',        filename: 'oz-w9-2026.pdf',             uploadedAt: '2026-01-04' },
+      { id: 'att-011', type: 'insurance', filename: 'oz-coi-2026.pdf',            uploadedAt: '2026-04-22' },
+      { id: 'att-012', type: 'msa',       filename: 'oz-msa-2025-12.pdf',         uploadedAt: '2025-12-18' },
+    ] },
+  { id: 'op-006', name: '5 Angels Transport, LLC', phone: '(720) 555-0211', email: 'ops@5angels.co',      projectIds: ['WP','GW','RR','AS','CH'],
+    attachments: [
+      { id: 'att-013', type: 'w9',        filename: '5angels-w9.pdf',             uploadedAt: '2026-02-14' },
+      { id: 'att-014', type: 'insurance', filename: '5angels-coi-Q2.pdf',         uploadedAt: '2026-04-08' },
+    ] },
+  { id: 'op-007', name: 'Dominguez',           phone: '(303) 555-0212', email: 'jorge@dominguezhauling.com', projectIds: ['WP','GW','RR','AS'], attachments: [] },
+  { id: 'op-008', name: 'Z&Z Hauling',         phone: '(720) 555-0213', email: 'dispatch@zandz.co',       projectIds: ['WP','GW','RR','AS'],
+    attachments: [
+      { id: 'att-015', type: 'w9',        filename: 'zz-w9-2026.pdf',             uploadedAt: '2026-01-19' },
+      { id: 'att-016', type: 'msa',       filename: 'zz-msa-signed.pdf',          uploadedAt: '2025-10-22' },
+    ] },
+  { id: 'op-009', name: 'Cordillera Hauling',  phone: '(720) 555-0224', email: 'rachel@cordillerahaul.com', projectIds: ['CH'], attachments: [] },
+  { id: 'op-010', name: 'Front Range Logistics', phone: '(303) 555-0231', email: 'dispatch@frontrangelogistics.com', projectIds: ['WP','CH'],
+    attachments: [
+      { id: 'att-017', type: 'w9',        filename: 'frl-w9.pdf',                 uploadedAt: '2026-02-05' },
+      { id: 'att-018', type: 'insurance', filename: 'frl-coi.pdf',                uploadedAt: '2026-04-19' },
+      { id: 'att-019', type: 'msa',       filename: 'frl-msa-v2.pdf',             uploadedAt: '2026-01-30' },
+    ] },
 ];
 
 const TRUCKS_SEED = [
@@ -1176,7 +1209,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 8;
+const DB_SCHEMA_VERSION = 9;
 const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity'];
 
 // =====================================================================
@@ -1295,10 +1328,20 @@ function hydrateDb(raw) {
     //   v7 → v8: add `assignments[]` to every haulRequest. Multi-truck, multi-day,
     //            per-truck load tracking. Legacy `matchedHaulerId`/`matchedTruckId`
     //            preserved for compat; `assignments[]` is the new source of truth.
+    //   v8 → v9: backfill `attachments: []` on every hauler (W-9/Insurance/MSA/Other
+    //            docs). Backfill any missing `rates` key from TRUCK_TYPES defaults so
+    //            new truck types (e.g. HS at $140) light up after a stale-cache load.
     const { operators: legacyOperators, ...rest } = parsed;
-    const migratedHaulers = Array.isArray(rest.haulers)
+    const migratedHaulers = (Array.isArray(rest.haulers)
       ? rest.haulers
-      : (Array.isArray(legacyOperators) ? legacyOperators : HAULERS_SEED);
+      : (Array.isArray(legacyOperators) ? legacyOperators : HAULERS_SEED)
+    ).map(h => h && !Array.isArray(h.attachments) ? { ...h, attachments: [] } : h);
+    const migratedRates = (() => {
+      const out = { ...RATES_INIT, ...(rest.rates && typeof rest.rates === 'object' ? rest.rates : {}) };
+      // Preserve user-edited values; only fill in keys missing from the cached payload.
+      TRUCK_TYPES.forEach(t => { if (out[t.code] == null) out[t.code] = t.rate; });
+      return out;
+    })();
     const renameOpField = (rows) => Array.isArray(rows)
       ? rows.map(r => {
           if (!r || typeof r !== 'object' || !('operatorId' in r)) return r;
@@ -1316,6 +1359,7 @@ function hydrateDb(raw) {
     return {
       ...rest,
       haulers: migratedHaulers,
+      rates: migratedRates,
       trucks: renameOpField(rest.trucks),
       invoices: renameOpField(rest.invoices),
       loads: Array.isArray(rest.loads)
@@ -2558,16 +2602,17 @@ function AdminNewDriver({ db, setDb, navigate }) {
 //   2. Assignments (optional project + hauler from existing records)
 //   3. Review + Create
 // =====================================================================
-function AdminNewTruck({ db, setDb, navigate }) {
+function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
+  const prefillHauler = prefillHaulerId ? db.haulers.find(h => h.id === prefillHaulerId) : null;
   const [step, setStep] = useState(1);
   const [plate, setPlate] = useState('');
   const [type, setType] = useState(TRUCK_TYPES[0].code);
-  const [haulerCompany, setHaulerCompany] = useState('');
+  const [haulerCompany, setHaulerCompany] = useState(prefillHauler ? prefillHauler.name : '');
   const [make, setMake] = useState('');
   const [model, setModel] = useState('');
   const [capacityCY, setCapacityCY] = useState('');
   const [projectId, setProjectId] = useState('');
-  const [haulerId, setHaulerId] = useState('');
+  const [haulerId, setHaulerId] = useState(prefillHauler ? prefillHauler.id : '');
 
   const inputStyle = WIZARD_INPUT_STYLE;
   const detailsValid = !!plate.trim() && !!type;
@@ -3877,18 +3922,44 @@ function AdminHaulers({ db, navigate }) {
 
 function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const hauler = db.haulers.find(o => o.id === haulerId);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState({ name: '', phone: '', email: '' });
   if (!hauler) return <NotFound navigate={navigate} />;
   const projects = db.projects.filter(p => hauler.projectIds.includes(p.id));
   const trucks = db.trucks.filter(t => t.haulerId === hauler.id);
   const truckIds = new Set(trucks.map(t => t.id));
   const hours = db.hours.filter(h => truckIds.has(h.truckId));
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
+  const attachments = hauler.attachments || [];
   const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const totalRevenue = hours.reduce((s, h) => {
     const t = trucks.find(x => x.id === h.truckId);
     return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0);
   }, 0);
+
+  const beginEdit = () => { setDraft({ name: hauler.name, phone: hauler.phone, email: hauler.email }); setEditing(true); };
+  const saveEdit = () => { updateHauler({ name: draft.name.trim() || hauler.name, phone: draft.phone.trim(), email: draft.email.trim() }); setEditing(false); };
+  const cancelEdit = () => { setEditing(false); };
+
+  // Attachments: 4 doc categories. Each entry shows current upload state or empty placeholder.
+  // For the mockup we simulate uploads by generating filenames + ISO dates client-side.
+  const DOC_TYPES = [
+    { code: 'w9',        label: 'W-9',       hint: 'IRS W-9 tax form' },
+    { code: 'insurance', label: 'Insurance', hint: 'Certificate of Insurance' },
+    { code: 'msa',       label: 'MSA',       hint: 'Master Service Agreement' },
+    { code: 'other',     label: 'Other',     hint: 'Safety certs, licenses, etc.' },
+  ];
+  const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'hauler';
+  const uploadAttachment = (typeCode) => {
+    const filename = `${slug(hauler.name)}-${typeCode}-${TODAY_ISO}.pdf`;
+    const newAtt = { id: 'att-' + Math.random().toString(36).substring(2, 7), type: typeCode, filename, uploadedAt: TODAY_ISO };
+    const existing = attachments.filter(a => a.type !== typeCode);
+    updateHauler({ attachments: [...existing, newAtt] });
+  };
+  const removeAttachment = (typeCode) => {
+    updateHauler({ attachments: attachments.filter(a => a.type !== typeCode) });
+  };
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -3898,24 +3969,49 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         { label: hauler.name },
       ]} navigate={navigate} />
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
-        <Avatar name={hauler.name} size={56} color={C.accent} />
-        <div style={{ flex: 1 }}>
-          <Label color={C.accent}>Hauler</Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
-            <EditableText value={hauler.name} onSave={(v) => updateHauler({ name: v })} />
-          </h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            <EditableText value={hauler.phone} onSave={(v) => updateHauler({ phone: v })} mono /> Â·{' '}
-            <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
+      {editing ? (
+        <Card style={{ marginBottom: S[5], padding: S[5] }}>
+          <Label color={C.accent} style={{ marginBottom: S[3] }}>Edit hauler</Label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[4] }}>
+            <div>
+              <Label style={{ marginBottom: 4 }}>Name</Label>
+              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+                style={{ ...T.body, width: '100%', padding: '8px 10px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, boxSizing: 'border-box', fontFamily: F.display, fontWeight: 600 }} />
+            </div>
+            <div>
+              <Label style={{ marginBottom: 4 }}>Phone</Label>
+              <input value={draft.phone} onChange={e => setDraft(d => ({ ...d, phone: e.target.value }))}
+                style={{ ...T.body, width: '100%', padding: '8px 10px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, boxSizing: 'border-box', fontFamily: F.mono }} />
+            </div>
+            <div>
+              <Label style={{ marginBottom: 4 }}>Email</Label>
+              <input type="email" value={draft.email} onChange={e => setDraft(d => ({ ...d, email: e.target.value }))}
+                style={{ ...T.body, width: '100%', padding: '8px 10px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, boxSizing: 'border-box', fontFamily: F.mono }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
+            <Btn variant="secondary" size="sm" onClick={cancelEdit}>Cancel</Btn>
+            <Btn variant="primary" size="sm" onClick={saveEdit}>Save changes</Btn>
+          </div>
+        </Card>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5], flexWrap: 'wrap' }}>
+          <Avatar name={hauler.name} size={56} color={C.accent} />
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <Label color={C.accent}>Hauler</Label>
+            <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{hauler.name}</h1>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, fontFamily: F.mono }}>
+              {hauler.phone} <span style={{ color: C.inkFaint }}>·</span> {hauler.email}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/drivers/new')}>+ Add driver</Btn>
+            <Btn variant="primary"   size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/drivers/new')}>+ New driver</Btn>
-          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/trucks/new')}>+ New truck</Btn>
-          <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
-        </div>
-      </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
         <Card padding={S[4]}><Stat label="Hauls" value={projects.length} /></Card>
@@ -3923,6 +4019,44 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         <Card padding={S[4]}><Stat label="Loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs`} /></Card>
       </div>
+
+      {/* Attachments — W-9, Insurance, MSA, Other. Mockup-only upload (generates ISO-named pdf). */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label>Attachments</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+            {attachments.length === 0 ? 'No documents on file.' : `${attachments.length} of ${DOC_TYPES.length} document${DOC_TYPES.length === 1 ? '' : 's'} on file.`}
+          </div>
+        </div>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><Th>Document</Th><Th>File</Th><Th>Uploaded</Th><Th></Th></tr></thead>
+          <tbody>
+            {DOC_TYPES.map(dt => {
+              const att = attachments.find(a => a.type === dt.code);
+              return (
+                <tr key={dt.code} style={{ borderTop: `1px solid ${C.rule}` }}>
+                  <Td>
+                    <div style={{ fontWeight: 600, color: C.ink }}>{dt.label}</div>
+                    <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{dt.hint}</div>
+                  </Td>
+                  <Td mono>{att ? <span style={{ color: C.ink }}>{att.filename}</span> : <span style={{ color: C.inkFaint }}>— not uploaded</span>}</Td>
+                  <Td mono dim>{att ? isoToShortDate(att.uploadedAt) : '—'}</Td>
+                  <Td align="right">
+                    <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
+                      <Btn variant={att ? 'secondary' : 'primary'} size="sm" onClick={() => uploadAttachment(dt.code)}>
+                        {att ? 'Replace' : 'Upload'}
+                      </Btn>
+                      {att && <Btn variant="danger" size="sm" onClick={() => removeAttachment(dt.code)}>Remove</Btn>}
+                    </div>
+                  </Td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </Card>
 
       <div style={{ marginBottom: S[3] }}><Label>Hauls this hauler is on</Label></div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
@@ -3952,12 +4086,12 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       </Card>
 
       <div style={{ marginBottom: S[3] }}><Label>All trucks</Label></div>
-      <Card padding={0}>
+      <Card padding={0} style={{ marginBottom: S[4] }}>
         {trucks.length === 0 ? (
           <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Plate</Th><Th>Type</Th><Th>Haul</Th><Th>Driver</Th></tr></thead>
+            <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th>Driver</Th></tr></thead>
             <tbody>
               {trucks.map(t => {
                 const driver = db.drivers.find(d => d.id === t.driverId);
@@ -3966,8 +4100,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
                   <Tr key={t.id}>
                     <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
                     <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
-                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>â€” Bench</span>}</Td>
-                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>â€” unassigned</span>}</Td>
+                    <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
+                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
+                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
                   </Tr>
                 );
               })}
@@ -3975,6 +4110,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </table>
         )}
       </Card>
+      <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: S[6] }}>
+        <Btn variant="primary" size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck for {hauler.name}</Btn>
+      </div>
     </div>
   );
 }
@@ -4307,6 +4445,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks'  && parts[2] === 'new' && <AdminNewTruck  db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 5 && parts[1] === 'trucks'  && parts[2] === 'new' && parts[3] === 'for' && <AdminNewTruck db={db} setDb={setDb} navigate={navigate} prefillHaulerId={parts[4]} />}
           {parts.length === 3 && parts[1] === 'drivers' && parts[2] === 'new' && <AdminNewDriver db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] !== 'new' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
           {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
@@ -4777,6 +4916,8 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
 
 function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
   const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [draft, setDraft] = useState({ plate: '', type: '', rate: '' });
   const addTruck = (form) => {
     const id = 'tk-' + Math.random().toString(36).substring(2, 7);
     setDb(prev => appendActivity(
@@ -4789,15 +4930,27 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
     if (!confirm('Remove this truck from the haul?')) return;
     setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
   };
-  const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
-  const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
-  const typeOptions = TRUCK_TYPES.map(t => ({ value: t.code, label: t.label }));
+  const beginEditTruck = (t) => {
+    setEditingId(t.id);
+    setDraft({ plate: t.plate, type: t.type, rate: String(db.rates[t.type] || 0) });
+  };
+  const cancelEditTruck = () => { setEditingId(null); };
+  const saveEditTruck = (id) => {
+    const rateNum = parseInt(draft.rate);
+    setDb(prev => ({
+      ...prev,
+      trucks: prev.trucks.map(t => t.id === id ? { ...t, plate: draft.plate.trim() || t.plate, type: draft.type } : t),
+      rates: Number.isFinite(rateNum) && rateNum > 0 ? { ...prev.rates, [draft.type]: rateNum } : prev.rates,
+    }));
+    setEditingId(null);
+  };
+  const inlineInput = { ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono, width: 90 };
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[4] }}>
         <div>
           <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Trucks</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this haul Â· click any value to edit Â· rate updates all trucks of that type</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this haul · click Edit on a row to change plate / type / rate</div>
         </div>
       </div>
       <Card padding={0}>
@@ -4806,13 +4959,39 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
           <tbody>
             {trucks.map(t => {
               const driver = db.drivers.find(d => d.id === t.driverId);
+              const isEditing = editingId === t.id;
+              if (isEditing) {
+                return (
+                  <Tr key={t.id} style={{ background: C.surfaceHi }}>
+                    <Td mono><span style={{ color: C.accent }}>#</span><input value={draft.plate} onChange={e => setDraft(d => ({ ...d, plate: e.target.value }))} style={inlineInput} /></Td>
+                    <Td align="right" mono>$<input value={draft.rate} onChange={e => setDraft(d => ({ ...d, rate: e.target.value }))} style={{ ...inlineInput, width: 70 }} />/hr</Td>
+                    <Td>
+                      <select value={draft.type} onChange={e => setDraft(d => ({ ...d, type: e.target.value, rate: String(db.rates[e.target.value] || 0) }))} style={{ ...inlineInput, fontFamily: F.body, width: 'auto' }}>
+                        {TRUCK_TYPES.map(tt => <option key={tt.code} value={tt.code}>{tt.label}</option>)}
+                      </select>
+                    </Td>
+                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                    <Td align="right">
+                      <div style={{ display: 'flex', gap: S[1], justifyContent: 'flex-end' }}>
+                        <Btn variant="primary" size="xs" onClick={() => saveEditTruck(t.id)}>Save</Btn>
+                        <Btn variant="ghost" size="xs" onClick={cancelEditTruck}>Cancel</Btn>
+                      </div>
+                    </Td>
+                  </Tr>
+                );
+              }
               return (
                 <Tr key={t.id}>
-                  <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
-                  <Td align="right" mono>$<EditableText value={String(db.rates[t.type] || 0)} onSave={(v) => updateRate(t.type, v)} mono />/hr</Td>
-                  <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={typeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
-                  <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>-- unassigned</span>}</Td>
-                  <Td align="right"><Btn variant="danger" size="xs" onClick={() => removeTruck(t.id)}>Remove</Btn></Td>
+                  <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
+                  <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
+                  <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{(TRUCK_TYPES.find(tt => tt.code === t.type) || {}).label || t.type}</Pill></Td>
+                  <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                  <Td align="right">
+                    <div style={{ display: 'flex', gap: S[1], justifyContent: 'flex-end' }}>
+                      <Btn variant="secondary" size="xs" onClick={() => beginEditTruck(t)}>Edit</Btn>
+                      <Btn variant="danger" size="xs" onClick={() => removeTruck(t.id)}>Remove</Btn>
+                    </div>
+                  </Td>
                 </Tr>
               );
             })}
