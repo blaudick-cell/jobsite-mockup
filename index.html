@@ -38,6 +38,11 @@
     }
     /* Compensate for any sticky header so section anchors land below it */
     section[id] { scroll-margin-top: 24px; }
+    /* Hero headline: force the second clause onto its own line only at desktop widths.
+       At ≤900px the span flows inline so the headline wraps naturally with no double-wrap. */
+    @media (min-width: 901px) {
+      [data-hero-line="break"] { display: block; }
+    }
 
 
     /* === Tier 2: tables → cards on mobile === */
@@ -882,11 +887,11 @@ function EyeIcon({ size = 24 }) {
   );
 }
 function PhoneIcon({ size = 24 }) {
-  // Mobile phone outline
+  // Mobile phone outline — path scaled to fill 28x28 viewBox so visual weight matches sibling icons.
   return (
     <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <rect x="8" y="3" width="12" height="22" rx="2.5" />
-      <path d="M12 6 H16 M13 22 H15" />
+      <rect x="6" y="1" width="16" height="26" rx="3" />
+      <path d="M11 5 H17 M13 24 H15" />
     </svg>
   );
 }
@@ -952,7 +957,12 @@ function Landing({ navigate }) {
           maxWidth: 1180, margin: '0 auto', padding: `${S[4]}px ${S[5]}px`,
           display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[4],
         }}>
-          <Brand size="md" />
+          <button onClick={() => scrollTo('hero')} aria-label="Back to top" style={{
+            background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit',
+            display: 'flex', alignItems: 'center',
+          }}>
+            <Brand size="md" />
+          </button>
           <a href={GH_URL} target="_blank" rel="noopener noreferrer" style={{
             display: 'inline-flex', alignItems: 'center', gap: S[2],
             color: C.inkDim, fontFamily: F.body, fontSize: 13, fontWeight: 500,
@@ -971,7 +981,8 @@ function Landing({ navigate }) {
           <div>
             <Label color={C.accent}>Operational visibility</Label>
             <h1 style={{ ...T.h1, fontSize: 64, lineHeight: 1.05, letterSpacing: -2, marginTop: S[3], marginBottom: S[4], color: C.ink }}>
-              Dispatch to delivery,<br />on the same page.
+              Dispatch to delivery,{' '}
+              <span data-hero-line="break">on the same page.</span>
             </h1>
             <p style={{ ...T.bodyLg, fontSize: 19, color: C.inkDim, lineHeight: 1.5, maxWidth: 540, margin: 0 }}>
               Jobsite Exchange coordinates project managers, operators, and drivers in real time — so loads, hours, and truck assignments stay tight across every shift.
