@@ -349,19 +349,25 @@ const F = {
   body: '"Inter", -apple-system, system-ui, sans-serif',
   mono: '"JetBrains Mono", "SF Mono", Menlo, monospace',
 };
-const R = { sm: 8, md: 12, lg: 16, pill: 999 };
+const R = { xs: 4, sm: 8, md: 12, lg: 16, pill: 999 };
 const S = { 1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32, 7: 48, 8: 64 };
 
-// Typography tokens — opt-in for new code. Existing 240+ inline call sites left alone
-// so this refactor stays surgical. Use these for new components / landing / EmptyState.
+// Typography tokens — single source of truth for type. Inline `fontSize:` values
+// throughout the app should spread from these tokens instead of using raw numbers.
 const T = {
-  h1:      { fontFamily: F.display, fontSize: 44, fontWeight: 700, lineHeight: 1.1, letterSpacing: -1 },
-  h2:      { fontFamily: F.display, fontSize: 28, fontWeight: 700, lineHeight: 1.2, letterSpacing: -0.5 },
-  h3:      { fontFamily: F.display, fontSize: 20, fontWeight: 600, lineHeight: 1.3 },
-  body:    { fontFamily: F.body, fontSize: 14, lineHeight: 1.5 },
-  bodyLg:  { fontFamily: F.body, fontSize: 16, lineHeight: 1.5 },
-  caption: { fontFamily: F.body, fontSize: 12, lineHeight: 1.4, color: C.inkDim },
-  mono:    { fontFamily: F.mono, fontSize: 12, lineHeight: 1.4 },
+  h1:        { fontFamily: F.display, fontSize: 44, fontWeight: 700, lineHeight: 1.1, letterSpacing: -1 },
+  h2Lg:      { fontFamily: F.display, fontSize: 36, fontWeight: 700, lineHeight: 1.15, letterSpacing: -1 },
+  h2:        { fontFamily: F.display, fontSize: 28, fontWeight: 700, lineHeight: 1.2, letterSpacing: -0.5 },
+  statValue: { fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1 },
+  h3:        { fontFamily: F.display, fontSize: 20, fontWeight: 600, lineHeight: 1.3 },
+  h4:        { fontFamily: F.display, fontSize: 18, fontWeight: 600, lineHeight: 1.3 },
+  bodyLg:    { fontFamily: F.body, fontSize: 16, lineHeight: 1.5 },
+  body:      { fontFamily: F.body, fontSize: 14, lineHeight: 1.5 },
+  bodySm:    { fontFamily: F.body, fontSize: 13, lineHeight: 1.5 },
+  caption:   { fontFamily: F.body, fontSize: 12, lineHeight: 1.4, color: C.inkDim },
+  micro:     { fontFamily: F.body, fontSize: 11, lineHeight: 1.35 },
+  mono:      { fontFamily: F.mono, fontSize: 12, lineHeight: 1.4 },
+  monoSm:    { fontFamily: F.mono, fontSize: 11, lineHeight: 1.4 },
 };
 
 // =====================================================================
@@ -688,7 +694,7 @@ function Btn({ children, onClick, variant = 'primary', size = 'md', disabled, fu
 function Pill({ children, color = C.accent, soft = C.accentSoft, style = {} }) {
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 4,
+      display: 'inline-flex', alignItems: 'center', gap: S[1],
       padding: '4px 10px', borderRadius: R.pill, background: soft, color,
       fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
       ...style,
@@ -721,8 +727,8 @@ function Stat({ label, value, sub, align = 'left' }) {
   return (
     <div style={{ textAlign: align }}>
       <Label style={{ marginBottom: 6 }}>{label}</Label>
-      <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, color: C.ink, lineHeight: 1.05 }}>{value}</div>
-      {sub && <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 4 }}>{sub}</div>}
+      <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.ink, lineHeight: 1.05 }}>{value}</div>
+      {sub && <div style={{ ...T.caption, marginTop: S[1] }}>{sub}</div>}
     </div>
   );
 }
@@ -747,8 +753,8 @@ function EmptyState({ icon, title, body, action }) {
   return (
     <div style={{ padding: S[6], textAlign: 'center', background: C.surface, borderRadius: R.lg }}>
       {iconNode}
-      <div style={{ ...T.h3, fontSize: 18, color: C.ink, marginBottom: 6 }}>{title}</div>
-      <div style={{ ...T.body, fontSize: 13, color: C.inkDim, marginBottom: action ? S[4] : 0 }}>{body}</div>
+      <div style={{ ...T.h4, color: C.ink, marginBottom: 6 }}>{title}</div>
+      <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: action ? S[4] : 0 }}>{body}</div>
       {action}
     </div>
   );
@@ -763,8 +769,8 @@ function Th({ children, align = 'left', width }) {
 }
 function Td({ children, align = 'left', mono, dim, style = {} }) {
   return <td style={{
-    textAlign: align, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`,
-    fontFamily: mono ? F.mono : F.body, fontSize: 13, color: dim ? C.inkDim : C.ink, fontWeight: 500,
+    ...T.bodySm, textAlign: align, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`,
+    fontFamily: mono ? F.mono : F.body, color: dim ? C.inkDim : C.ink, fontWeight: 500,
     ...style,
   }}>{children}</td>;
 }
@@ -780,14 +786,13 @@ function Crumbs({ items, navigate }) {
     <nav style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: S[5] }}>
       {items.map((it, i) => (
         <React.Fragment key={i}>
-          {i > 0 && <span style={{ color: C.inkFaint, fontFamily: F.mono, fontSize: 11 }}>/</span>}
+          {i > 0 && <span style={{ ...T.monoSm, color: C.inkFaint}}>/</span>}
           {it.to && i < items.length - 1 ? (
             <button onClick={() => navigate(it.to)} style={{
-              background: 'transparent', border: 'none', cursor: 'pointer',
-              fontFamily: F.body, fontSize: 13, color: C.inkDim, padding: 0, fontWeight: 500,
+              ...T.bodySm, background: 'transparent', border: 'none', cursor: 'pointer', color: C.inkDim, padding: 0, fontWeight: 500,
             }}>{it.label}</button>
           ) : (
-            <span style={{ fontFamily: F.body, fontSize: 13, color: i === items.length - 1 ? C.ink : C.inkDim, fontWeight: i === items.length - 1 ? 600 : 500 }}>{it.label}</span>
+            <span style={{ ...T.bodySm, color: i === items.length - 1 ? C.ink : C.inkDim, fontWeight: i === items.length - 1 ? 600 : 500 }}>{it.label}</span>
           )}
         </React.Fragment>
       ))}
@@ -815,7 +820,7 @@ function EditableText({ value, onSave, multiline, mono, placeholder, style = {} 
     <span
       onClick={(e) => { e.stopPropagation(); e.preventDefault(); setEditing(true); }}
       onMouseDown={e => e.stopPropagation()}
-      style={{ cursor: 'text', padding: '3px 6px', margin: '-3px -6px', borderRadius: 4, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
+      style={{ cursor: 'text', padding: '3px 6px', margin: '-3px -6px', borderRadius: R.xs, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       title="Click to edit">
@@ -840,7 +845,7 @@ function EditableSelect({ value, options, onSave, style = {} }) {
     <span
       onClick={(e) => { e.stopPropagation(); e.preventDefault(); setEditing(true); }}
       onMouseDown={e => e.stopPropagation()}
-      style={{ cursor: 'pointer', padding: '3px 6px', margin: '-3px -6px', borderRadius: 4, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
+      style={{ cursor: 'pointer', padding: '3px 6px', margin: '-3px -6px', borderRadius: R.xs, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
       title="Click to edit">{opt.label}</span>
@@ -854,7 +859,7 @@ function PhonePreview({ children, label = 'Driver view', scale = 0.78 }) {
       <Label>{label}</Label>
       <div style={{ width: W + 20 * scale, height: H + 20 * scale, background: '#000', borderRadius: 48 * scale, padding: 10 * scale, boxShadow: '0 16px 40px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
         <div style={{ width: '100%', height: '100%', background: C.bg, borderRadius: 40 * scale, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ position: 'absolute', top: 8 * scale, left: '50%', transform: 'translateX(-50%)', width: 104 * scale, height: 24 * scale, background: '#000', borderRadius: 12 * scale, zIndex: 100 }} />
+          <div style={{ position: 'absolute', top: 8 * scale, left: '50%', transform: 'translateX(-50%)', width: 104 * scale, height: 24 * scale, background: '#000', borderRadius: R.md * scale, zIndex: 100 }} />
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${14 * scale}px ${26 * scale}px ${4 * scale}px`, fontFamily: F.body, fontSize: 12 * scale, color: C.ink, fontWeight: 600 }}>
             <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
           </div>
@@ -880,14 +885,14 @@ function Topbar({ navigate, role, current, right }) {
         </button>
         <div style={{ display: 'flex', gap: S[1], alignItems: 'center' }}>
           <Pill color={C.accent} soft={C.accentSoft}>{role}</Pill>
-          {current && <span style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>{current}</span>}
+          {current && <span style={{ ...T.bodySm, color: C.inkDim }}>{current}</span>}
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
         {right}
         <button onClick={() => navigate('/')} style={{
-          background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
-          padding: '6px 12px', borderRadius: R.pill, fontFamily: F.body, fontSize: 12, cursor: 'pointer',
+          ...T.caption, background: 'transparent', border: `1px solid ${C.ruleHi}`,
+          padding: '6px 12px', borderRadius: R.pill, cursor: 'pointer',
         }}>Switch role</button>
       </div>
     </div>
@@ -1061,8 +1066,8 @@ function Landing({ navigate }) {
             <Brand size="md" />
           </button>
           <a href={GH_URL} target="_blank" rel="noopener noreferrer" style={{
-            display: 'inline-flex', alignItems: 'center', gap: S[2],
-            color: C.inkDim, fontFamily: F.body, fontSize: 13, fontWeight: 500,
+            ...T.bodySm, display: 'inline-flex', alignItems: 'center', gap: S[2],
+            color: C.inkDim, fontWeight: 500,
             padding: `${S[2]}px ${S[3]}px`, borderRadius: R.pill, border: `1px solid ${C.ruleHi}`,
           }}>
             <GitHubIcon size={16} />
@@ -1141,7 +1146,7 @@ function Landing({ navigate }) {
       <section id="who-its-for" style={{ borderBottom: `1px solid ${C.rule}` }}>
         <div style={sectionShell}>
           <Label color={C.accent}>For the whole crew</Label>
-          <h2 style={{ ...T.h2, fontSize: 36, letterSpacing: -1, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
+          <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
             Built for the people who actually move dirt.
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
@@ -1152,8 +1157,8 @@ function Landing({ navigate }) {
                   <div style={{ color: C.accent, display: 'inline-flex', marginBottom: S[4] }}>
                     <Icon size={32} />
                   </div>
-                  <div style={{ ...T.h3, fontSize: 18, color: C.ink, marginBottom: 6 }}>{a.title}</div>
-                  <div style={{ ...T.body, fontSize: 14, color: C.inkDim }}>{a.body}</div>
+                  <div style={{ ...T.h4, color: C.ink, marginBottom: 6 }}>{a.title}</div>
+                  <div style={{ ...T.body, color: C.inkDim }}>{a.body}</div>
                 </Card>
               );
             })}
@@ -1165,20 +1170,20 @@ function Landing({ navigate }) {
       <section id="how-it-works" style={{ borderBottom: `1px solid ${C.rule}`, background: C.bgDeep }}>
         <div style={sectionShell}>
           <Label color={C.accent}>How it works</Label>
-          <h2 style={{ ...T.h2, fontSize: 36, letterSpacing: -1, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
+          <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
             Three steps from dispatch to delivery.
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
             {steps.map((s) => (
               <Card key={s.n} padding={S[5]} style={{ border: `1px solid ${C.rule}` }}>
                 <div style={{
-                  width: 36, height: 36, borderRadius: '50%',
+                  ...T.bodySm, width: 36, height: 36, borderRadius: '50%',
                   background: C.accent, color: C.bg,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontFamily: F.mono, fontSize: 13, fontWeight: 700, marginBottom: S[4],
+                  fontFamily: F.mono, fontWeight: 700, marginBottom: S[4],
                 }}>{s.n}</div>
-                <div style={{ ...T.h3, fontSize: 20, color: C.ink, marginBottom: 6 }}>{s.title}</div>
-                <div style={{ ...T.body, fontSize: 14, color: C.inkDim }}>{s.body}</div>
+                <div style={{ ...T.h3, color: C.ink, marginBottom: 6 }}>{s.title}</div>
+                <div style={{ ...T.body, color: C.inkDim }}>{s.body}</div>
               </Card>
             ))}
           </div>
@@ -1189,7 +1194,7 @@ function Landing({ navigate }) {
       <section id="value" style={{ borderBottom: `1px solid ${C.rule}` }}>
         <div style={sectionShell}>
           <Label color={C.accent}>Why teams pick JSE</Label>
-          <h2 style={{ ...T.h2, fontSize: 36, letterSpacing: -1, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
+          <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
             Four things you'll feel on day one.
           </h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[4] }}>
@@ -1201,7 +1206,7 @@ function Landing({ navigate }) {
                     <Icon size={24} />
                   </div>
                   <div style={{ ...T.h3, fontSize: 17, color: C.ink, marginBottom: 6, lineHeight: 1.3 }}>{p.title}</div>
-                  <div style={{ ...T.body, fontSize: 13, color: C.inkDim }}>{p.body}</div>
+                  <div style={{ ...T.bodySm, color: C.inkDim }}>{p.body}</div>
                 </Card>
               );
             })}
@@ -1213,10 +1218,10 @@ function Landing({ navigate }) {
       <section id="demo" style={{ borderBottom: `1px solid ${C.rule}`, background: C.bgDeep }}>
         <div style={sectionShell}>
           <Label color={C.accent}>Live demo</Label>
-          <h2 style={{ ...T.h2, fontSize: 36, letterSpacing: -1, margin: `${S[3]}px 0 ${S[3]}px`, color: C.ink }}>
+          <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[3]}px`, color: C.ink }}>
             Try every role in your browser.
           </h2>
-          <p style={{ ...T.bodyLg, fontSize: 16, color: C.inkDim, maxWidth: 720, marginTop: 0, marginBottom: S[6] }}>
+          <p style={{ ...T.bodyLg, color: C.inkDim, maxWidth: 720, marginTop: 0, marginBottom: S[6] }}>
             All three role experiences in one page. Demo data persists locally and updates in real time as you click. Try opening this in two browser tabs — clock in as a driver in one, watch the Admin Reports KPIs update in the other. Hit Reset on the Admin shell anytime to start over.
           </p>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[4] }}>
@@ -1235,11 +1240,11 @@ function Landing({ navigate }) {
                     <Pill color={C.accent} soft={C.accentSoft}>{c.role}</Pill>
                     <span style={{ color: C.accent, display: 'inline-flex' }}><Icon size={28} /></span>
                   </div>
-                  <div style={{ ...T.h3, fontSize: 22, fontWeight: 700, letterSpacing: -0.6, marginBottom: 6 }}>
+                  <div style={{ ...T.statValue, fontWeight: 700, letterSpacing: -0.6, marginBottom: 6 }}>
                     Enter as {c.role}
                   </div>
-                  <div style={{ ...T.body, fontSize: 13, color: C.inkDim }}>{c.blurb}</div>
-                  <div style={{ marginTop: S[4], fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>
+                  <div style={{ ...T.bodySm, color: C.inkDim }}>{c.blurb}</div>
+                  <div style={{ ...T.monoSm, marginTop: S[4], color: C.inkFaint }}>
                     {'→'} #{c.to}
                   </div>
                 </button>
@@ -1252,7 +1257,7 @@ function Landing({ navigate }) {
             display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap',
           }}>
             <Pill color={C.info} soft={C.infoSoft}>Demo mode</Pill>
-            <span style={{ ...T.body, fontSize: 13, color: C.inkDim }}>
+            <span style={{ ...T.bodySm, color: C.inkDim }}>
               All data lives in your browser. Hit Reset on the Admin shell to start over.
             </span>
           </div>
@@ -1262,9 +1267,9 @@ function Landing({ navigate }) {
       {/* === Footer === */}
       <footer style={{ borderTop: `1px solid ${C.rule}`, marginTop: 'auto' }}>
         <div style={{
-          maxWidth: 1180, margin: '0 auto', padding: `${S[5]}px ${S[5]}px`,
+          ...T.caption, maxWidth: 1180, margin: '0 auto', padding: `${S[5]}px ${S[5]}px`,
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-          gap: S[4], flexWrap: 'wrap', color: C.inkDim, fontSize: 12,
+          gap: S[4], flexWrap: 'wrap',
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
             <HexLogo size={16} />
@@ -1322,7 +1327,7 @@ function AdminProjects({ db, setDb, navigate }) {
       style={dim ? { opacity: 0.6 } : {}}>
       <Td>
         <div style={{ fontWeight: 600 }}><EditableText value={p.name} onSave={(v) => updateProject(p.id, { name: v })} /></div>
-        <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}><EditableText value={p.address} onSave={(v) => updateProject(p.id, { address: v })} /></div>
+        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}><EditableText value={p.address} onSave={(v) => updateProject(p.id, { address: v })} /></div>
       </Td>
       <Td dim><EditableText value={p.gc} onSave={(v) => updateProject(p.id, { gc: v })} /></Td>
       <Td><EditableSelect value={p.status || 'active'} options={statusOptions} onSave={(v) => updateProject(p.id, { status: v })} /></Td>
@@ -1357,8 +1362,8 @@ function AdminProjects({ db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
           <Label color={C.accent} style={{ marginBottom: 6 }}>Active projects · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Projects overview</h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a project between sections.</div>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Projects overview</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a project between sections.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="secondary" size="sm">Export CSV</Btn>
@@ -1376,18 +1381,18 @@ function AdminProjects({ db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.accent}>Active</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{active.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{active.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           {head}
           <tbody>
             {active.map(p => renderRow(p, false))}
-            {active.length === 0 && <tr><td colSpan={11} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No active projects.</td></tr>}
+            {active.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No active projects.</td></tr>}
             <tr onClick={() => navigate('/admin/new')} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={11} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new project</td>
+              <td colSpan={11} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new project</td>
             </tr>
           </tbody>
         </table>
@@ -1397,14 +1402,14 @@ function AdminProjects({ db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.info || C.inkDim}>Upcoming</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{upcoming.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{upcoming.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           {head}
           <tbody>
             {upcoming.map(p => renderRow(p, false))}
-            {upcoming.length === 0 && <tr><td colSpan={11} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No upcoming projects.</td></tr>}
+            {upcoming.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No upcoming projects.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -1413,14 +1418,14 @@ function AdminProjects({ db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.inkDim}>Completed</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{completed.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{completed.length}</span>
       </div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           {head}
           <tbody>
             {completed.map(p => renderRow(p, true))}
-            {completed.length === 0 && <tr><td colSpan={11} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No completed projects.</td></tr>}
+            {completed.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No completed projects.</td></tr>}
           </tbody>
         </table>
       </Card>
@@ -1449,7 +1454,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: 6 }}>
-            <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>started <EditableText value={project.startDate} onSave={(v) => updateProject({ startDate: v })} mono placeholder="YYYY-MM-DD" /></span>
+            <span style={{ ...T.caption }}>started <EditableText value={project.startDate} onSave={(v) => updateProject({ startDate: v })} mono placeholder="YYYY-MM-DD" /></span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
             <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>
@@ -1457,7 +1462,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
             </h1>
             <StatusPill status={project.status || 'active'} />
           </div>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
             <EditableText value={project.gc} onSave={(v) => updateProject({ gc: v })} /> · <EditableText value={project.address} onSave={(v) => updateProject({ address: v })} />
           </div>
           {project.material && project.material.length > 0 && (
@@ -1493,11 +1498,11 @@ function AdminProject({ projectId, db, setDb, navigate }) {
                       <Avatar name={op.name} color={C.accent} />
                       <div>
                         <div style={{ fontWeight: 600 }}>{op.name}</div>
-                        <div style={{ fontSize: 11, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} projects` : '1 project'}</div>
+                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} projects` : '1 project'}</div>
                       </div>
                     </div>
                   </Td>
-                  <Td dim mono style={{ fontSize: 12 }}>{op.phone}<br/>{op.email}</Td>
+                  <Td dim mono style={{ ...T.caption }}>{op.phone}<br/>{op.email}</Td>
                   <Td align="right" mono>{opTrucks.length}</Td>
                   <Td align="right" mono>{opActive}</Td>
                   <Td align="right" mono>{fmtHours(opHours)}</Td>
@@ -1508,7 +1513,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={6} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this project</td>
+              <td colSpan={6} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this project</td>
             </tr>
           </tbody>
         </table>
@@ -1522,14 +1527,14 @@ function AddOperatorForm({ onAdd, onCancel }) {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
-  const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14, width: '100%', boxSizing: 'border-box' };
+  const inputStyle = { ...T.body, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, width: '100%', boxSizing: 'border-box' };
   return (
     <Card style={{ marginTop: S[4] }}>
       <Label style={{ marginBottom: S[3] }}>Assign hauler</Label>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto', gap: S[3], alignItems: 'flex-end' }}>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Name</div><input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" style={inputStyle} autoFocus /></div>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Phone</div><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-1234" style={inputStyle} /></div>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Email</div><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" style={inputStyle} /></div>
+        <div><div style={{ ...T.caption, marginBottom: 4 }}>Name</div><input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" style={inputStyle} autoFocus /></div>
+        <div><div style={{ ...T.caption, marginBottom: 4 }}>Phone</div><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-1234" style={inputStyle} /></div>
+        <div><div style={{ ...T.caption, marginBottom: 4 }}>Email</div><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" style={inputStyle} /></div>
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <Btn onClick={() => { if (name) onAdd({ name, phone, email }); }} disabled={!name}>Assign hauler</Btn>
@@ -1576,7 +1581,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
             <EditableText value={operator.name} onSave={(v) => updateOperator({ name: v })} />
           </h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
             <EditableText value={operator.phone} onSave={(v) => updateOperator({ phone: v })} mono /> ·{' '}
             <EditableText value={operator.email} onSave={(v) => updateOperator({ email: v })} mono />
           </div>
@@ -1594,7 +1599,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
 
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Label>Trucks on {project.name}</Label>
-        <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>Click any value to edit. Click row to drill into truck.</span>
+        <span style={{ ...T.caption }}>Click any value to edit. Click row to drill into truck.</span>
       </div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1627,7 +1632,7 @@ function AdminOperator({ projectId, operatorId, db, setDb, navigate }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={10} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this project</td>
+              <td colSpan={10} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck to this project</td>
             </tr>
           </tbody>
         </table>
@@ -1701,7 +1706,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
             Truck <span style={{ color: C.accent }}>#</span>
             <EditableText value={truck.plate} onSave={(v) => updateTruck({ plate: v })} mono />
           </h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>
             <EditableSelect value={truck.type} options={typeOptions} onSave={(v) => updateTruck({ type: v })} /> · {truckType.axles} · ${' '}
             <EditableText value={String(rate)} onSave={updateRate} mono /><span>/hr</span>
           </div>
@@ -1722,38 +1727,38 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
                   <Avatar name={driver.name} size={44} />
                   <div>
-                    <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700 }}>
+                    <div style={{ ...T.h4, fontWeight: 700 }}>
                       <EditableText value={driver.name} onSave={(v) => updateDriver({ name: v })} />
                     </div>
-                    <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>
+                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
                       <EditableText value={driver.phone} onSave={(v) => updateDriver({ phone: v })} mono />
                     </div>
                   </div>
                 </div>
-              ) : <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, marginTop: S[3] }}>No driver assigned. Hauler (or admin) will assign one.</div>}
+              ) : <div style={{ ...T.bodySm, color: C.inkFaint, marginTop: S[3] }}>No driver assigned. Hauler (or admin) will assign one.</div>}
               {hr && (
                 <div style={{ marginTop: S[4], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
                     <Label>Clocked in</Label>
-                    <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 600 }}>
+                    <span style={{ ...T.mono, color: C.ink, fontWeight: 600 }}>
                       <EditableText value={hr.clockIn} onSave={(v) => updateHr({ clockIn: v })} mono placeholder="HH:MM" />
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
                     <Label>Break</Label>
-                    <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink }}>
+                    <span style={{ ...T.mono, color: C.ink }}>
                       <EditableText value={String(hr.breakMin)} onSave={(v) => updateHr({ breakMin: parseInt(v) || 0 })} mono /> min
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, alignItems: 'center' }}>
                     <Label>Status</Label>
-                    <span style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, fontWeight: 700 }}>
+                    <span style={{ ...T.mono, color: C.accent, fontWeight: 700 }}>
                       <EditableSelect value={hr.status} options={statusOptions} onSave={(v) => updateHr({ status: v })} />
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <Label color={C.accent}>Hours so far</Label>
-                    <span style={{ fontFamily: F.mono, fontSize: 12, color: C.accent, fontWeight: 700 }}>{fmtHours(truckHours)}</span>
+                    <span style={{ ...T.mono, color: C.accent, fontWeight: 700 }}>{fmtHours(truckHours)}</span>
                   </div>
                 </div>
               )}
@@ -1770,7 +1775,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
           </div>
           <div style={{ marginBottom: S[3], display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <Label>Today's loads</Label>
-            <span style={{ fontFamily: F.body, fontSize: 11, color: C.inkFaint }}>Click any value to edit</span>
+            <span style={{ ...T.micro, color: C.inkFaint }}>Click any value to edit</span>
           </div>
           <Card padding={0}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -1781,8 +1786,8 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
                 {truckLoads.length === 0 && (
                   <tr><td colSpan="6" style={{ padding: S[6], textAlign: 'center' }}>
                     <div style={{ color: C.inkFaint, marginBottom: S[2], display: 'inline-flex' }}><TruckIcon size={28} /></div>
-                    <div style={{ ...T.h3, fontSize: 15, color: C.ink, marginBottom: 4 }}>No loads logged yet today</div>
-                    <div style={{ ...T.body, fontSize: 12, color: C.inkDim }}>Loads logged by the driver will appear here.</div>
+                    <div style={{ ...T.h3, fontSize: 15, color: C.ink, marginBottom: S[1] }}>No loads logged yet today</div>
+                    <div style={{ ...T.caption}}>Loads logged by the driver will appear here.</div>
                   </td></tr>
                 )}
                 {truckLoads.map(l => (
@@ -1790,7 +1795,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
                     <Td mono><EditableText value={l.time} onSave={(v) => updateLoad(l.id, { time: v })} mono placeholder="HH:MM" /></Td>
                     <Td mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
                     <Td><EditableSelect value={l.material} options={materialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
-                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 36, height: 36, borderRadius: 4, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ color: C.inkFaint, fontSize: 11 }}>—</span>}</Td>
+                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 36, height: 36, borderRadius: R.xs, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ ...T.micro, color: C.inkFaint}}>—</span>}</Td>
                     <Td><EditableSelect value={l.status} options={statusOptions} onSave={(v) => updateLoad(l.id, { status: v })} /></Td>
                     <Td align="right"><Btn variant="ghost" size="xs" onClick={() => deleteLoad(l.id)}>Delete</Btn></Td>
                   </Tr>
@@ -1809,11 +1814,11 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
                   <Avatar name={driver.name} size={44} color={C.accent} />
                   <div>
-                    <Label style={{ marginBottom: 4 }}>What {driver.name.split(' ').pop()} sees</Label>
-                    <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink }}>
+                    <Label style={{ marginBottom: S[1] }}>What {driver.name.split(' ').pop()} sees</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink }}>
                       Driver phone widget · #{truck.plate}
                     </div>
-                    <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>
+                    <div style={{ ...T.caption, marginTop: 2 }}>
                       Clock in/out, log loads, see today's earnings
                     </div>
                   </div>
@@ -1825,7 +1830,7 @@ function AdminTruck({ projectId, operatorId, truckId, db, setDb, navigate }) {
             </Card>
           ) : (
             <Card>
-              <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkFaint, textAlign: 'center', padding: S[3] }}>
+              <div style={{ ...T.bodySm, color: C.inkFaint, textAlign: 'center', padding: S[3] }}>
                 No driver assigned to this truck yet. Assign one above to open their mobile widget.
               </div>
             </Card>
@@ -1858,8 +1863,8 @@ function OperatorLanding({ db, navigate }) {
       <Crumbs items={[{ label: 'Hauler' }, { label: 'Pick a hauler' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler view</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick a hauler</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick a hauler</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
           Each hauler sees only the projects they're assigned to. Click any card to enter their view.
         </div>
       </div>
@@ -1875,18 +1880,18 @@ function OperatorLanding({ db, navigate }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4] }}>
               <Avatar name={op.name} color={C.accent} size={44} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{op.name}</div>
-                <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
+                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{op.name}</div>
+                <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
               <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: 4 }}>Projects</Label>
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{op.projectCount}</div>
+                <Label style={{ marginBottom: S[1] }}>Projects</Label>
+                <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{op.projectCount}</div>
               </div>
               <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: 4 }}>Trucks</Label>
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{op.trucks.length}</div>
+                <Label style={{ marginBottom: S[1] }}>Trucks</Label>
+                <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{op.trucks.length}</div>
               </div>
             </div>
           </button>
@@ -1919,7 +1924,7 @@ function OperatorHome({ operatorId, db, navigate }) {
         <div style={{ flex: 1 }}>
           <Label color={C.accent}>Hauler dashboard</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{op.name}</h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>
             <span style={{ fontFamily: F.mono }}>{op.phone}</span> · <span style={{ fontFamily: F.mono }}>{op.email}</span>
           </div>
         </div>
@@ -1934,8 +1939,8 @@ function OperatorHome({ operatorId, db, navigate }) {
 
       {pendingCount > 0 && (
         <Card style={{ marginBottom: S[5], borderLeft: `3px solid ${C.warn}` }}>
-          <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>{pendingCount} item{pendingCount === 1 ? '' : 's'} pending across your projects</div>
-          <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{pendingCount} item{pendingCount === 1 ? '' : 's'} pending across your projects</div>
+          <div style={{ ...T.caption, marginTop: 2 }}>
             Drill into a project to review loads and hour adjustments.
           </div>
         </Card>
@@ -1967,17 +1972,17 @@ function OperatorHome({ operatorId, db, navigate }) {
               >
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3] }}>
                   <div>
-                    <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{p.name}</div>
-                    <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 4 }}>{p.gc}</div>
-                    <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkFaint, marginTop: 2 }}>{p.address}</div>
+                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{p.name}</div>
+                    <div style={{ ...T.caption, marginTop: S[1] }}>{p.gc}</div>
+                    <div style={{ ...T.micro, color: C.inkFaint, marginTop: 2 }}>{p.address}</div>
                   </div>
                   <StatusPill status={p.status || 'active'} />
                 </div>
                 <div style={{ display: 'flex', gap: S[4], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-                  <div><Label style={{ marginBottom: 4 }}>Trucks</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pTrucks.length}</div></div>
-                  <div><Label style={{ marginBottom: 4 }}>Loads</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pLoads.filter(l => l.status === 'approved').length}</div></div>
-                  <div><Label style={{ marginBottom: 4 }}>Hours</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{fmtHours(pTotalHours)}</div></div>
-                  {pPending > 0 && <div><Label style={{ marginBottom: 4 }} color={C.warn}>Pending</Label><div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.warn, lineHeight: 1 }}>{pPending}</div></div>}
+                  <div><Label style={{ marginBottom: S[1] }}>Trucks</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pTrucks.length}</div></div>
+                  <div><Label style={{ marginBottom: S[1] }}>Loads</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pLoads.filter(l => l.status === 'approved').length}</div></div>
+                  <div><Label style={{ marginBottom: S[1] }}>Hours</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{fmtHours(pTotalHours)}</div></div>
+                  {pPending > 0 && <div><Label style={{ marginBottom: S[1] }} color={C.warn}>Pending</Label><div style={{ ...T.h4, fontWeight: 700, color: C.warn, lineHeight: 1 }}>{pPending}</div></div>}
                 </div>
               </button>
             );
@@ -2012,7 +2017,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
         <div>
           <Label color={C.accent}>Project</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>{project.name}</h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>{project.gc} · {project.address}</div>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>{project.gc} · {project.address}</div>
         </div>
         <StatusPill status={project.status || 'active'} />
       </div>
@@ -2026,7 +2031,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
 
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Label>Your trucks on {project.name}</Label>
-        <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>Click a row to drill into the truck.</span>
+        <span style={{ ...T.caption }}>Click a row to drill into the truck.</span>
       </div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -2035,7 +2040,7 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
           </thead>
           <tbody>
             {trucks.length === 0 && (
-              <tr><td colSpan={8} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No trucks assigned to you on this project yet.</td></tr>
+              <tr><td colSpan={8} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this project yet.</td></tr>
             )}
             {trucks.map(t => {
               const driver = db.drivers.find(d => d.id === t.driverId);
@@ -2050,12 +2055,12 @@ function OperatorProject({ operatorId, projectId, db, setDb, navigate }) {
                       <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{t.plate}</span>
                       <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill>
                     </div>
-                    <div style={{ fontSize: 11, color: C.inkDim, marginTop: 4 }}>{t.hauler}</div>
+                    <div style={{ ...T.micro, color: C.inkDim, marginTop: S[1] }}>{t.hauler}</div>
                   </Td>
                   <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
                   <Td mono>{hr ? hr.clockIn : '—'}</Td>
                   <Td align="right" mono>{fmtHours(truckHours)}</Td>
-                  <Td align="right" mono>{truckLoads.filter(l => l.status === 'approved').length}{truckLoads.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: 4 }}>+{truckLoads.filter(l => l.status === 'pending').length}p</span>}</Td>
+                  <Td align="right" mono>{truckLoads.filter(l => l.status === 'approved').length}{truckLoads.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: S[1] }}>+{truckLoads.filter(l => l.status === 'pending').length}p</span>}</Td>
                   <Td align="right" mono>{truckCY}</Td>
                   <Td>{hr ? <StatusPill status={hr.status} /> : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off</Pill>}</Td>
                   <Td align="right" dim>{'>'}</Td>
@@ -2097,7 +2102,7 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>
             Truck <span style={{ color: C.accent }}>#{truck.plate}</span>
           </h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>
             {truckType.label} · {truckType.cap} · ${rate}/hr
           </div>
         </div>
@@ -2106,7 +2111,7 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
             <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
               <Avatar name={driver.name} size={36} />
               <div>
-                <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600 }}>{driver.name}</div>
+                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}>{driver.name}</div>
                 <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim }}>{driver.phone}</div>
               </div>
             </div>
@@ -2131,7 +2136,7 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
             {truckLoads.length === 0 && (
               <tr><td colSpan={5} style={{ padding: S[5], textAlign: 'center' }}>
                 <div style={{ color: C.inkFaint, marginBottom: S[2], display: 'inline-flex' }}><TruckIcon size={24} /></div>
-                <div style={{ ...T.body, fontSize: 13, color: C.inkDim }}>No loads yet today.</div>
+                <div style={{ ...T.bodySm, color: C.inkDim }}>No loads yet today.</div>
               </td></tr>
             )}
             {truckLoads.map(l => {
@@ -2158,7 +2163,7 @@ function OperatorTruckView({ operatorId, projectId, truckId, db, setDb, navigate
           </thead>
           <tbody>
             {truckHoursRows.length === 0 && (
-              <tr><td colSpan={6} style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No hours logged for this truck yet.</td></tr>
+              <tr><td colSpan={6} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No hours logged for this truck yet.</td></tr>
             )}
             {truckHoursRows.map(h => {
               const d = db.drivers.find(dr => dr.id === h.driverId);
@@ -2192,7 +2197,7 @@ function OperatorLogLoadForm({ truck, driver, project, db, setDb }) {
     return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
   });
 
-  const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14, width: '100%', boxSizing: 'border-box' };
+  const inputStyle = { ...T.body, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, width: '100%', boxSizing: 'border-box' };
   const canSubmit = cy && parseFloat(cy) > 0;
 
   const submit = () => {
@@ -2223,28 +2228,28 @@ function OperatorLogLoadForm({ truck, driver, project, db, setDb }) {
       <Card>
         <div style={{ display: 'grid', gridTemplateColumns: '90px 1fr 1fr 100px auto', gap: S[3], alignItems: 'flex-end' }}>
           <div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Time</div>
+            <div style={{ ...T.caption, marginBottom: S[1] }}>Time</div>
             <input value={time} onChange={e => setTime(e.target.value)} placeholder="HH:MM" style={{ ...inputStyle, fontFamily: F.mono }} />
           </div>
           <div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Material</div>
+            <div style={{ ...T.caption, marginBottom: S[1] }}>Material</div>
             <select value={material} onChange={e => setMaterial(e.target.value)} style={inputStyle}>
               {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
             </select>
           </div>
           <div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Ticket # (optional)</div>
+            <div style={{ ...T.caption, marginBottom: S[1] }}>Ticket # (optional)</div>
             <input value={ticketNo} onChange={e => setTicketNo(e.target.value)} placeholder="e.g. T-44801" style={{ ...inputStyle, fontFamily: F.mono }} />
           </div>
           <div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>CY</div>
+            <div style={{ ...T.caption, marginBottom: S[1] }}>CY</div>
             <input type="number" min="0" step="0.5" value={cy} onChange={e => setCy(e.target.value)} placeholder="e.g. 16" style={{ ...inputStyle, fontFamily: F.mono }} />
           </div>
           <div>
             <Btn onClick={submit} disabled={!canSubmit}>+ Log load</Btn>
           </div>
         </div>
-        <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkFaint, marginTop: S[3] }}>
+        <div style={{ ...T.micro, color: C.inkFaint, marginTop: S[3] }}>
           Driver: {driver ? driver.name : 'unassigned'} · Submits as pending for review.
         </div>
       </Card>
@@ -2270,8 +2275,8 @@ function OperatorTrucks({ projectId, opId, trucks, db, setDb }) {
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[4] }}>
         <div>
-          <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Trucks</h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this project · click any value to edit · rate updates all trucks of that type</div>
+          <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Trucks</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} on this project · click any value to edit · rate updates all trucks of that type</div>
         </div>
       </div>
       <Card padding={0}>
@@ -2293,7 +2298,7 @@ function OperatorTrucks({ projectId, opId, trucks, db, setDb }) {
             <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
               onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
               onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={5} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, fontSize: 13, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck</td>
+              <td colSpan={5} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck</td>
             </tr>
           </tbody>
         </table>
@@ -2307,15 +2312,15 @@ function AddTruckForm({ onAdd, onCancel }) {
   const [plate, setPlate] = useState('');
   const [type, setType] = useState('TRI');
   const [hauler, setHauler] = useState('');
-  const inputStyle = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14, width: '100%' };
+  const inputStyle = { ...T.body, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, width: '100%' };
   return (
     <Card style={{ marginTop: S[4] }}>
       <Label style={{ marginBottom: S[3] }}>New truck</Label>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: S[3], alignItems: 'flex-end' }}>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Plate</div><input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g. 419" style={inputStyle} /></div>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Type</div><select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>{TRUCK_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}</select></div>
-        <div><div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Hauler</div><input value={hauler} onChange={e => setHauler(e.target.value)} placeholder="Hauler company" style={inputStyle} /></div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div><div style={{ ...T.caption, marginBottom: S[1] }}>Plate</div><input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g. 419" style={inputStyle} /></div>
+        <div><div style={{ ...T.caption, marginBottom: S[1] }}>Type</div><select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>{TRUCK_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}</select></div>
+        <div><div style={{ ...T.caption, marginBottom: S[1] }}>Hauler</div><input value={hauler} onChange={e => setHauler(e.target.value)} placeholder="Hauler company" style={inputStyle} /></div>
+        <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <Btn onClick={() => { if (plate && hauler) onAdd({ plate, type, hauler }); }} disabled={!plate || !hauler}>Add truck</Btn>
         </div>
@@ -2334,8 +2339,8 @@ function OperatorDrivers({ projectId, trucks, db, setDb }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <div style={{ marginBottom: S[4] }}>
-        <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Driver assignments</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>Assign one driver to each truck. Click name or phone to edit.</div>
+        <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Driver assignments</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>Assign one driver to each truck. Click name or phone to edit.</div>
       </div>
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -2346,13 +2351,13 @@ function OperatorDrivers({ projectId, trucks, db, setDb }) {
               const choices = [...(driver ? [driver] : []), ...available];
               return (
                 <Tr key={t.id}>
-                  <Td mono><span style={{ color: C.accent }}>#{t.plate}</span> <span style={{ color: C.inkDim, fontSize: 11 }}>{t.type}</span></Td>
+                  <Td mono><span style={{ color: C.accent }}>#{t.plate}</span> <span style={{ ...T.micro, color: C.inkDim}}>{t.type}</span></Td>
                   <Td>
-                    <select value={t.driverId || ''} onChange={e => assign(t.id, e.target.value || null)} style={{ background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 12px', borderRadius: R.sm, fontFamily: F.body, fontSize: 13, minWidth: 180 }}>
+                    <select value={t.driverId || ''} onChange={e => assign(t.id, e.target.value || null)} style={{ ...T.bodySm, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 12px', borderRadius: R.sm, minWidth: 180 }}>
                       <option value="">-- Unassigned --</option>
                       {choices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                     </select>
-                    {driver && <span style={{ marginLeft: 8 }}><EditableText value={driver.name} onSave={(v) => updateDriver(driver.id, { name: v })} /></span>}
+                    {driver && <span style={{ marginLeft: S[2] }}><EditableText value={driver.name} onSave={(v) => updateDriver(driver.id, { name: v })} /></span>}
                   </Td>
                   <Td mono dim>{driver ? <EditableText value={driver.phone} onSave={(v) => updateDriver(driver.id, { phone: v })} mono /> : '—'}</Td>
                   <Td align="right">{driver && <Btn variant="ghost" size="xs" onClick={() => assign(t.id, null)}>Unassign</Btn>}</Td>
@@ -2371,8 +2376,8 @@ function OperatorDrivers({ projectId, trucks, db, setDb }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
                   <Avatar name={d.name} />
                   <div>
-                    <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600 }}><EditableText value={d.name} onSave={(v) => updateDriver(d.id, { name: v })} /></div>
-                    <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}><EditableText value={d.phone} onSave={(v) => updateDriver(d.id, { phone: v })} mono /></div>
+                    <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}><EditableText value={d.name} onSave={(v) => updateDriver(d.id, { name: v })} /></div>
+                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}><EditableText value={d.phone} onSave={(v) => updateDriver(d.id, { phone: v })} mono /></div>
                   </div>
                 </div>
               </Card>
@@ -2395,15 +2400,15 @@ function OperatorApprovals({ projectId, hours, loads, db, setDb }) {
   const materialOptions = MATERIALS.map(m => ({ value: m.code, label: m.label }));
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink, marginBottom: 6 }}>Approvals</h1>
-      <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginBottom: S[5] }}>Click any value to fix typos before approving.</div>
+      <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink, marginBottom: 6 }}>Approvals</h1>
+      <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[5] }}>Click any value to fix typos before approving.</div>
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <Label>Pending loads ({pendingLoads.length})</Label>
         {pendingLoads.length > 0 && <Btn variant="secondary" size="sm" onClick={() => pendingLoads.forEach(l => approveLoad(l.id))}>Approve all</Btn>}
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {pendingLoads.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>Nothing pending.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>Nothing pending.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><Th>Time</Th><Th>Truck</Th><Th>Driver</Th><Th>Material</Th><Th>CY</Th><Th>Photo</Th><Th></Th></tr></thead>
@@ -2418,7 +2423,7 @@ function OperatorApprovals({ projectId, hours, loads, db, setDb }) {
                     <Td>{d.name}</Td>
                     <Td><EditableSelect value={l.material} options={materialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
                     <Td mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
-                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ color: C.inkFaint, fontSize: 11 }}>—</span>}</Td>
+                    <Td>{l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover', cursor: 'pointer' }} onClick={() => window.open(l.photo, '_blank')} /> : <span style={{ ...T.micro, color: C.inkFaint}}>—</span>}</Td>
                     <Td align="right">
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                         <Btn variant="ghost" size="xs" onClick={() => rejectLoad(l.id)}>Reject</Btn>
@@ -2435,7 +2440,7 @@ function OperatorApprovals({ projectId, hours, loads, db, setDb }) {
       <div style={{ marginBottom: S[3] }}><Label>Pending hour adjustments ({pendingHrs.length})</Label></div>
       <Card padding={0}>
         {pendingHrs.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>Nothing pending.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>Nothing pending.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><Th>Driver</Th><Th>Truck</Th><Th>Clock-in</Th><Th>Break</Th><Th align="right">Hours</Th><Th></Th></tr></thead>
@@ -2516,8 +2521,8 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[5] }}>
         <div>
-          <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Invoices</h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>Bill {project.gc} for hours and CY hauled on {project.name}.</div>
+          <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Invoices</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>Bill {project.gc} for hours and CY hauled on {project.name}.</div>
         </div>
         {!showDraft && <Btn onClick={startDraft}>+ New invoice</Btn>}
       </div>
@@ -2527,19 +2532,19 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
             <div>
               <Label color={C.accent} style={{ marginBottom: 6 }}>Draft invoice · click any value to edit</Label>
-              <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink }}>
+              <div style={{ ...T.statValue, fontWeight: 700, color: C.ink }}>
                 <EditableText value={draft.number} onSave={(v) => updateDraft({ number: v })} mono />
               </div>
-              <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>
                 For period <EditableText value={draft.periodStart} onSave={(v) => updateDraft({ periodStart: v })} mono /> {'→'} <EditableText value={draft.periodEnd} onSave={(v) => updateDraft({ periodEnd: v })} mono />
               </div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <Label style={{ marginBottom: 6 }}>Bill to</Label>
-              <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>
+              <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>
                 <EditableText value={draft.billTo} onSave={(v) => updateDraft({ billTo: v })} />
               </div>
-              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>From {operator.name}</div>
+              <div style={{ ...T.caption, marginTop: 2 }}>From {operator.name}</div>
             </div>
           </div>
 
@@ -2558,8 +2563,8 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
                 </Tr>
               ))}
               <tr style={{ background: C.surfaceHi }}>
-                <td colSpan={5} style={{ padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, textAlign: 'right', fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink }}>Total</td>
-                <Td align="right" mono style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtMoney(draftTotal)}</Td>
+                <td colSpan={5} style={{ ...T.body, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, textAlign: 'right', fontFamily: F.display, fontWeight: 600, color: C.ink }}>Total</td>
+                <Td align="right" mono style={{ ...T.h4, fontWeight: 700, color: C.accent }}>{fmtMoney(draftTotal)}</Td>
                 <Td></Td>
               </tr>
             </tbody>
@@ -2571,7 +2576,7 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
           </div>
 
           <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>
+            <div style={{ ...T.caption }}>
               {draft.lineItems.length} line item{draft.lineItems.length === 1 ? '' : 's'} · {draft.loadCount} loads · {draft.totalCY} CY
             </div>
             <div style={{ display: 'flex', gap: S[2] }}>
@@ -2587,7 +2592,7 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
       <div style={{ marginBottom: S[3] }}><Label>Past invoices ({invoices.length})</Label></div>
       <Card padding={0}>
         {invoices.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>
             No invoices yet. Generate one above when you're ready to bill.
           </div>
         ) : (
@@ -2618,12 +2623,12 @@ function OperatorInvoices({ operator, projectId, project, trucks, hours, db, set
 function Phone({ children }) {
   return (
     <div className="phone-frame-outer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: S[5], minHeight: '100vh', background: C.bgDeep }}>
-      <div className="phone-frame-caption" style={{ fontSize: 12, color: C.inkDim, marginBottom: S[3], textAlign: 'center', fontFamily: F.body }}>Driver view — what a field user sees in the field.</div>
+      <div className="phone-frame-caption" style={{ ...T.caption, marginBottom: S[3], textAlign: 'center'}}>Driver view — what a field user sees in the field.</div>
       <div className="brand-frame-chrome" style={{ marginBottom: S[3] }}><Brand size="sm" /></div>
       <div className="phone-bezel" style={{ width: 360, minHeight: 760, background: '#000', borderRadius: 48, padding: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
         <div className="phone-screen" style={{ width: '100%', height: '100%', minHeight: 740, background: C.bg, borderRadius: 40, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          <div className="phone-notch" style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 104, height: 24, background: '#000', borderRadius: 12, zIndex: 100 }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 26px 4px', fontFamily: F.body, fontSize: 12, color: C.ink, fontWeight: 600 }}>
+          <div className="phone-notch" style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 104, height: 24, background: '#000', borderRadius: R.md, zIndex: 100 }} />
+          <div style={{ ...T.caption, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 26px 4px', color: C.ink, fontWeight: 600 }}>
             <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
           </div>
           {children}
@@ -2685,11 +2690,11 @@ function DriverNoTruck({ driver }) {
 function DriverTruckNotFound({ navigate }) {
   return (
     <div style={{ flex: 1, padding: S[5], display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-      <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Truck not found</div>
-      <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, lineHeight: 1.5, marginBottom: S[4] }}>That truck isn't on your assignment list.</div>
+      <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Truck not found</div>
+      <div style={{ ...T.bodySm, color: C.inkDim, lineHeight: 1.5, marginBottom: S[4] }}>That truck isn't on your assignment list.</div>
       <button onClick={() => navigate('/driver')} style={{
-        background: C.accent, color: C.bg, border: 'none', padding: '10px 18px',
-        borderRadius: R.pill, cursor: 'pointer', fontFamily: F.mono, fontSize: 12, letterSpacing: 0.4,
+        ...T.mono, background: C.accent, color: C.bg, border: 'none', padding: '10px 18px',
+        borderRadius: R.pill, cursor: 'pointer', letterSpacing: 0.4,
       }}>Back to my trucks</button>
     </div>
   );
@@ -2791,7 +2796,7 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px` }}>
       <div style={{ marginBottom: S[3] }}>
         <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
-        <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
+        <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
       </div>
 
       {/* Truck card */}
@@ -2803,12 +2808,12 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
           {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
           {hr && hr.status !== 'open' && <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">Shift ended</Pill>}
         </div>
-        <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>{truckType.label} · {truckType.cap} · {truck.hauler}</div>
+        <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType.label} · {truckType.cap} · {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
           <Label style={{ marginBottom: 4 }}>On project</Label>
-          <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>{project.name}</div>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{project.address}</div>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project.name}</div>
+          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project.address}</div>
         </div>
       </div>
 
@@ -2817,45 +2822,45 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
         <div style={{ background: isPaused ? C.warnSoft : C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3], border: isPaused ? `1px solid ${C.warn}` : 'none' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: S[2] }}>
             <Label color={isPaused ? C.warn : C.accent}>{isPaused ? 'Paused' : (isOpen ? 'On the clock' : 'Shift submitted')}</Label>
-            <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>started {hr.clockIn}{hr.clockOut ? ' · ended ' + hr.clockOut : ''}</span>
+            <span style={{ ...T.monoSm, color: C.inkDim }}>started {hr.clockIn}{hr.clockOut ? ' · ended ' + hr.clockOut : ''}</span>
           </div>
-          <div style={{ fontFamily: F.mono, fontSize: 44, fontWeight: 700, color: isPaused ? C.warn : C.accent, lineHeight: 1, letterSpacing: -1, fontVariantNumeric: 'tabular-nums' }}>
+          <div style={{ ...T.h1, fontFamily: F.mono, fontWeight: 700, color: isPaused ? C.warn : C.accent, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
             {fmtElapsed(elapsedMs)}
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: S[3], alignItems: 'flex-end' }}>
             <div>
               <Label style={{ marginBottom: 4 }}>Loads</Label>
-              <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
+              <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <Label style={{ marginBottom: 4 }}>Total CY</Label>
-              <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.reduce((s, l) => s + (l.cy || 0), 0)}</div>
+              <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.reduce((s, l) => s + (l.cy || 0), 0)}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <Label style={{ marginBottom: 4 }}>Break</Label>
-              <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.inkDim, lineHeight: 1 }}>{Math.round(((hr.pausedMs || 0) + (hr.pausedAt ? Date.now() - hr.pausedAt : 0)) / 60000)}m</div>
+              <div style={{ ...T.h4, fontWeight: 700, color: C.inkDim, lineHeight: 1 }}>{Math.round(((hr.pausedMs || 0) + (hr.pausedAt ? Date.now() - hr.pausedAt : 0)) / 60000)}m</div>
             </div>
           </div>
         </div>
       ) : (
         <div style={{ background: C.surfaceHi, borderRadius: R.lg, padding: S[4], marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[3] }}>
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.inkFaint }} />
-          <div><Label>Status</Label><div style={{ fontFamily: F.display, fontSize: 16, color: C.inkDim, fontWeight: 600, marginTop: 2 }}>Not clocked in</div></div>
+          <div><Label>Status</Label><div style={{ ...T.bodyLg, fontFamily: F.display, color: C.inkDim, fontWeight: 600, marginTop: 2 }}>Not clocked in</div></div>
         </div>
       )}
 
       <div style={{ flex: 1 }} />
 
       {!hr && (
-        <button onClick={clockIn} style={{ width: '100%', height: 84, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontFamily: F.display, fontSize: 22, fontWeight: 700, letterSpacing: -0.6 }}>Clock in</button>
+        <button onClick={clockIn} style={{ ...T.statValue, width: '100%', height: 84, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.6 }}>Clock in</button>
       )}
       {isOpen && (
         <>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], marginBottom: S[2] }}>
-            <button onClick={() => navigate('/driver/log')} disabled={isPaused} style={{ height: 84, border: 'none', cursor: isPaused ? 'not-allowed' : 'pointer', background: isPaused ? C.surfaceHi : C.accent, color: isPaused ? C.inkFaint : C.bg, borderRadius: R.lg, fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Log load</button>
-            <button onClick={togglePause} style={{ height: 84, border: `1px solid ${isPaused ? C.accent : C.warn}`, cursor: 'pointer', background: isPaused ? C.accentSoft : 'transparent', color: isPaused ? C.accent : C.warn, borderRadius: R.lg, fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.4 }}>{isPaused ? 'Resume' : 'Pause'}</button>
+            <button onClick={() => navigate('/driver/log')} disabled={isPaused} style={{ ...T.h4, height: 84, border: 'none', cursor: isPaused ? 'not-allowed' : 'pointer', background: isPaused ? C.surfaceHi : C.accent, color: isPaused ? C.inkFaint : C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Log load</button>
+            <button onClick={togglePause} style={{ ...T.h4, height: 84, border: `1px solid ${isPaused ? C.accent : C.warn}`, cursor: 'pointer', background: isPaused ? C.accentSoft : 'transparent', color: isPaused ? C.accent : C.warn, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4 }}>{isPaused ? 'Resume' : 'Pause'}</button>
           </div>
-          <button onClick={clockOut} style={{ width: '100%', height: 56, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontSize: 16, fontWeight: 600 }}>End shift / Clock out</button>
+          <button onClick={clockOut} style={{ ...T.bodyLg, width: '100%', height: 56, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontWeight: 600 }}>End shift / Clock out</button>
         </>
       )}
 
@@ -2865,9 +2870,9 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
           {todayLoads.slice().reverse().slice(0, 6).map(l => {
             const m = MATERIALS.find(m => m.code === l.material);
             return (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`, fontFamily: F.body, fontSize: 13 }}>
+              <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} /> : <div style={{ width: 32, height: 32, borderRadius: 4, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>📷</div>}
+                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
                   <div>
                     <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m.label}</div>
                     <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
@@ -2886,16 +2891,16 @@ function DriverHome({ driver, truck, db, setDb, navigate }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: S[3] }}>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Loads</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Hours</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : '—'}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : '—'}</div>
             {!hr && <div style={{ fontFamily: F.body, fontSize: 10, color: C.inkFaint, marginTop: 4 }}>Not clocked in</div>}
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Last load</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length > 0 ? todayLoads[todayLoads.length - 1].time : '—'}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length > 0 ? todayLoads[todayLoads.length - 1].time : '—'}</div>
           </div>
         </div>
       </div>
@@ -2938,12 +2943,12 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
-      <button onClick={() => navigate(back)} style={{ background: 'transparent', border: 'none', color: C.inkDim, fontFamily: F.body, fontSize: 13, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← Back</button>
+      <button onClick={() => navigate(back)} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← Back</button>
       <Label color={C.accent} style={{ marginBottom: 6 }}>New load · #{truck.plate} · {proj ? proj.name : ''}</Label>
       <div style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, letterSpacing: -0.6, marginBottom: S[4] }}>Log a load</div>
 
       <Label style={{ marginBottom: 6 }}>Material</Label>
-      <select value={material} onChange={e => setMaterial(e.target.value)} style={{ background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '16px 16px', fontFamily: F.display, fontSize: 16, fontWeight: 600, marginBottom: S[4], appearance: 'menulist', width: '100%', boxSizing: 'border-box' }}>
+      <select value={material} onChange={e => setMaterial(e.target.value)} style={{ ...T.bodyLg, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '16px 16px', fontFamily: F.display, fontWeight: 600, marginBottom: S[4], appearance: 'menulist', width: '100%', boxSizing: 'border-box' }}>
         {MATERIALS.map(m => (
           <option key={m.code} value={m.code}>{m.label}</option>
         ))}
@@ -2951,26 +2956,26 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
 
       <Label style={{ marginBottom: 6 }}>Cubic yards (CY)</Label>
       <input type="number" inputMode="decimal" value={cy} onChange={e => setCy(e.target.value)} placeholder="e.g. 16" min="0" step="0.5" autoFocus
-        style={{ background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '18px 16px', fontFamily: F.mono, fontSize: 28, fontWeight: 700, marginBottom: S[4], textAlign: 'center', letterSpacing: -0.6, boxSizing: 'border-box', width: '100%' }} />
+        style={{ ...T.h2, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '18px 16px', fontFamily: F.mono, fontWeight: 700, marginBottom: S[4], textAlign: 'center', letterSpacing: -0.6, boxSizing: 'border-box', width: '100%' }} />
 
       <Label style={{ marginBottom: 6 }}>Photo (required)</Label>
       <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPick} style={{ display: 'none' }} />
       {!photo ? (
         <button onClick={() => fileRef.current && fileRef.current.click()} style={{
-          height: 140, border: `2px dashed ${C.ruleHi}`, cursor: 'pointer', background: C.surface,
-          color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontSize: 14, fontWeight: 600,
+          ...T.body, height: 140, border: `2px dashed ${C.ruleHi}`, cursor: 'pointer', background: C.surface,
+          color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontWeight: 600,
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: S[4],
         }}>
           <span style={{ fontSize: 32 }}>📷</span>
           <span>Take photo of load</span>
-          <span style={{ fontSize: 11, color: C.inkFaint, fontWeight: 500 }}>Required to submit</span>
+          <span style={{ ...T.micro, color: C.inkFaint, fontWeight: 500 }}>Required to submit</span>
         </button>
       ) : (
         <div style={{ position: 'relative', marginBottom: S[4] }}>
           <img src={photo} alt="Load" style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: R.md, border: `1px solid ${C.accent}`, display: 'block' }} />
           <button onClick={() => { setPhoto(null); if (fileRef.current) fileRef.current.value = ''; }} style={{
-            position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.7)', color: C.ink, border: 'none',
-            padding: '6px 12px', borderRadius: R.pill, fontFamily: F.body, fontSize: 11, cursor: 'pointer', fontWeight: 600,
+            ...T.micro, position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.7)', color: C.ink, border: 'none',
+            padding: '6px 12px', borderRadius: R.pill, cursor: 'pointer', fontWeight: 600,
           }}>Retake</button>
         </div>
       )}
@@ -2978,12 +2983,11 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo }) {
       <div style={{ flex: 1, minHeight: S[3] }} />
 
       <button onClick={submit} disabled={!canSubmit} style={{
-        height: 64, border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed',
-        background: C.accent, color: C.bg, borderRadius: R.lg,
-        fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.4,
+        ...T.h4, height: 64, border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed',
+        background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4,
         opacity: canSubmit ? 1 : 0.4,
       }}>Submit load</button>
-      <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, textAlign: 'center', marginTop: S[2] }}>
+      <div style={{ ...T.micro, color: C.inkDim, textAlign: 'center', marginTop: S[2] }}>
         Hauler will review and approve.
       </div>
     </div>
@@ -3001,8 +3005,8 @@ function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
       <div style={{ marginBottom: S[3] }}>
         <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
-        <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 2 }}>You're assigned to {trucks.length} trucks today. Tap one to log loads or start a shift.</div>
+        <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>You're assigned to {trucks.length} trucks today. Tap one to log loads or start a shift.</div>
       </div>
 
       {trucks.map(truck => {
@@ -3025,23 +3029,23 @@ function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
               {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
               {!isOpen && <StatusPill status="idle" />}
             </div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} · {truck.hauler}</div>
+            <div style={{ ...T.caption, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} · {truck.hauler}</div>
             <div style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[3] }}>
               <Label style={{ marginBottom: 4 }}>On project</Label>
               <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
-              <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
+              <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <div>
                 <Label style={{ marginBottom: 4 }}>Loads today</Label>
-                <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckLoadsToday.length}</div>
+                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckLoadsToday.length}</div>
               </div>
               <div style={{ textAlign: 'right' }}>
                 <Label style={{ marginBottom: 4 }}>Total CY</Label>
-                <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckCY}</div>
+                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckCY}</div>
               </div>
               <div style={{ textAlign: 'right', alignSelf: 'flex-end' }}>
-                <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkFaint }}>Open {'>'}</span>
+                <span style={{ ...T.monoSm, color: C.inkFaint }}>Open {'>'}</span>
               </div>
             </div>
           </button>
@@ -3056,15 +3060,15 @@ function DriverMultiTruckHome({ driver, trucks, db, navigate }) {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: S[3] }}>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Loads</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todaysLoadsAll.length}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todaysLoadsAll.length}</div>
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Total CY</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
           </div>
           <div>
             <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Active</div>
-            <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: openShifts.length > 0 ? C.accent : C.inkDim, lineHeight: 1 }}>{openShifts.length}/{trucks.length}</div>
+            <div style={{ ...T.statValue, fontWeight: 700, color: openShifts.length > 0 ? C.accent : C.inkDim, lineHeight: 1 }}>{openShifts.length}/{trucks.length}</div>
           </div>
         </div>
       </div>
@@ -3137,7 +3141,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
-      <button onClick={() => navigate(backHref)} style={{ background: 'transparent', border: 'none', color: C.inkDim, fontFamily: F.body, fontSize: 13, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← All my trucks</button>
+      <button onClick={() => navigate(backHref)} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← All my trucks</button>
 
       {/* Truck header */}
       <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
@@ -3147,13 +3151,13 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
           {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
           {!isOpen && <StatusPill status="idle" />}
         </div>
-        <div style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} · {truckType ? truckType.cap : ''} · {truck.hauler}</div>
+        <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} · {truckType ? truckType.cap : ''} · {truck.hauler}</div>
         <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
           <Label style={{ marginBottom: 4 }}>On project</Label>
-          <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
-          <div style={{ fontFamily: F.body, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{project ? project.address : ''}</div>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
+          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
+          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.address : ''}</div>
         </div>
       </div>
 
@@ -3161,25 +3165,25 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: S[2], marginBottom: S[3] }}>
         <Card padding={S[3]}>
           <Label style={{ marginBottom: 4 }}>Loads</Label>
-          <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
+          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
         </Card>
         <Card padding={S[3]}>
           <Label style={{ marginBottom: 4 }}>Total CY</Label>
-          <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
+          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
         </Card>
         <Card padding={S[3]}>
           <Label style={{ marginBottom: 4 }}>Shift</Label>
-          <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: isOpen ? C.accent : C.inkDim, lineHeight: 1 }}>{isOpen ? (elapsedMs / 3600000).toFixed(1) + 'h' : '—'}</div>
+          <div style={{ ...T.statValue, fontWeight: 700, color: isOpen ? C.accent : C.inkDim, lineHeight: 1 }}>{isOpen ? (elapsedMs / 3600000).toFixed(1) + 'h' : '—'}</div>
         </Card>
       </div>
 
       {/* Primary actions */}
       {!isOpen ? (
-        <button onClick={clockIn} style={{ width: '100%', height: 64, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.4, marginBottom: S[2] }}>Clock in (this truck)</button>
+        <button onClick={clockIn} style={{ ...T.h4, width: '100%', height: 64, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, marginBottom: S[2] }}>Clock in (this truck)</button>
       ) : (
         <>
-          <button onClick={() => navigate(`/driver/log/${truck.id}`)} style={{ width: '100%', height: 64, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontFamily: F.display, fontSize: 18, fontWeight: 700, letterSpacing: -0.4, marginBottom: S[2] }}>+ Log load (this truck)</button>
-          <button onClick={clockOut} style={{ width: '100%', height: 48, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontSize: 14, fontWeight: 600, marginBottom: S[2] }}>End shift on this truck</button>
+          <button onClick={() => navigate(`/driver/log/${truck.id}`)} style={{ ...T.h4, width: '100%', height: 64, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, marginBottom: S[2] }}>+ Log load (this truck)</button>
+          <button onClick={clockOut} style={{ ...T.body, width: '100%', height: 48, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontWeight: 600, marginBottom: S[2] }}>End shift on this truck</button>
         </>
       )}
 
@@ -3196,9 +3200,9 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate }) {
           todayLoads.slice().reverse().map(l => {
             const m = MATERIALS.find(m => m.code === l.material);
             return (
-              <div key={l.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`, fontFamily: F.body, fontSize: 13 }}>
+              <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: 4, objectFit: 'cover' }} /> : <div style={{ width: 32, height: 32, borderRadius: 4, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>📷</div>}
+                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
                   <div>
                     <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m ? m.label : l.material}</div>
                     <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
@@ -3292,24 +3296,23 @@ function AdminNewProject({ db, setDb, navigate }) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flex: 1, minWidth: 0 }}>
         <div style={{
-          width: 28, height: 28, borderRadius: '50%',
+          ...T.mono, width: 28, height: 28, borderRadius: '50%',
           background: active ? C.accent : (done ? C.accentSoft : C.surfaceHi),
           color: active ? C.bg : (done ? C.accent : C.inkDim),
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontFamily: F.mono, fontSize: 12, fontWeight: 700, flexShrink: 0,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0,
           border: active ? 'none' : `1px solid ${C.ruleHi}`,
         }}>{n}</div>
-        <div style={{ fontFamily: F.mono, fontSize: 11, color: active ? C.ink : C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
+        <div style={{ ...T.monoSm, color: active ? C.ink : C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</div>
       </div>
     );
   };
 
   const Chip = ({ active, onClick, children, warn }) => (
     <button onClick={onClick} style={{
-      background: active ? C.accent : 'transparent',
+      ...T.bodySm, background: active ? C.accent : 'transparent',
       color: active ? C.bg : (warn ? C.warn : C.ink),
       border: `1px solid ${active ? C.accent : (warn ? C.warn : C.ruleHi)}`,
-      borderRadius: R.pill, padding: '8px 14px', fontFamily: F.body, fontSize: 13, fontWeight: 600,
+      borderRadius: R.pill, padding: '8px 14px', fontWeight: 600,
       cursor: 'pointer',
     }}>{children}</button>
   );
@@ -3334,32 +3337,32 @@ function AdminNewProject({ db, setDb, navigate }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
             <Label>Step 1 — Project basics</Label>
             <div>
-              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Project name</div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Project name</div>
               <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="e.g., West Side Phase 2" style={inputStyle} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
               <div>
-                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Code (2–4 chars)</div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>Code (2–4 chars)</div>
                 <input value={effectiveCode} onChange={e => {
                   const v = e.target.value;
                   setCodeTouched(v.length > 0);
                   setBasics(b => ({ ...b, code: v }));
                 }} placeholder="e.g., WSP" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={4} />
                 {codeDuplicate && (
-                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.warn, marginTop: 6 }}>
+                  <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>
                     Code "{effectiveCode}" is already used by "{duplicateOwner.name}".
                   </div>
                 )}
                 {!codeDuplicate && effectiveCode && effectiveCode.length < 2 && (
-                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.warn, marginTop: 6 }}>Code must be at least 2 characters.</div>
+                  <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>Code must be at least 2 characters.</div>
                 )}
               </div>
               <div>
-                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Start date</div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>Start date</div>
                 <input type="date" value={basics.startDate} onChange={e => setBasics(b => ({ ...b, startDate: e.target.value }))} style={inputStyle} />
               </div>
               <div>
-                <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Status</div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>Status</div>
                 <select value={basics.status} onChange={e => setBasics(b => ({ ...b, status: e.target.value }))} style={inputStyle}>
                   <option value="active">Active</option>
                   <option value="upcoming">Upcoming</option>
@@ -3367,15 +3370,15 @@ function AdminNewProject({ db, setDb, navigate }) {
               </div>
             </div>
             <div>
-              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>General contractor</div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>General contractor</div>
               <input value={basics.gc} onChange={e => setBasics(b => ({ ...b, gc: e.target.value }))} placeholder="e.g., Acme Contractors" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: 4 }}>Address</div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Address</div>
               <input value={basics.address} onChange={e => setBasics(b => ({ ...b, address: e.target.value }))} placeholder="e.g., 1234 Main St, Denver CO" style={inputStyle} />
             </div>
             <div>
-              <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginBottom: S[2] }}>Materials (pick one or more)</div>
+              <div style={{ ...T.caption, marginBottom: S[2] }}>Materials (pick one or more)</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
                 {MATERIALS.map(m => (
                   <Chip key={m.code} active={basics.materials.includes(m.code)} onClick={() => toggleMaterial(m.code)}>{m.label}</Chip>
@@ -3388,7 +3391,7 @@ function AdminNewProject({ db, setDb, navigate }) {
         {step === 2 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
             <Label>Step 2 — Assign haulers</Label>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Pick the haulers who will run this project. You'll assign trucks to them in the next step.</div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>Pick the haulers who will run this project. You'll assign trucks to them in the next step.</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
               {db.operators.map(op => {
                 const selected = operatorIds.includes(op.id);
@@ -3401,32 +3404,32 @@ function AdminNewProject({ db, setDb, navigate }) {
                     borderRadius: R.md, cursor: 'pointer', flexWrap: 'wrap',
                   }}>
                     <div style={{
-                      width: 22, height: 22, borderRadius: 6,
+                      ...T.body, width: 22, height: 22, borderRadius: 6,
                       background: selected ? C.accent : 'transparent',
                       border: `2px solid ${selected ? C.accent : C.ruleHi}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: C.bg, fontFamily: F.display, fontSize: 14, fontWeight: 700, flexShrink: 0,
+                      color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0,
                     }}>{selected ? '✓' : ''}</div>
                     <Avatar name={op.name} color={C.accent} />
                     <div style={{ flex: 1, minWidth: 140 }}>
                       <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
-                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
+                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
                     </div>
-                    <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>
+                    <div style={{ ...T.monoSm, color: C.inkDim }}>
                       {op.projectIds.length} {op.projectIds.length === 1 ? 'project' : 'projects'} · {trucksManaged} {trucksManaged === 1 ? 'truck' : 'trucks'}
                     </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{operatorIds.length} hauler{operatorIds.length === 1 ? '' : 's'} selected</div>
+            <div style={{ ...T.caption }}>{operatorIds.length} hauler{operatorIds.length === 1 ? '' : 's'} selected</div>
           </div>
         )}
 
         {step === 3 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
             <Label>Step 3 — Assign trucks</Label>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the haulers you selected.</div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this project and assign each to one of the haulers you selected.</div>
             <div>
               <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
             </div>
@@ -3446,21 +3449,21 @@ function AdminNewProject({ db, setDb, navigate }) {
                     borderRadius: R.md, flexWrap: 'wrap',
                   }}>
                     <div onClick={() => toggleTruck(t.id)} style={{
-                      width: 22, height: 22, borderRadius: 6,
+                      ...T.body, width: 22, height: 22, borderRadius: 6,
                       background: selected ? C.accent : 'transparent',
                       border: `2px solid ${selected ? C.accent : C.ruleHi}`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: C.bg, fontFamily: F.display, fontSize: 14, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
+                      color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
                     }}>{selected ? '✓' : ''}</div>
                     <div onClick={() => toggleTruck(t.id)} style={{ flex: 1, minWidth: 180, cursor: 'pointer' }}>
                       <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
-                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>
+                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
                         {t.hauler} · {currentProj ? `On ${currentProj.name}${currentOp ? ' / ' + currentOp.name : ''}` : 'Unassigned'}
                       </div>
                     </div>
                     {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
                     {selected && (
-                      <select value={sel.operatorId} onChange={e => setTruckOperator(t.id, e.target.value)} style={{ ...inputStyle, width: 'auto', padding: '8px 10px', fontSize: 13 }}>
+                      <select value={sel.operatorId} onChange={e => setTruckOperator(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
                         <option value="">Pick a hauler…</option>
                         {operatorIds.map(opId => {
                           const op = db.operators.find(o => o.id === opId);
@@ -3472,7 +3475,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                 );
               })}
             </div>
-            <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>
+            <div style={{ ...T.caption }}>
               {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick a hauler for each' : ''}
             </div>
           </div>
@@ -3507,7 +3510,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                     <div key={opId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>
                       <Avatar name={op.name} color={C.accent} />
                       <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
-                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{op.phone}</div>
+                      <div style={{ ...T.monoSm, color: C.inkDim }}>{op.phone}</div>
                     </div>
                   ) : null;
                 })}
@@ -3516,7 +3519,7 @@ function AdminNewProject({ db, setDb, navigate }) {
             <div>
               <Label style={{ marginBottom: S[2] }}>Trucks ({trucks.length})</Label>
               {trucks.length === 0 ? (
-                <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No trucks assigned yet — you can add them later.</div>
+                <div style={{ ...T.bodySm, color: C.inkDim, background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>No trucks assigned yet — you can add them later.</div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
                   {trucks.map(sel => {
@@ -3526,9 +3529,9 @@ function AdminNewProject({ db, setDb, navigate }) {
                     return t ? (
                       <div key={sel.truckId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3], flexWrap: 'wrap' }}>
                         <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
-                        <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{t.hauler}</div>
+                        <div style={{ ...T.monoSm, color: C.inkDim }}>{t.hauler}</div>
                         <div style={{ flex: 1 }} />
-                        <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>→ {op ? op.name : 'No hauler'}</div>
+                        <div style={{ ...T.caption }}>→ {op ? op.name : 'No hauler'}</div>
                       </div>
                     ) : null;
                   })}
@@ -3710,8 +3713,8 @@ function AdminReports({ db, navigate }) {
 
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Today vs yesterday across projects, haulers, and trucks. Numbers update live as drivers log hours and loads.</div>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Today vs yesterday across projects, haulers, and trucks. Numbers update live as drivers log hours and loads.</div>
       </div>
 
       {/* A. Headline KPI row */}
@@ -3754,17 +3757,17 @@ function AdminReports({ db, navigate }) {
       <Card padding={S[4]} style={{ marginBottom: S[6] }}>
         <Label style={{ marginBottom: 6 }}>Daily activity</Label>
         {todayCount === 0 ? (
-          <div style={{ fontFamily: F.body, fontSize: 14, color: C.inkDim }}>No loads logged today yet.</div>
+          <div style={{ ...T.body, color: C.inkDim }}>No loads logged today yet.</div>
         ) : yesterdayCount === 0 ? (
-          <div style={{ fontFamily: F.display, fontSize: 16, color: C.ink, fontWeight: 600 }}>
-            Today <span style={{ color: C.accent }}>{todayCount}</span> loads <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}>(no yesterday comparison)</span>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, color: C.ink, fontWeight: 600 }}>
+            Today <span style={{ color: C.accent }}>{todayCount}</span> loads <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400}}>(no yesterday comparison)</span>
           </div>
         ) : (
-          <div style={{ fontFamily: F.display, fontSize: 16, color: C.ink, fontWeight: 600 }}>
+          <div style={{ ...T.bodyLg, fontFamily: F.display, color: C.ink, fontWeight: 600 }}>
             Today <span style={{ color: C.accent }}>{todayCount}</span> loads
-            <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> — </span>
+            <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400}}> — </span>
             <span style={{ color: deltaColor }}>{deltaArrow} {deltaPct}%</span>
-            <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> vs yesterday ({yesterdayCount})</span>
+            <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400}}> vs yesterday ({yesterdayCount})</span>
           </div>
         )}
       </Card>
@@ -3773,7 +3776,7 @@ function AdminReports({ db, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.accent}>Projects</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{sortedRows.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{sortedRows.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -3811,11 +3814,11 @@ function AdminReports({ db, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.accent}>Top haulers today</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{operatorRows.length} of {db.operators.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{operatorRows.length} of {db.operators.length}</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {operatorRows.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No haulers on the roster yet.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No haulers on the roster yet.</div>
         ) : (
           <div>
             {operatorRows.map((op, i) => (
@@ -3825,10 +3828,10 @@ function AdminReports({ db, navigate }) {
                 borderBottom: i < operatorRows.length - 1 ? `1px solid ${C.rule}` : 'none',
               }}>
                 <div style={{
-                  width: 28, textAlign: 'center', fontFamily: F.mono, fontSize: 13,
+                  ...T.bodySm, width: 28, textAlign: 'center', fontFamily: F.mono,
                   color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
                 }}>{i + 1}</div>
-                <div style={{ flex: 1, fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink }}>{op.name}</div>
+                <div style={{ ...T.body, flex: 1, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
                 <div style={{ textAlign: 'right', minWidth: 64 }}>
                   <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.loadsToday}</div>
                   <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>loads</div>
@@ -3851,11 +3854,11 @@ function AdminReports({ db, navigate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.accent}>Truck utilization</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim }}>{truckRows.length}</span>
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{truckRows.length}</span>
       </div>
       <Card padding={0}>
         {truckRows.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No trucks on the roster yet.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks on the roster yet.</div>
         ) : (
           <div>
             {truckRows.map((t, i) => (
@@ -3866,16 +3869,16 @@ function AdminReports({ db, navigate }) {
                 flexWrap: 'wrap',
               }}>
                 <div style={{
-                  width: 28, textAlign: 'center', fontFamily: F.mono, fontSize: 13,
+                  ...T.bodySm, width: 28, textAlign: 'center', fontFamily: F.mono,
                   color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
                 }}>{i + 1}</div>
                 <div style={{ minWidth: 80 }}>
-                  <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 600, color: C.ink }}>#{t.plate}</div>
+                  <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate}</div>
                   <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 2 }}>{t.type}</div>
                 </div>
                 <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ fontFamily: F.body, fontSize: 13, color: C.ink }}>{t.driverName}</div>
-                  <div style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim, marginTop: 2 }}>{t.projectName}</div>
+                  <div style={{ ...T.bodySm, color: C.ink }}>{t.driverName}</div>
+                  <div style={{ ...T.caption, marginTop: 2 }}>{t.projectName}</div>
                 </div>
                 <StatusPill status={t.status} />
                 <div style={{ textAlign: 'right', minWidth: 64 }}>
@@ -3909,11 +3912,10 @@ function AdminHaulRequests({ db, setDb, navigate }) {
     const active = filter === k;
     return (
       <button onClick={() => setFilter(k)} style={{
-        background: active ? C.accent : 'transparent',
+        ...T.bodySm, background: active ? C.accent : 'transparent',
         color: active ? C.bg : C.inkDim,
         border: `1px solid ${active ? C.accent : C.ruleHi}`,
-        borderRadius: R.pill, padding: '6px 14px',
-        fontFamily: F.body, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+        borderRadius: R.pill, padding: '6px 14px', fontWeight: 600, cursor: 'pointer',
       }}>{label} <span style={{ opacity: 0.65, marginLeft: 4 }}>({counts[k]})</span></button>
     );
   };
@@ -3923,8 +3925,8 @@ function AdminHaulRequests({ db, setDb, navigate }) {
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Requests</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>Match incoming requests to available haulers.</div>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming requests to available haulers.</div>
       </div>
       <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[4] }}>
         <Tab k="all" label="All" />
@@ -3934,7 +3936,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
       </div>
       <Card padding={0}>
         {visible.length === 0 ? (
-          <div style={{ padding: S[6], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>
+          <div style={{ ...T.bodySm, padding: S[6], textAlign: 'center', color: C.inkDim}}>
             No {filter === 'all' ? '' : filter + ' '}requests.
           </div>
         ) : (
@@ -3968,7 +3970,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
                       {req.status === 'pending' ? (
                         <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
                       ) : hauler && truck ? (
-                        <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkDim }}>{hauler.name} / #{truck.plate}</span>
+                        <span style={{ ...T.caption }}>{hauler.name} / #{truck.plate}</span>
                       ) : <span style={{ color: C.inkFaint }}>—</span>}
                     </Td>
                   </Tr>
@@ -4024,14 +4026,14 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
             <Label color={C.accent} style={{ marginBottom: 6 }}>Request {req.id}</Label>
-            <h1 style={{ fontFamily: F.display, fontSize: 28, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
+            <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
               {req.volumeCY} CY of {material ? material.label : req.materialCode}
             </h1>
-            <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
               {project ? project.name : '—'} · requested at {req.requestedAt}
             </div>
             {req.notes && (
-              <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, fontFamily: F.body, fontSize: 13, color: C.ink }}>
+              <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
                 {req.notes}
               </div>
             )}
@@ -4042,7 +4044,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         {matchedHauler && matchedTruck && (
           <div style={{ marginTop: S[4], padding: S[3], background: C.accentSoft, borderRadius: R.md, border: `1px solid ${C.accent}` }}>
             <Label color={C.accent} style={{ marginBottom: 4 }}>Matched</Label>
-            <div style={{ fontFamily: F.display, fontSize: 16, fontWeight: 600, color: C.ink }}>
+            <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>
               {matchedHauler.name} · Truck #{matchedTruck.plate}
             </div>
           </div>
@@ -4055,7 +4057,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       </div>
       <Card padding={0}>
         {suggestedHaulers.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>
             No haulers available right now.
           </div>
         ) : (
@@ -4074,7 +4076,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     <Avatar name={op.name} color={C.accent} />
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{op.name}</div>
-                      <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>
+                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
                         {op.projectIds.length} project{op.projectIds.length === 1 ? '' : 's'} · {opTrucks.length} truck{opTrucks.length === 1 ? '' : 's'}
                       </div>
                     </div>
@@ -4087,12 +4089,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                       <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
                         {opTrucks.length === 0 ? (
-                          <span style={{ fontFamily: F.body, fontSize: 12, color: C.inkFaint }}>This hauler has no trucks on the roster.</span>
+                          <span style={{ ...T.caption, color: C.inkFaint }}>This hauler has no trucks on the roster.</span>
                         ) : opTrucks.map(t => (
                           <button key={t.id} onClick={() => assign(op.id, t.id)} style={{
-                            background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
-                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer',
-                            fontFamily: F.body, fontSize: 13, fontWeight: 600,
+                            ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
+                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
                           }}
                             onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
                             onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
@@ -4121,8 +4122,8 @@ function AdminHaulers({ db, navigate }) {
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Haulers</Label>
-        <h1 style={{ fontFamily: F.display, fontSize: 36, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
-        <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
         {haulers.map(h => (
@@ -4136,18 +4137,18 @@ function AdminHaulers({ db, navigate }) {
             <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4] }}>
               <Avatar name={h.name} color={C.accent} size={44} />
               <div style={{ flex: 1 }}>
-                <div style={{ fontFamily: F.display, fontSize: 18, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
-                <div style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 2 }}>{h.phone}</div>
+                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
+                <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{h.phone}</div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
               <div style={{ flex: 1 }}>
                 <Label style={{ marginBottom: 4 }}>Projects</Label>
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{h.projectCount}</div>
+                <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{h.projectCount}</div>
               </div>
               <div style={{ flex: 1 }}>
                 <Label style={{ marginBottom: 4 }}>Trucks</Label>
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{h.truckCount}</div>
+                <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{h.truckCount}</div>
               </div>
             </div>
           </button>
@@ -4187,7 +4188,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>
             <EditableText value={hauler.name} onSave={(v) => updateHauler({ name: v })} />
           </h1>
-          <div style={{ fontFamily: F.body, fontSize: 13, color: C.inkDim, marginTop: 4 }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
             <EditableText value={hauler.phone} onSave={(v) => updateHauler({ phone: v })} mono /> ·{' '}
             <EditableText value={hauler.email} onSave={(v) => updateHauler({ email: v })} mono />
           </div>
@@ -4205,7 +4206,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       <div style={{ marginBottom: S[3] }}><Label>Projects this hauler is on</Label></div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {projects.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>This hauler isn't on any projects.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>This hauler isn't on any projects.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><Th>Project</Th><Th>GC</Th><Th>Status</Th><Th align="right">Trucks</Th><Th align="right">Loads</Th><Th></Th></tr></thead>
@@ -4232,7 +4233,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       <div style={{ marginBottom: S[3] }}><Label>All trucks</Label></div>
       <Card padding={0}>
         {trucks.length === 0 ? (
-          <div style={{ padding: S[5], textAlign: 'center', color: C.inkDim, fontFamily: F.body, fontSize: 13 }}>No trucks under this hauler.</div>
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><Th>Plate</Th><Th>Type</Th><Th>Project</Th><Th>Driver</Th></tr></thead>
@@ -4286,10 +4287,9 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; } }}
       >
         <button onClick={onClick} style={{
-          flex: 1, display: 'flex', alignItems: 'center', gap: S[3],
+          ...T.body, flex: 1, display: 'flex', alignItems: 'center', gap: S[3],
           background: 'transparent', color: 'inherit',
-          border: 'none', padding: '10px 12px', cursor: 'pointer',
-          fontFamily: F.body, fontSize: 14, fontWeight: 600, textAlign: 'left',
+          border: 'none', padding: '10px 12px', cursor: 'pointer', fontWeight: 600, textAlign: 'left',
         }}>
           <span style={{ display: 'inline-flex', flexShrink: 0 }} aria-hidden="true">{icon}</span>
           <span style={{ flex: 1 }}>{label}</span>
@@ -4307,9 +4307,8 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
             aria-expanded={!!expanded}
             aria-label={expanded ? `Collapse ${label}` : `Expand ${label}`}
             style={{
-              background: 'transparent', color: C.inkFaint, border: 'none',
+              ...T.monoSm, background: 'transparent', color: C.inkFaint, border: 'none',
               padding: '0 10px', cursor: 'pointer',
-              fontFamily: F.mono, fontSize: 11,
             }}
           ><span aria-hidden="true">{expanded ? '▾' : '▸'}</span></button>
         )}
@@ -4325,10 +4324,9 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], paddingBottom: S[3], borderBottom: `1px solid ${C.rule}` }}>
           <Brand size="sm" />
           <button onClick={onNavigate} aria-label="Close menu" style={{
-            background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
+            ...T.bodyLg, background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
             width: 30, height: 30, borderRadius: '50%', cursor: 'pointer',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontFamily: F.body, fontSize: 16,
           }}>×</button>
         </div>
       )}
@@ -4358,9 +4356,8 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
           {sortedHaulers.map(op => (
             <button key={op.id} onClick={() => go(`/admin/haulers/${op.id}`)} style={{
-              background: 'transparent', border: 'none', textAlign: 'left',
-              padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer',
-              fontFamily: F.body, fontSize: 13, color: C.inkDim,
+              ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+              padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.inkDim,
             }}
               onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; }}
