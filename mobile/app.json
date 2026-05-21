@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "JSE Hauler",
+    "slug": "jse-hauler",
+    "version": "0.1.0",
+    "scheme": "jsehauler",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0A0A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jse.hauler",
+      "infoPlist": {
+        "NSCameraUsageDescription": "JSE Hauler uses the camera so drivers can photograph load tickets.",
+        "NSPhotoLibraryUsageDescription": "JSE Hauler accesses your photos so drivers can attach an existing ticket image."
+      }
+    },
+    "android": {
+      "package": "com.jse.hauler",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0A"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "bundler": "metro",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "JSE Hauler uses the camera so drivers can photograph load tickets.",
+          "photosPermission": "JSE Hauler accesses your photos so drivers can attach an existing ticket image."
+        }
+      ]
+    ],
+    "experiments": {
+      "tsconfigPaths": true,
+      "typedRoutes": false
+    }
+  }
+}
