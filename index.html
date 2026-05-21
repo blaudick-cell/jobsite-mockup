@@ -4515,88 +4515,392 @@ function AdminReports({ db, navigate }) {
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate }) {
   const requests = db.haulRequests || [];
-  // Group by status into three buckets, displayed in fixed order:
-  //   Pending → Active (matched + accepted) → Completed.
-  // The middle "Active" bucket combines `matched` (admin-assigned a hauler)
-  // and `accepted` (driver opted in); both are mid-flight states and
-  // collapsing them removes the user-confusing type filter previously here.
-  const pending   = requests.filter(r => r.status === 'pending');
-  const active    = requests.filter(r => r.status === 'matched' || r.status === 'accepted');
-  const completed = requests.filter(r => r.status === 'completed');
+  // === Filter / search state ===
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [materialFilter, setMaterialFilter] = useState('all');
+  const [priorityFilter, setPriorityFilter] = useState('all');
 
-  const renderRow = (req) => {
-    const project = db.projects.find(p => p.id === req.projectId);
-    const material = MATERIALS.find(m => m.code === req.materialCode);
-    const hauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
-    const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
+  // === Helpers — convert HH:MM to minutes since midnight, compute waiting age ===
+  const hhmmToMin = (t) => {
+    if (!t || typeof t !== 'string' || !t.includes(':')) return 0;
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m;
+  };
+  const now = new Date();
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
+
+  // === Enrich each request with derived dispatch fields ===
+  const enriched = requests.map(r => {
+    const project = db.projects.find(pp => pp.id === r.projectId);
+    const material = MATERIALS.find(mm => mm.code === r.materialCode);
+    const reqMin = hhmmToMin(r.requestedAt);
+    const waitingMin = Math.max(0, nowMin - reqMin);
+    const trucksNeeded = Math.max(1, Math.ceil((r.volumeCY || 0) / 18));
+    const trucksAssigned = (r.assignments || []).length || (r.matchedTruckId ? 1 : 0);
+    // Priority: critical (>30m waiting + pending), high (pending, no trucks), normal, scheduled (future request)
+    let priority = 'normal';
+    if (r.status === 'pending') {
+      if (waitingMin > 30) priority = 'critical';
+      else if (trucksAssigned === 0) priority = 'high';
+    } else if (r.status === 'completed') priority = 'scheduled';
+    // Lifecycle state for the matched/accepted bucket
+    let lifecycle = 'Searching';
+    if (r.status === 'pending')        lifecycle = trucksAssigned > 0 ? 'Matching' : 'Searching';
+    else if (r.status === 'matched')   lifecycle = 'Assigned';
+    else if (r.status === 'accepted')  lifecycle = 'En route';
+    else if (r.status === 'completed') lifecycle = 'Completed';
+    // Material flow direction
+    const matFlow = r.materialCode === 'EX' ? 'Export'
+                  : r.materialCode === 'CF' ? 'Import — Clean Fill'
+                  : r.materialCode === 'CR' ? 'Import — Aggregate'
+                  : r.materialCode === 'TS' ? 'Topsoil Transfer'
+                  : 'Transfer';
+    // Distance estimate (demo)
+    const distance = 8 + (r.id.charCodeAt(r.id.length - 1) % 28);
+    return {
+      r, project, material, waitingMin, trucksNeeded, trucksAssigned,
+      priority, lifecycle, matFlow, distance,
+      pickup: fmtLoc(r.pickupLocation) || (project ? project.address : ''),
+      dropoff: fmtLoc(r.dropoffLocation) || (project ? project.address : ''),
+    };
+  });
+
+  // === Apply filters ===
+  const filtered = enriched.filter(e => {
+    if (statusFilter !== 'all' && e.r.status !== statusFilter) return false;
+    if (materialFilter !== 'all' && e.r.materialCode !== materialFilter) return false;
+    if (priorityFilter !== 'all' && e.priority !== priorityFilter) return false;
+    if (search) {
+      const q = search.toLowerCase();
+      const hay = (e.r.id + ' ' + (e.project ? e.project.name : '') + ' ' + (e.project ? e.project.gc : '') + ' ' + (e.material ? e.material.label : '') + ' ' + e.pickup + ' ' + e.dropoff).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const pending   = filtered.filter(e => e.r.status === 'pending');
+  const active    = filtered.filter(e => e.r.status === 'matched' || e.r.status === 'accepted');
+  const completed = filtered.filter(e => e.r.status === 'completed');
+
+  // === Operations KPIs ===
+  const openRequests   = enriched.filter(e => e.r.status === 'pending').length;
+  const trucksNeededAll = enriched.filter(e => e.r.status === 'pending').reduce((s, e) => s + (e.trucksNeeded - e.trucksAssigned), 0);
+  const activeMatches  = enriched.filter(e => e.r.status === 'matched' || e.r.status === 'accepted').length;
+  const delayedReqs    = enriched.filter(e => e.priority === 'critical').length;
+  const matchedWaits   = enriched.filter(e => e.r.status === 'matched' || e.r.status === 'accepted').map(e => e.waitingMin);
+  const avgMatchMin    = matchedWaits.length > 0 ? Math.round(matchedWaits.reduce((s,v) => s+v,0) / matchedWaits.length) : 0;
+  const todayVolumeCY  = enriched.filter(e => e.r.status !== 'completed').reduce((s, e) => s + (e.r.volumeCY || 0), 0);
+
+  const kpis = [
+    { label: 'Open requests',         value: openRequests,                                tone: openRequests > 0 ? C.warn : C.inkDim,  sub: 'awaiting match' },
+    { label: 'Trucks needed',         value: trucksNeededAll,                             tone: trucksNeededAll > 0 ? C.accent : C.inkDim, sub: 'across pending' },
+    { label: 'Active matches',        value: activeMatches,                               tone: C.ok,                                  sub: 'in motion' },
+    { label: 'Avg match time',        value: avgMatchMin > 0 ? avgMatchMin + ' min' : '—', tone: C.info,                                sub: 'pickup → assignment' },
+    { label: 'Delayed',               value: delayedReqs,                                 tone: delayedReqs > 0 ? (C.danger || C.warn) : C.inkDim, sub: 'waiting >30 min' },
+    { label: 'Volume today',          value: todayVolumeCY + ' CY',                       tone: C.accent,                              sub: 'requested + active' },
+  ];
+
+  // === Priority + lifecycle tone helpers ===
+  const priTone = (p) => ({
+    critical:  { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Critical' },
+    high:      { c: C.warn,   soft: C.warnSoft, label: 'High' },
+    normal:    { c: C.accent, soft: C.accentSoft, label: 'Normal' },
+    scheduled: { c: C.info,   soft: C.infoSoft, label: 'Scheduled' },
+  }[p] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: p });
+  const lifecycleTone = (s) => ({
+    'Searching':  { c: C.warn,   soft: C.warnSoft },
+    'Matching':   { c: C.info,   soft: C.infoSoft },
+    'Assigned':   { c: C.accent, soft: C.accentSoft },
+    'En route':   { c: C.ok,     soft: C.okSoft },
+    'Completed':  { c: C.inkDim, soft: 'rgba(255,255,255,0.06)' },
+  }[s] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)' });
+
+  // === Recommended matches — derive from db.haulers/db.trucks for first pending ===
+  const buildRecommendations = (e) => {
+    if (!e) return [];
+    return db.haulers.slice(0, 5).map((h, i) => {
+      const haulerTrucks = db.trucks.filter(t => t.haulerId === h.id);
+      const active = haulerTrucks.filter(t => t.driverId && (db.hours || []).some(hr => hr.truckId === t.id && hr.status === 'open')).length;
+      const available = haulerTrucks.length - active;
+      // Stable deterministic fields per hauler
+      const minsAway = 6 + ((h.id.charCodeAt(h.id.length - 1) + i) % 22);
+      const fulfillment = 88 + ((h.id.charCodeAt(0) + i * 7) % 11);
+      const rateEst = e.material && e.material.code === 'CF' ? 125 : e.material && e.material.code === 'CR' ? 125 : e.material && e.material.code === 'TS' ? 140 : 130;
+      return { hauler: h, available, totalTrucks: haulerTrucks.length, minsAway, fulfillment, rateEst };
+    }).filter(rec => rec.available > 0).slice(0, 3);
+  };
+  const recTarget = pending[0] || enriched.find(e => e.r.status === 'pending');
+  const recommendations = buildRecommendations(recTarget);
+
+  // === Dispatch activity feed — recent events ===
+  const activityFeed = (db.activity || []).slice().sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
+  const fmtAgo = (ts) => {
+    const sec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
+    if (sec < 60) return sec + ' sec ago';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + ' min ago';
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return hr + ' hr ago';
+    return Math.floor(hr / 24) + ' d ago';
+  };
+
+  // === Contextual actions per request state ===
+  const actionsFor = (e) => {
+    const acts = [];
+    if (e.r.status === 'pending') {
+      if (e.priority === 'critical') acts.push({ label: 'Escalate', variant: 'primary' });
+      acts.push({ label: e.trucksAssigned > 0 ? 'Assign fleet' : 'Find trucks', variant: 'primary' });
+      acts.push({ label: 'Broadcast', variant: 'secondary' });
+    } else if (e.r.status === 'matched' || e.r.status === 'accepted') {
+      acts.push({ label: 'Open dispatch', variant: 'primary' });
+      acts.push({ label: 'View route', variant: 'secondary' });
+    } else {
+      acts.push({ label: 'Open record', variant: 'secondary' });
+    }
+    return acts;
+  };
+
+  // === Dispatch-style row ===
+  const DispatchRow = ({ e, last }) => {
+    const tone = priTone(e.priority);
+    const lct  = lifecycleTone(e.lifecycle);
     return (
-      <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
-        <Td>{project ? project.name : '—'}</Td>
-        <Td>{material ? material.label : req.materialCode}</Td>
-        <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
-        <Td mono dim>{req.requestedAt}</Td>
-        <Td>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <StatusPill status={req.status} />
-            {req.status === 'pending' && (req.passedBy || []).length > 0 && (
-              <Pill color={C.inkDim} soft={'rgba(255,255,255,0.06)'}>Passed by {req.passedBy.length}</Pill>
-            )}
-          </span>
-        </Td>
-        <Td align="right">
-          {req.status === 'pending' ? (
-            <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
-          ) : hauler && truck ? (
-            <span style={{ ...T.caption }}>{hauler.name} / #{truck.plate}</span>
-          ) : <span style={{ color: C.inkFaint }}>—</span>}
-        </Td>
-      </Tr>
+      <div
+        onClick={() => navigate('/admin/requests/' + e.r.id)}
+        style={{
+          padding: S[4],
+          borderBottom: last ? 'none' : `1px solid ${C.rule}`,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 0.9fr)',
+          gap: S[4],
+          alignItems: 'start',
+          cursor: 'pointer',
+          transition: 'background 120ms ease',
+        }}
+        onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.025)'}
+        onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
+      >
+        {/* LEFT — id / haul / route / requested */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 4 }}>
+            <span style={{ ...T.monoSm, color: C.accent, fontWeight: 700 }}>#{e.r.id.toUpperCase()}</span>
+            <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
+            <Pill color={lct.c} soft={lct.soft}>{e.lifecycle}</Pill>
+          </div>
+          <div style={{ ...T.body, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{e.project ? e.project.name : '—'}</div>
+          <div style={{ ...T.caption, color: C.inkDim }}>{e.project ? e.project.gc : ''}</div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontFamily: F.mono, lineHeight: 1.4 }}>
+            <span style={{ color: C.ink }}>{e.pickup || '—'}</span>
+            <span style={{ color: C.accent, margin: '0 4px' }}>{'→'}</span>
+            <span style={{ color: C.ink }}>{e.dropoff || '—'}</span>
+          </div>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 4 }}>
+            Requested <span style={{ fontFamily: F.mono, color: C.ink }}>{e.r.requestedAt}</span>
+            <span style={{ color: C.inkFaint }}> · </span>
+            {e.r.status === 'pending'
+              ? <span style={{ color: e.waitingMin > 30 ? (C.danger || C.warn) : C.warn, fontWeight: 600 }}>Waiting {e.waitingMin} min</span>
+              : <span style={{ color: C.inkDim }}>Dispatched</span>}
+          </div>
+        </div>
+
+        {/* CENTER — material / volume / trucks / distance */}
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 6 }}>
+            <Pill color={C.accent} soft={C.accentSoft}>{e.matFlow}</Pill>
+            <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{e.material ? e.material.label : e.r.materialCode}</Pill>
+          </div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>VOLUME</div>
+          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink, marginBottom: 6 }}>{e.r.volumeCY} CY</div>
+          <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
+            <span style={{ color: C.ink, fontWeight: 600 }}>{e.trucksAssigned}/{e.trucksNeeded}</span> trucks
+            <span style={{ color: C.inkFaint }}> · </span>
+            <span>~{e.distance} mi</span>
+            <span style={{ color: C.inkFaint }}> · </span>
+            <span>~{Math.round(e.distance * 1.8)} min</span>
+          </div>
+          {/* Mini fulfillment bar */}
+          <div style={{ marginTop: 6, height: 4, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
+            <div style={{ width: Math.min(100, (e.trucksAssigned / Math.max(1, e.trucksNeeded)) * 100) + '%', height: '100%', background: e.priority === 'critical' ? (C.danger || C.warn) : C.accent, borderRadius: 999 }} />
+          </div>
+        </div>
+
+        {/* RIGHT — assigned hauler + actions */}
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[2], alignItems: 'stretch' }}>
+          {e.r.matchedHaulerId ? (() => {
+            const h = db.haulers.find(o => o.id === e.r.matchedHaulerId);
+            const t = e.r.matchedTruckId ? db.trucks.find(tt => tt.id === e.r.matchedTruckId) : null;
+            return (
+              <div>
+                <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>ASSIGNED</div>
+                <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600, lineHeight: 1.3 }}>{h ? h.name : '—'}</div>
+                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>{t ? '#' + t.plate : 'truck TBD'}</div>
+              </div>
+            );
+          })() : (
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>ASSIGNED</div>
+              <div style={{ ...T.bodySm, color: C.inkFaint, fontStyle: 'italic' }}>Unmatched</div>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[1], marginTop: 'auto' }}>
+            {actionsFor(e).map((a, i) => (
+              <Btn key={i} variant={a.variant} size="xs" onClick={(ev) => { ev.stopPropagation(); navigate('/admin/requests/' + e.r.id); }}>{a.label}</Btn>
+            ))}
+          </div>
+        </div>
+      </div>
     );
   };
 
-  const head = (
-    <thead>
-      <tr>
-        <Th>Haul</Th>
-        <Th>Material</Th>
-        <Th align="right">Volume</Th>
-        <Th>Requested</Th>
-        <Th>Status</Th>
-        <Th align="right">Action</Th>
-      </tr>
-    </thead>
-  );
-
   const Section = ({ label, color, rows, emptyText }) => (
-    <>
+    <div style={{ marginBottom: S[5] }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={color}>{label}</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{rows.length}</span>
       </div>
-      <Card padding={0} style={{ marginBottom: S[6] }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          {head}
-          <tbody>
-            {rows.map(req => renderRow(req))}
-            {rows.length === 0 && <tr><td colSpan={7} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>{emptyText}</td></tr>}
-          </tbody>
-        </table>
+      <Card padding={0}>
+        {rows.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>{emptyText}</div>
+        ) : rows.map((e, i) => <DispatchRow key={e.r.id} e={e} last={i === rows.length - 1} />)}
       </Card>
-    </>
+    </div>
   );
 
+  const materialOptions = [{ value: 'all', label: 'All materials' }, ...MATERIALS.map(m => ({ value: m.code, label: m.label }))];
+  const inputStyle = { ...T.body, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 10px', borderRadius: R.sm, fontFamily: F.body };
+
   return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
-      <div style={{ marginBottom: S[5] }}>
-        <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Requests</Label>
-        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming requests to available haulers.</div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 6 }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: C.ok, boxShadow: `0 0 0 0 ${C.ok}`, animation: 'jse-pulse 1.6s ease-out infinite' }} />
+            <Label color={C.accent} style={{ margin: 0 }}>Live · dispatch marketplace</Label>
+            <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· {db.haulers.length} haulers connected · GPS active · updated 8s ago</span>
+          </div>
+          <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Pending requests appear at the top with priority + waiting time.</div>
+        </div>
       </div>
-      <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests." />
-      <Section label="Active"    color={C.accent} rows={active}    emptyText="No active requests." />
-      <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests." />
+
+      {/* Operations KPI strip */}
+      <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
+        {kpis.map(k => (
+          <Card key={k.label} padding={S[4]}>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 6 }}>{k.label.toUpperCase()}</div>
+            <div style={{ ...T.h2, fontWeight: 700, color: k.tone || C.ink, letterSpacing: -0.5, lineHeight: 1 }}>{k.value}</div>
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>{k.sub}</div>
+          </Card>
+        ))}
+      </div>
+
+      {/* Filter / sort bar */}
+      <Card padding={S[3]} style={{ marginBottom: S[5] }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+          <input
+            type="search"
+            value={search}
+            onChange={ev => setSearch(ev.target.value)}
+            placeholder="Search by id, haul, GC, or location…"
+            style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+          />
+          <select value={statusFilter} onChange={ev => setStatusFilter(ev.target.value)} style={inputStyle}>
+            <option value="all">All status</option>
+            <option value="pending">Pending</option>
+            <option value="matched">Matched</option>
+            <option value="accepted">Accepted</option>
+            <option value="completed">Completed</option>
+          </select>
+          <select value={materialFilter} onChange={ev => setMaterialFilter(ev.target.value)} style={inputStyle}>
+            {materialOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+          <select value={priorityFilter} onChange={ev => setPriorityFilter(ev.target.value)} style={inputStyle}>
+            <option value="all">All priority</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="scheduled">Scheduled</option>
+          </select>
+          <div style={{ ...T.caption, color: C.inkDim, marginLeft: 'auto' }}>{filtered.length} of {enriched.length} requests</div>
+        </div>
+      </Card>
+
+      {/* Main 2-col layout: requests | side rail */}
+      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: S[4] }}>
+        <div style={{ minWidth: 0 }}>
+          <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests match the filters." />
+          <Section label="Active"    color={C.accent} rows={active}    emptyText="No active matches." />
+          <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests yet." />
+        </div>
+
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[4] }}>
+          {/* Recommended Matches */}
+          <Card padding={0}>
+            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
+              <Label color={C.accent}>Recommended matches</Label>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
+                {recTarget ? 'For #' + recTarget.r.id.toUpperCase() + ' · ' + (recTarget.project ? recTarget.project.name : '') : 'No pending request'}
+              </div>
+            </div>
+            {recommendations.length === 0 ? (
+              <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No haulers with available trucks right now.</div>
+            ) : (
+              <div>
+                {recommendations.map((rec, i) => (
+                  <div key={rec.hauler.id} style={{ padding: S[3], borderBottom: i < recommendations.length - 1 ? `1px solid ${C.rule}` : 'none' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
+                      <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{rec.hauler.name}</div>
+                      <Pill color={C.ok} soft={C.okSoft}>{rec.fulfillment}% fulfill</Pill>
+                    </div>
+                    <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginBottom: 6 }}>
+                      <span style={{ color: C.ink, fontWeight: 600 }}>{rec.available}</span> of {rec.totalTrucks} trucks free
+                      <span style={{ color: C.inkFaint }}> · </span>
+                      ~{rec.minsAway} min away
+                      <span style={{ color: C.inkFaint }}> · </span>
+                      est. ${rec.rateEst}/hr
+                    </div>
+                    <div style={{ display: 'flex', gap: S[2] }}>
+                      <Btn variant="primary" size="xs" onClick={() => navigate('/admin/haulers/' + rec.hauler.id)}>Assign</Btn>
+                      <Btn variant="secondary" size="xs" onClick={() => navigate('/admin/haulers/' + rec.hauler.id)}>View hauler</Btn>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+
+          {/* Dispatch Activity feed */}
+          <Card padding={0}>
+            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <Label color={C.accent}>Dispatch activity</Label>
+                <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Recent assignments + log</div>
+              </div>
+              <Pill color={C.ok} soft={C.okSoft}>Live</Pill>
+            </div>
+            {activityFeed.length === 0 ? (
+              <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No recent activity.</div>
+            ) : (
+              <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                {activityFeed.map((a, i) => (
+                  <div key={a.id || i} style={{ padding: S[3], borderBottom: i < activityFeed.length - 1 ? `1px solid ${C.rule}` : 'none', display: 'flex', alignItems: 'flex-start', gap: S[2] }}>
+                    <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: C.accent, marginTop: 6, flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ ...T.caption, color: C.ink, lineHeight: 1.4 }}>{a.summary}</div>
+                      <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, marginTop: 2 }}>{fmtAgo(a.timestamp)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }
