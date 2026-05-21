@@ -2284,63 +2284,117 @@ function AdminProjects({ db, setDb, navigate }) {
     );
   };
 
-  // === Live operations map — dark mock that reads like Mapbox.
-  // Projects active/upcoming hauls onto a Colorado-region viewport with
-  // curved routes, animated truck dots, pulse pickups, hover tooltips,
-  // and a filter row. Architected so RouteLayer/TruckMarker/etc. can be
-  // swapped onto a real map provider later — pure mock today.
+  // === Live operations map — dark tactical dispatch view.
+  //   Architecture intentionally mirrors a real-map integration so the inline
+  //   SVG ROAD/CITY layers can be swapped for a Mapbox GL or MapLibre source
+  //   without rewriting the route/marker/tooltip/filter code on top:
+  //     • <BaseLayer />      → today: SVG roads + cities + terrain washes
+  //                            tomorrow: real raster/vector tiles
+  //     • <RouteLayer />     → projected pickup→dump paths with animated flow
+  //     • <PickupMarker />,
+  //       <DumpMarker />,
+  //       <TruckMarker />   → SVG primitives that ride the route paths
+  //     • <MapFilters />     → status chips (Active / Upcoming / Delayed / Completed)
+  //     • <MetricsDrawer />  → collapsible side panel summarizing visible state
+  //     • <RouteTooltip />,
+  //       <PinnedRouteCard /> → hover preview + click-to-pin info card
+  //   Real Mapbox swap, when ready: provide a public token, lift the projection
+  //   helpers to the Mapbox `lng/lat` API, render the base layer with
+  //   <mapboxgl.Map style="mapbox://styles/mapbox/dark-v11"> and keep the
+  //   route/marker/tooltip code as overlays.
   const LiveOperationsMap = () => {
-    // -- Fake Colorado-area projection. Roughly Denver / Front Range.
-    //    Viewport: lng -106.5..-104.0 (left→right), lat 39.5..40.5 (bottom→top).
-    const VIEW = { lngMin: -106.5, lngMax: -104.0, latMin: 39.5, latMax: 40.5, w: 600, h: 360 };
+    // -- Front Range projection. Viewport tuned to frame Denver metro +
+    //    foothills + I-70 east corridor so every active haul sits inside.
+    const VIEW = { lngMin: -106.4, lngMax: -104.2, latMin: 39.55, latMax: 40.35, w: 640, h: 400 };
     const projX = (lng) => ((lng - VIEW.lngMin) / (VIEW.lngMax - VIEW.lngMin)) * VIEW.w;
     const projY = (lat) => (1 - (lat - VIEW.latMin) / (VIEW.latMax - VIEW.latMin)) * VIEW.h;
 
-    // -- City gazetteer. Real lat/lng for Front Range + I-70 corridor cities
-    //    so the spatial relationships feel right.
-    const CITIES = {
-      'Denver':        { lat: 39.7392, lng: -104.9903 },
-      'Aurora':        { lat: 39.7294, lng: -104.8319 },
-      'Commerce City': { lat: 39.8083, lng: -104.9339 },
-      'Boulder':       { lat: 40.0150, lng: -105.2705 },
-      'Winter Park':   { lat: 39.8869, lng: -105.7625 },
-      'Granby':        { lat: 40.0858, lng: -105.9425 },
-      'Bennett':       { lat: 39.7592, lng: -104.4291 },
-      'Brighton':      { lat: 39.9853, lng: -104.8208 },
-      'Castle Rock':   { lat: 39.3722, lng: -104.8561 },
-    };
+    // -- City gazetteer. Tier drives label weight; bigger cities anchor the
+    //    visual hierarchy and act as named waypoints.
+    const CITIES = [
+      { name: 'Denver',        lat: 39.7392, lng: -104.9903, tier: 1 },
+      { name: 'Aurora',        lat: 39.7294, lng: -104.8319, tier: 1 },
+      { name: 'Boulder',       lat: 40.0150, lng: -105.2705, tier: 1 },
+      { name: 'Westminster',   lat: 39.8366, lng: -105.0372, tier: 2 },
+      { name: 'Commerce City', lat: 39.8083, lng: -104.9339, tier: 2 },
+      { name: 'Brighton',      lat: 39.9853, lng: -104.8208, tier: 2 },
+      { name: 'Castle Rock',   lat: 39.3722, lng: -104.8561, tier: 2 },
+      { name: 'Lakewood',      lat: 39.7047, lng: -105.0814, tier: 2 },
+      { name: 'Bennett',       lat: 39.7592, lng: -104.4291, tier: 3 },
+      { name: 'Winter Park',   lat: 39.8869, lng: -105.7625, tier: 3 },
+      { name: 'Granby',        lat: 40.0858, lng: -105.9425, tier: 3 },
+      { name: 'Idaho Springs', lat: 39.7425, lng: -105.5136, tier: 3 },
+      { name: 'Golden',        lat: 39.7555, lng: -105.2211, tier: 3 },
+    ];
+    const cityByName = Object.fromEntries(CITIES.map(c => [c.name, c]));
 
-    // -- Per-project pickup/dump assignment. Routes are deterministic so the
-    //    map doesn't reshuffle on every render. Falls back gracefully if a
-    //    project name isn't in the gazetteer.
+    // -- Front Range road network. Each road carries a name + viewBox path that
+    //    threads cities + a few interpolated bends to feel less polygonal. Drawn
+    //    twice (outline + lighter inner) for a vector-tile highway look.
+    const pt = (city) => [projX(cityByName[city].lng), projY(cityByName[city].lat)];
+    const path = (segs) => 'M ' + segs.map((s, i) => i === 0 ? `${s[0]} ${s[1]}` : `L ${s[0]} ${s[1]}`).join(' ');
+    const curvePath = (segs) => 'M ' + segs[0].join(' ') + ' ' + segs.slice(1).map((p, i) => {
+      const prev = segs[i];
+      const cx = (prev[0] + p[0]) / 2;
+      const cy = (prev[1] + p[1]) / 2;
+      return `Q ${cx} ${cy} ${p[0]} ${p[1]}`;
+    }).join(' ');
+    const ROADS = [
+      // I-25 vertical spine
+      { name: 'I-25', cls: 'highway', d: path([pt('Castle Rock'), [projX(-104.93), projY(39.50)], pt('Denver'), pt('Commerce City'), pt('Brighton'), [projX(-104.78), projY(40.30)]]) },
+      // I-70 east — Denver → Aurora → Bennett → off-map east
+      { name: 'I-70 E', cls: 'highway', d: path([pt('Denver'), pt('Aurora'), pt('Bennett'), [projX(-104.30), projY(39.74)]]) },
+      // I-70 west / US-40 into foothills, then up to Winter Park & Granby
+      { name: 'I-70 W', cls: 'highway', d: curvePath([pt('Denver'), pt('Golden'), [projX(-105.45), projY(39.70)], pt('Idaho Springs'), [projX(-105.65), projY(39.78)], pt('Winter Park'), pt('Granby')]) },
+      // US-36 NW: Denver → Westminster → Boulder
+      { name: 'US-36', cls: 'arterial', d: path([pt('Denver'), pt('Westminster'), pt('Boulder')]) },
+      // E-470 outer ring (approximate arc around metro east)
+      { name: 'E-470', cls: 'arterial', d: curvePath([[projX(-104.70), projY(39.50)], [projX(-104.65), projY(39.74)], [projX(-104.70), projY(40.00)], [projX(-104.85), projY(40.10)]]) },
+      // C-470 west ring
+      { name: 'C-470', cls: 'arterial', d: curvePath([[projX(-105.18), projY(39.55)], [projX(-105.12), projY(39.65)], pt('Lakewood'), [projX(-105.10), projY(39.80)]]) },
+      // US-285 SW
+      { name: 'US-285', cls: 'arterial', d: path([pt('Denver'), [projX(-105.10), projY(39.62)], [projX(-105.30), projY(39.55)]]) },
+    ];
+    // Smaller local-road web — tiny, very dim. Adds the "vector tile" busyness.
+    const LOCAL_ROADS = [
+      `M ${projX(-104.95)} ${projY(39.78)} L ${projX(-104.83)} ${projY(39.80)}`,
+      `M ${projX(-105.05)} ${projY(39.70)} L ${projX(-104.95)} ${projY(39.66)}`,
+      `M ${projX(-104.90)} ${projY(39.93)} L ${projX(-104.80)} ${projY(39.95)}`,
+      `M ${projX(-105.15)} ${projY(39.90)} L ${projX(-105.05)} ${projY(39.85)}`,
+      `M ${projX(-104.65)} ${projY(39.78)} L ${projX(-104.55)} ${projY(39.76)}`,
+      `M ${projX(-105.25)} ${projY(39.78)} L ${projX(-105.18)} ${projY(39.74)}`,
+    ];
+
+    // -- Per-project pickup/dump preset (deterministic so map doesn't reshuffle).
     const ROUTE_PRESETS = {
-      'RR': { pickup: 'Denver',      dump: 'Commerce City', label: '5800 Federal'             },
-      'WP': { pickup: 'Winter Park', dump: 'Granby',        label: 'Winter Park'              },
-      'CH': { pickup: 'Denver',      dump: 'Aurora',        label: 'Capitol Hill Mixed-Use'   },
-      'AS': { pickup: 'Aurora',      dump: 'Bennett',       label: 'Aurora Square'            },
-      'GW': { pickup: 'Boulder',     dump: 'Brighton',      label: 'GW Apartments'            },
+      'RR': { pickup: 'Denver',      dump: 'Commerce City' },
+      'WP': { pickup: 'Winter Park', dump: 'Granby'        },
+      'CH': { pickup: 'Denver',      dump: 'Aurora'        },
+      'AS': { pickup: 'Aurora',      dump: 'Bennett'       },
+      'GW': { pickup: 'Boulder',     dump: 'Brighton'      },
     };
     const FALLBACK_PRESET = { pickup: 'Denver', dump: 'Aurora' };
-    // Haversine-ish — close enough for visual mock minutes/miles. ~70 mi/lat.
     const distMiles = (a, b) => {
-      const dx = (a.lng - b.lng) * 53; // ~mi per degree lng at ~40°N
+      const dx = (a.lng - b.lng) * 53;
       const dy = (a.lat - b.lat) * 69;
       return Math.sqrt(dx * dx + dy * dy);
     };
-    // Highway-speed assumption: 35 mph average door-to-dump including loads.
     const estDriveMin = (miles) => Math.max(5, Math.round((miles / 35) * 60));
 
     const allHauls = [...active, ...upcoming, ...completed];
     const enrichedRoutes = allHauls.map(p => {
       const preset = ROUTE_PRESETS[p.id] || FALLBACK_PRESET;
-      const pk = CITIES[preset.pickup] || CITIES['Denver'];
-      const dp = CITIES[preset.dump]   || CITIES['Aurora'];
+      const pk = cityByName[preset.pickup] || cityByName['Denver'];
+      const dp = cityByName[preset.dump]   || cityByName['Aurora'];
       const miles = distMiles(pk, dp);
       const minutes = estDriveMin(miles);
       const routeStatus = p.status === 'completed' ? 'completed'
         : p.status === 'upcoming' ? 'upcoming'
         : (p.healthStatus === 'critical' || p.healthStatus === 'atrisk') ? 'delayed'
         : 'active';
+      const cyPerDay = p.loadsCompleted > 0 ? Math.max(40, p.loadsCompleted * 12) : 0;
+      const roundTrip = minutes * 2 + 8; // +8 min for load/unload
+      const loadsPerDay = roundTrip > 0 ? Math.max(1, Math.floor((9 * 60) / roundTrip) * Math.max(1, p.trucksActive)) : 0;
       return {
         id: p.id,
         name: p.name,
@@ -2350,11 +2404,14 @@ function AdminProjects({ db, setDb, navigate }) {
         loadsCompleted: p.loadsCompleted,
         loadsTarget: p.loadsTarget,
         estimatedCompletion: p.estimatedCompletion,
+        cyPerDay,
+        loadsPerDay,
         pickupAddress: preset.pickup,
         dumpAddress: preset.dump,
         pickupLat: pk.lat, pickupLng: pk.lng,
         dumpLat: dp.lat,   dumpLng: dp.lng,
         estimatedDriveMinutes: minutes,
+        roundTripMinutes: roundTrip,
         routeDistanceMiles: parseFloat(miles.toFixed(1)),
         routeStatus,
         pickupX: projX(pk.lng), pickupY: projY(pk.lat),
@@ -2362,8 +2419,12 @@ function AdminProjects({ db, setDb, navigate }) {
       };
     });
 
-    // -- Filter state. Defaults: Active + Upcoming + Delayed on; Completed off.
+    // -- Filter + hover + pinned + drawer state.
     const [filters, setFilters] = useState({ active: true, upcoming: true, delayed: true, completed: false });
+    const [hover, setHover] = useState(null);
+    const [pinned, setPinned] = useState(null);
+    const [drawerOpen, setDrawerOpen] = useState(false);
+    const containerRef = useRef(null);
     const visible = enrichedRoutes.filter(r => filters[r.routeStatus]);
     const counts = {
       active:    enrichedRoutes.filter(r => r.routeStatus === 'active').length,
@@ -2372,10 +2433,108 @@ function AdminProjects({ db, setDb, navigate }) {
       completed: enrichedRoutes.filter(r => r.routeStatus === 'completed').length,
     };
 
-    // -- Tooltip state. Track which route is hovered + cursor position so the
-    //    tooltip card can follow the mouse without overflowing the viewport.
-    const [hover, setHover] = useState(null); // { route, x, y } in container coords
-    const containerRef = useRef(null);
+    // -- Cluster nearby pickups so dense metros don't overwhelm the visual.
+    //    Same-city pickups (>1 route) collapse to a single marker with a count.
+    const pickupClusters = (() => {
+      const groups = new Map();
+      visible.forEach(r => {
+        const key = r.pickupAddress;
+        if (!groups.has(key)) groups.set(key, { city: key, x: r.pickupX, y: r.pickupY, members: [] });
+        groups.get(key).members.push(r);
+      });
+      return Array.from(groups.values());
+    })();
+
+    // -- Route geometry: quadratic Bezier with a deterministic perpendicular
+    //    offset per route id so multiple hauls between the same cities fan out.
+    const routePath = (r) => {
+      const mx = (r.pickupX + r.dumpX) / 2;
+      const my = (r.pickupY + r.dumpY) / 2;
+      const dx = r.dumpX - r.pickupX;
+      const dy = r.dumpY - r.pickupY;
+      const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+      const px = -dy / len, py = dx / len;
+      const seed = (r.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
+      const offset = 24 + ((seed * 7) % 30) * ((seed % 2 === 0) ? 1 : -1);
+      return `M ${r.pickupX} ${r.pickupY} Q ${mx + px * offset} ${my + py * offset} ${r.dumpX} ${r.dumpY}`;
+    };
+    const routeColor = (s) => s === 'completed' ? C.inkDim
+      : s === 'upcoming'  ? C.info
+      : s === 'delayed'   ? (C.danger || C.warn)
+      : C.accent;
+
+    // -- Status chip + icon row.
+    const STATUS_ICONS = {
+      active: (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M3 7h11l3 5h4v5h-2a3 3 0 1 1-6 0H10a3 3 0 1 1-6 0H3z" />
+        </svg>
+      ),
+      upcoming: (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" />
+        </svg>
+      ),
+      delayed: (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M12 3l10 18H2z" /><path d="M12 10v5" />
+        </svg>
+      ),
+      completed: (
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M4 12l5 5L20 6" />
+        </svg>
+      ),
+    };
+    const STATUS_DEF = {
+      active:    { label: 'Active',    color: C.accent },
+      upcoming:  { label: 'Upcoming',  color: C.info },
+      delayed:   { label: 'Delayed',   color: C.danger || C.warn },
+      completed: { label: 'Completed', color: C.inkDim },
+    };
+    const StatusChip = ({ k }) => {
+      const on = filters[k];
+      const def = STATUS_DEF[k];
+      return (
+        <button
+          onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))}
+          style={{
+            ...T.caption,
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+            background: on ? (def.color === C.inkDim ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.6)') : 'transparent',
+            color: on ? def.color : C.inkDim,
+            border: `1px solid ${on ? def.color : C.rule}`,
+            boxShadow: on ? `0 0 0 1px rgba(0,0,0,0.4), 0 0 14px -4px ${def.color}` : 'none',
+            borderRadius: R.pill, padding: '4px 10px', fontWeight: 700, cursor: 'pointer',
+            fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase',
+          }}
+        >
+          <span style={{ color: def.color, display: 'inline-flex' }}>{STATUS_ICONS[k]}</span>
+          {def.label}
+          <span style={{ color: C.inkFaint, fontFamily: F.mono }}>{counts[k]}</span>
+        </button>
+      );
+    };
+
+    // -- Drawer metrics summarize the currently-visible routes.
+    const visibleActive = visible.filter(r => r.routeStatus === 'active');
+    const drawerStats = {
+      cyToday: visibleActive.reduce((s, r) => s + (r.cyPerDay || 0), 0),
+      trucksLive: visibleActive.reduce((s, r) => s + r.trucksActive, 0),
+      avgCycle: (() => {
+        const vals = visibleActive.map(r => r.roundTripMinutes).filter(Boolean);
+        return vals.length ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length) : 0;
+      })(),
+      atRisk: visible.filter(r => r.routeStatus === 'delayed').length,
+      upcomingCount: visible.filter(r => r.routeStatus === 'upcoming').length,
+    };
+    const MetricBlock = ({ label, value, tone = C.ink }) => (
+      <div style={{ padding: `${S[2]}px ${S[3]}px`, borderBottom: `1px solid ${C.rule}` }}>
+        <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 2 }}>{label}</div>
+        <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: tone }}>{value}</div>
+      </div>
+    );
+
     const onRouteEnter = (route) => (e) => {
       const rect = containerRef.current && containerRef.current.getBoundingClientRect();
       if (!rect) return;
@@ -2388,220 +2547,293 @@ function AdminProjects({ db, setDb, navigate }) {
       setHover(h => h && ({ ...h, x: e.clientX - rect.left, y: e.clientY - rect.top }));
     };
     const onRouteLeave = () => setHover(null);
+    const onRouteClick = (route) => (e) => { e.stopPropagation(); setPinned(route); };
+    const onMapBgClick = () => { setPinned(null); };
 
-    // -- Route geometry: a quadratic Bezier with a control point offset
-    //    perpendicular to the pickup→dump line. Each route gets a small
-    //    deterministic arc offset so they fan out instead of stacking.
-    const routePath = (r) => {
-      const mx = (r.pickupX + r.dumpX) / 2;
-      const my = (r.pickupY + r.dumpY) / 2;
-      const dx = r.dumpX - r.pickupX;
-      const dy = r.dumpY - r.pickupY;
-      const len = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-      // perpendicular unit vector
-      const px = -dy / len, py = dx / len;
-      const seed = (r.id || '').split('').reduce((s, c) => s + c.charCodeAt(0), 0);
-      const offset = 22 + ((seed * 7) % 28) * ((seed % 2 === 0) ? 1 : -1);
-      const cx = mx + px * offset;
-      const cy = my + py * offset;
-      return `M ${r.pickupX} ${r.pickupY} Q ${cx} ${cy} ${r.dumpX} ${r.dumpY}`;
-    };
-
-    const routeColor = (s) => s === 'completed' ? C.inkDim
-      : s === 'upcoming'  ? C.info
-      : s === 'delayed'   ? (C.danger || C.warn)
-      : C.accent;
-
-    // -- Lightweight filter pill row used in the top-right of the header.
-    const FilterPill = ({ k, label }) => {
-      const on = filters[k];
-      return (
-        <button
-          onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))}
-          style={{
-            ...T.caption,
-            background: on ? C.surfaceHi : 'transparent',
-            color: on ? C.ink : C.inkDim,
-            border: `1px solid ${on ? C.ruleHi : C.rule}`,
-            borderRadius: R.pill, padding: '4px 10px', fontWeight: 600, cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}
-        >
-          <span style={{
-            display: 'inline-block', width: 7, height: 7, borderRadius: '50%',
-            background: k === 'active' ? C.accent : k === 'upcoming' ? C.info : k === 'delayed' ? (C.danger || C.warn) : C.inkDim,
-          }} />
-          {label} <span style={{ color: C.inkFaint }}>{counts[k]}</span>
-        </button>
-      );
-    };
-
-    // -- Realism layer: faint highway curves that approximate the actual
-    //    interstates / corridors connecting the cities above. Drawn under the
-    //    route layer so user routes pop on top.
-    const HIGHWAYS = [
-      // I-25 corridor — Castle Rock ↑ Denver ↑ Commerce City ↑ Brighton
-      `M ${projX(CITIES['Castle Rock'].lng)} ${projY(CITIES['Castle Rock'].lat)} L ${projX(CITIES['Denver'].lng)} ${projY(CITIES['Denver'].lat)} L ${projX(CITIES['Commerce City'].lng)} ${projY(CITIES['Commerce City'].lat)} L ${projX(CITIES['Brighton'].lng)} ${projY(CITIES['Brighton'].lat)}`,
-      // I-70 east — Denver → Aurora → Bennett
-      `M ${projX(CITIES['Denver'].lng)} ${projY(CITIES['Denver'].lat)} L ${projX(CITIES['Aurora'].lng)} ${projY(CITIES['Aurora'].lat)} L ${projX(CITIES['Bennett'].lng)} ${projY(CITIES['Bennett'].lat)}`,
-      // US-40 / I-70 west — Denver → Winter Park → Granby
-      `M ${projX(CITIES['Denver'].lng)} ${projY(CITIES['Denver'].lat)} Q ${projX(-105.4)} ${projY(39.95)} ${projX(CITIES['Winter Park'].lng)} ${projY(CITIES['Winter Park'].lat)} L ${projX(CITIES['Granby'].lng)} ${projY(CITIES['Granby'].lat)}`,
-      // US-36 — Denver → Boulder
-      `M ${projX(CITIES['Denver'].lng)} ${projY(CITIES['Denver'].lat)} L ${projX(CITIES['Boulder'].lng)} ${projY(CITIES['Boulder'].lat)}`,
-    ];
-
-    // -- Header summary text
-    const liveTrucksOnMap = visible.filter(r => r.routeStatus === 'active').reduce((s, r) => s + r.trucksActive, 0);
+    const liveTrucksOnMap = visibleActive.reduce((s, r) => s + r.trucksActive, 0);
+    const hoverDim = hover ? hover.route.id : null;
+    const pinnedDim = pinned ? pinned.id : null;
+    const focusId = hoverDim || pinnedDim;
 
     return (
       <Card padding={0} style={{ overflow: 'hidden' }}>
+        {/* === Header — title + status chip rail === */}
         <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
           <div>
             <Label color={C.accent}>Live operations map</Label>
             <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
-              {liveTrucksOnMap} truck{liveTrucksOnMap === 1 ? '' : 's'} live · {visible.length} route{visible.length === 1 ? '' : 's'} on view
+              {liveTrucksOnMap} truck{liveTrucksOnMap === 1 ? '' : 's'} live · {visible.length} route{visible.length === 1 ? '' : 's'} · Front Range
             </div>
           </div>
-          <div className="lom-filters" style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-            <FilterPill k="active"    label="Active" />
-            <FilterPill k="upcoming"  label="Upcoming" />
-            <FilterPill k="delayed"   label="Delayed" />
-            <FilterPill k="completed" label="Completed" />
+          <div className="lom-filters" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <StatusChip k="active" />
+            <StatusChip k="upcoming" />
+            <StatusChip k="delayed" />
+            <StatusChip k="completed" />
+            <button
+              onClick={() => setDrawerOpen(v => !v)}
+              title="Toggle metrics drawer"
+              style={{
+                ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase',
+                background: drawerOpen ? 'rgba(0,0,0,0.6)' : 'transparent',
+                color: drawerOpen ? C.accent : C.inkDim,
+                border: `1px solid ${drawerOpen ? C.accent : C.rule}`,
+                borderRadius: R.pill, padding: '4px 10px', fontWeight: 700, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                boxShadow: drawerOpen ? `0 0 14px -4px ${C.accent}` : 'none',
+              }}
+            >
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M4 6h16M4 12h10M4 18h16" /></svg>
+              Metrics
+            </button>
           </div>
         </div>
+
+        {/* === Map stage === */}
         <div
           ref={containerRef}
           onMouseMove={onRouteMove}
-          style={{ position: 'relative', background: 'radial-gradient(ellipse at 22% 30%, rgba(40,68,52,0.18) 0%, transparent 55%), radial-gradient(ellipse at 78% 70%, rgba(28,50,75,0.16) 0%, transparent 55%), linear-gradient(180deg, ' + C.surfaceHi + ' 0%, ' + C.bg + ' 100%)' }}
+          onClick={onMapBgClick}
+          style={{
+            position: 'relative',
+            background: '#070A0B',
+          }}
         >
-          <svg viewBox={`0 0 ${VIEW.w} ${VIEW.h}`} width="100%" style={{ display: 'block', maxHeight: 420 }} aria-label="Live operations map (mock)">
+          <svg viewBox={`0 0 ${VIEW.w} ${VIEW.h}`} width="100%" style={{ display: 'block', maxHeight: 440 }} aria-label="Front Range dispatch map (mock)">
             <defs>
-              {/* Subtle road-grid pattern under everything */}
-              <pattern id="lomRoads" width="60" height="60" patternUnits="userSpaceOnUse">
-                <path d="M 60 0 L 0 0 0 60" fill="none" stroke={C.rule} strokeWidth="0.3" opacity="0.55" />
+              {/* Tactical grid — very faint, sparse */}
+              <pattern id="lomGridV2" width="80" height="80" patternUnits="userSpaceOnUse">
+                <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#10171A" strokeWidth="0.7" />
               </pattern>
-              {/* Terrain wash — west side faintly green (foothills) */}
-              <radialGradient id="lomTerrainW" cx="18%" cy="40%" r="38%">
-                <stop offset="0%"   stopColor="#1B3D2E" stopOpacity="0.32" />
-                <stop offset="100%" stopColor="#1B3D2E" stopOpacity="0" />
+              {/* Terrain: foothills wash (W) + plains wash (E) */}
+              <radialGradient id="lomTerrainWv2" cx="14%" cy="38%" r="38%">
+                <stop offset="0%"   stopColor="#13241B" stopOpacity="0.95" />
+                <stop offset="100%" stopColor="#13241B" stopOpacity="0" />
               </radialGradient>
-              <radialGradient id="lomTerrainE" cx="80%" cy="60%" r="40%">
-                <stop offset="0%"   stopColor="#1C2C40" stopOpacity="0.28" />
-                <stop offset="100%" stopColor="#1C2C40" stopOpacity="0" />
+              <radialGradient id="lomTerrainEv2" cx="82%" cy="58%" r="40%">
+                <stop offset="0%"   stopColor="#10182A" stopOpacity="0.85" />
+                <stop offset="100%" stopColor="#10182A" stopOpacity="0" />
               </radialGradient>
-              <filter id="lomGlow" x="-50%" y="-50%" width="200%" height="200%">
-                <feGaussianBlur stdDeviation="2.4" result="b" />
-                <feMerge>
-                  <feMergeNode in="b" />
-                  <feMergeNode in="SourceGraphic" />
-                </feMerge>
+              {/* Edge vignette */}
+              <radialGradient id="lomVignette" cx="50%" cy="50%" r="68%">
+                <stop offset="60%"  stopColor="#000" stopOpacity="0" />
+                <stop offset="100%" stopColor="#000" stopOpacity="0.55" />
+              </radialGradient>
+              <filter id="lomRouteGlow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.8" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <filter id="lomPickGlow" x="-100%" y="-100%" width="300%" height="300%">
+                <feGaussianBlur stdDeviation="1.6" result="b" />
+                <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
               </filter>
             </defs>
-            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomRoads)" />
-            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomTerrainW)" />
-            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomTerrainE)" />
 
-            {/* Highway corridors (background reference) */}
-            {HIGHWAYS.map((d, i) => (
-              <path key={'hwy-' + i} d={d} fill="none" stroke="#3a3a3a" strokeWidth="1.4" strokeLinecap="round" opacity="0.7" />
-            ))}
+            {/* Background fills */}
+            <rect width={VIEW.w} height={VIEW.h} fill="#070A0B" />
+            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomTerrainWv2)" />
+            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomTerrainEv2)" />
+            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomGridV2)" />
 
-            {/* Faint city labels at known coords */}
-            {Object.entries(CITIES).map(([name, c]) => (
-              <g key={'city-' + name} pointerEvents="none">
-                <circle cx={projX(c.lng)} cy={projY(c.lat)} r="1.2" fill={C.inkFaint} opacity="0.75" />
-                <text x={projX(c.lng) + 6} y={projY(c.lat) - 4} style={{ fontFamily: F.mono, fontSize: 9 }} fill={C.inkFaint} opacity="0.75">{name}</text>
+            {/* Foothills relief — west-side hatch */}
+            <g opacity="0.18" stroke="#1F3A2C" strokeWidth="0.6" fill="none">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <path key={'rl-' + i} d={`M ${10 + i * 12} 30 Q ${30 + i * 12} ${80 + (i % 3) * 30} ${20 + i * 14} 200`} />
+              ))}
+            </g>
+
+            {/* Local road web */}
+            <g opacity="0.4" stroke="#1B2125" strokeWidth="0.7" fill="none">
+              {LOCAL_ROADS.map((d, i) => <path key={'lr-' + i} d={d} />)}
+            </g>
+
+            {/* Highways — outline + lighter inner stripe */}
+            {ROADS.map((rd, i) => (
+              <g key={'rd-' + i}>
+                <path d={rd.d} fill="none" stroke="#0F1417" strokeWidth={rd.cls === 'highway' ? 6 : 4} strokeLinecap="round" strokeLinejoin="round" />
+                <path d={rd.d} fill="none" stroke={rd.cls === 'highway' ? '#2E3942' : '#222B31'} strokeWidth={rd.cls === 'highway' ? 3 : 2} strokeLinecap="round" strokeLinejoin="round" />
               </g>
             ))}
 
-            {/* RouteLayer — pickup→dump paths */}
+            {/* Highway shields — small label tags near route midpoints */}
+            <g pointerEvents="none">
+              {ROADS.map((rd, i) => {
+                // Pick a label anchor along the path: roughly the middle of each road
+                const anchors = {
+                  'I-25':   [projX(-104.96), projY(39.82)],
+                  'I-70 E': [projX(-104.55), projY(39.74)],
+                  'I-70 W': [projX(-105.55), projY(39.78)],
+                  'US-36':  [projX(-105.15), projY(39.92)],
+                  'E-470':  [projX(-104.66), projY(39.86)],
+                  'C-470':  [projX(-105.12), projY(39.70)],
+                  'US-285': [projX(-105.20), projY(39.58)],
+                }[rd.name] || null;
+                if (!anchors) return null;
+                return (
+                  <g key={'sh-' + i} transform={`translate(${anchors[0]} ${anchors[1]})`} opacity="0.55">
+                    <rect x={-16} y={-7} width={32} height={14} rx={2} fill="#10181F" stroke="#2E3942" strokeWidth="0.6" />
+                    <text x="0" y="3.5" textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 8, fontWeight: 700 }} fill="#7A8893">{rd.name}</text>
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* City layer — tier-weighted */}
+            <g pointerEvents="none">
+              {CITIES.map(c => {
+                const x = projX(c.lng), y = projY(c.lat);
+                const r = c.tier === 1 ? 2.2 : c.tier === 2 ? 1.6 : 1.2;
+                const fs = c.tier === 1 ? 11 : c.tier === 2 ? 9 : 8.5;
+                const op = c.tier === 1 ? 0.85 : c.tier === 2 ? 0.65 : 0.55;
+                const fw = c.tier === 1 ? 700 : 500;
+                return (
+                  <g key={'city-' + c.name}>
+                    <circle cx={x} cy={y} r={r} fill="#5C6770" opacity={op} />
+                    <text x={x + 6} y={y - 5} style={{ fontFamily: F.display, fontSize: fs, fontWeight: fw, letterSpacing: 0.3 }} fill="#7A8893" opacity={op}>{c.name}</text>
+                  </g>
+                );
+              })}
+            </g>
+
+            {/* RouteLayer */}
             {visible.map(r => {
               const color = routeColor(r.routeStatus);
               const isActive = r.routeStatus === 'active';
-              const path = routePath(r);
-              const pathId = 'route-' + r.id;
+              const d = routePath(r);
+              const pathId = 'route-v2-' + r.id;
               const midX = (r.pickupX + r.dumpX) / 2;
-              const midY = (r.pickupY + r.dumpY) / 2 - 14;
+              const midY = (r.pickupY + r.dumpY) / 2 - 16;
+              const dim = focusId && focusId !== r.id ? 0.28 : 1;
               return (
                 <g
                   key={'rt-' + r.id}
                   onMouseEnter={onRouteEnter(r)}
                   onMouseLeave={onRouteLeave}
-                  style={{ cursor: 'pointer' }}
+                  onClick={onRouteClick(r)}
+                  style={{ cursor: 'pointer', opacity: dim, transition: 'opacity 180ms ease' }}
                 >
-                  {/* Hit area — wide, transparent — keeps hover stable. */}
-                  <path d={path} fill="none" stroke="transparent" strokeWidth="16" />
-                  {/* Route line. Active = solid + glow, others = dashed. */}
-                  <path
-                    id={pathId}
-                    d={path}
-                    fill="none"
-                    stroke={color}
-                    strokeWidth={isActive ? 2 : 1.5}
-                    strokeLinecap="round"
-                    strokeDasharray={r.routeStatus === 'upcoming' ? '6 5' : r.routeStatus === 'completed' ? '2 6' : 'none'}
-                    opacity={r.routeStatus === 'completed' ? 0.35 : 0.85}
-                    filter={isActive ? 'url(#lomGlow)' : undefined}
-                  />
-                  {/* TruckMarker — animated dot riding the path for active hauls */}
+                  {/* Wide transparent hit target keeps hover stable */}
+                  <path d={d} fill="none" stroke="transparent" strokeWidth="18" />
+                  {/* Glow underlay */}
+                  {isActive && (
+                    <path d={d} fill="none" stroke={color} strokeWidth="6.5" strokeLinecap="round" opacity="0.28" filter="url(#lomRouteGlow)" />
+                  )}
+                  {/* Animated dashed flow on active routes — moves toward the dump */}
+                  {isActive && (
+                    <path d={d} fill="none" stroke={color} strokeWidth="2.4" strokeLinecap="round" strokeDasharray="6 8">
+                      <animate attributeName="stroke-dashoffset" from="14" to="0" dur="0.9s" repeatCount="indefinite" />
+                    </path>
+                  )}
+                  {/* Solid stroke for non-active */}
+                  {!isActive && (
+                    <path d={d} fill="none" stroke={color}
+                      strokeWidth={r.routeStatus === 'delayed' ? 2.2 : 1.8}
+                      strokeLinecap="round"
+                      strokeDasharray={r.routeStatus === 'upcoming' ? '6 5' : r.routeStatus === 'completed' ? '2 7' : 'none'}
+                      opacity={r.routeStatus === 'completed' ? 0.4 : 0.85}
+                    />
+                  )}
+                  {/* TruckMarker — directional arrow rides the route */}
                   {isActive && r.trucksActive > 0 && (
                     <g>
-                      <circle r="5" fill={color} opacity="0.25">
-                        <animateMotion dur={`${Math.max(6, r.estimatedDriveMinutes / 2)}s`} repeatCount="indefinite" rotate="auto">
-                          <mpath href={`#${pathId}`} />
+                      <circle r="6" fill={color} opacity="0.22">
+                        <animateMotion dur={`${Math.max(7, r.estimatedDriveMinutes / 2.2)}s`} repeatCount="indefinite" rotate="auto">
+                          <mpath href={`#${pathId}-track`} />
                         </animateMotion>
                       </circle>
-                      <circle r="2.6" fill={color}>
-                        <animateMotion dur={`${Math.max(6, r.estimatedDriveMinutes / 2)}s`} repeatCount="indefinite" rotate="auto">
-                          <mpath href={`#${pathId}`} />
+                      <g>
+                        <animateMotion dur={`${Math.max(7, r.estimatedDriveMinutes / 2.2)}s`} repeatCount="indefinite" rotate="auto">
+                          <mpath href={`#${pathId}-track`} />
                         </animateMotion>
-                      </circle>
+                        <path d="M -3 -2 L 4 0 L -3 2 Z" fill={color} stroke={C.bg} strokeWidth="0.6" />
+                      </g>
                     </g>
                   )}
-                  {/* Route label — name + duration · distance */}
+                  {/* Hidden carrier path for animateMotion */}
+                  <path id={`${pathId}-track`} d={d} fill="none" stroke="none" />
+                  {/* Route label, larger + cleaner than v1 */}
                   <g pointerEvents="none">
-                    <text x={midX} y={midY} textAnchor="middle" style={{ fontFamily: F.display, fontSize: 10, fontWeight: 600 }} fill={C.ink} opacity="0.95">
+                    <rect x={midX - 70} y={midY - 11} width={140} height={26} rx={4} fill="#080C0E" opacity="0.7" />
+                    <text x={midX} y={midY + 1} textAnchor="middle" style={{ fontFamily: F.display, fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }} fill={C.ink}>
                       {r.pickupAddress} → {r.dumpAddress}
                     </text>
-                    <text x={midX} y={midY + 12} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 9 }} fill={C.inkDim}>
-                      {r.estimatedDriveMinutes} min · {r.routeDistanceMiles} mi
+                    <text x={midX} y={midY + 13} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 9, letterSpacing: 0.3 }} fill={color}>
+                      {r.estimatedDriveMinutes}min · {r.routeDistanceMiles}mi
                     </text>
                   </g>
                 </g>
               );
             })}
 
-            {/* PickupMarker — circle, pulses for active */}
-            {visible.map(r => {
-              const color = routeColor(r.routeStatus);
-              const isActive = r.routeStatus === 'active';
+            {/* PickupMarker (clustered) — single marker per city, count badge if >1 */}
+            {pickupClusters.map(cl => {
+              const r = cl.members[0];
+              const status = cl.members.some(m => m.routeStatus === 'active') ? 'active'
+                : cl.members.some(m => m.routeStatus === 'delayed') ? 'delayed'
+                : cl.members.some(m => m.routeStatus === 'upcoming') ? 'upcoming'
+                : 'completed';
+              const color = routeColor(status);
+              const isActive = status === 'active';
               return (
-                <g key={'pk-' + r.id} pointerEvents="none">
+                <g key={'pk-' + cl.city} pointerEvents="none" filter="url(#lomPickGlow)">
                   {isActive && (
-                    <circle cx={r.pickupX} cy={r.pickupY} r="8" fill={color} opacity="0.18">
-                      <animate attributeName="r" values="6;14;6" dur="2.4s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" values="0.35;0;0.35" dur="2.4s" repeatCount="indefinite" />
+                    <circle cx={cl.x} cy={cl.y} r="10" fill={color} opacity="0.22">
+                      <animate attributeName="r" values="7;18;7" dur="2.6s" repeatCount="indefinite" />
+                      <animate attributeName="opacity" values="0.4;0;0.4" dur="2.6s" repeatCount="indefinite" />
                     </circle>
                   )}
-                  <circle cx={r.pickupX} cy={r.pickupY} r="5" fill={color} stroke={C.bg} strokeWidth="1.5" />
+                  <circle cx={cl.x} cy={cl.y} r={cl.members.length > 1 ? 8 : 6} fill={color} stroke="#080C0E" strokeWidth="2" />
+                  {cl.members.length > 1 && (
+                    <text x={cl.x} y={cl.y + 3} textAnchor="middle" style={{ fontFamily: F.mono, fontSize: 9, fontWeight: 700 }} fill="#080C0E">
+                      {cl.members.length}
+                    </text>
+                  )}
                 </g>
               );
             })}
 
-            {/* DumpMarker — diamond, smaller than pickup */}
+            {/* DumpMarker — triangle (drop) */}
             {visible.map(r => {
               const color = routeColor(r.routeStatus);
-              const size = 5;
               return (
-                <g key={'dp-' + r.id} pointerEvents="none" transform={`translate(${r.dumpX} ${r.dumpY}) rotate(45)`}>
-                  <rect x={-size} y={-size} width={size * 2} height={size * 2} fill={color} stroke={C.bg} strokeWidth="1.2" />
+                <g key={'dp-' + r.id} pointerEvents="none">
+                  <polygon
+                    points={`${r.dumpX},${r.dumpY - 6} ${r.dumpX + 5.5},${r.dumpY + 4} ${r.dumpX - 5.5},${r.dumpY + 4}`}
+                    fill={color} stroke="#080C0E" strokeWidth="1.6"
+                  />
                 </g>
               );
             })}
+
+            {/* Vignette over everything */}
+            <rect width={VIEW.w} height={VIEW.h} fill="url(#lomVignette)" pointerEvents="none" />
           </svg>
 
-          {/* RouteTooltip — appears on route hover */}
-          {hover && (() => {
+          {/* === Metrics drawer (right side, collapsible) === */}
+          {drawerOpen && (
+            <div style={{
+              position: 'absolute', top: 8, right: 8, bottom: 8, width: 220,
+              background: 'rgba(8, 12, 14, 0.92)', border: `1px solid ${C.ruleHi}`,
+              borderRadius: R.md, boxShadow: '0 10px 30px rgba(0,0,0,0.45)',
+              overflow: 'hidden',
+            }} onClick={(e) => e.stopPropagation()}>
+              <div style={{ padding: `${S[2]}px ${S[3]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ ...T.caption, fontFamily: F.mono, color: C.accent, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700 }}>Operations</div>
+                <button onClick={() => setDrawerOpen(false)} aria-label="Close drawer" style={{ background: 'transparent', border: 'none', color: C.inkDim, cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+              </div>
+              <MetricBlock label="CY moved today"  value={drawerStats.cyToday.toLocaleString() + ' CY'} tone={C.accent} />
+              <MetricBlock label="Trucks live"     value={drawerStats.trucksLive} />
+              <MetricBlock label="Avg cycle"       value={drawerStats.avgCycle > 0 ? drawerStats.avgCycle + ' min' : '—'} />
+              <MetricBlock label="Jobs at risk"    value={drawerStats.atRisk} tone={drawerStats.atRisk > 0 ? (C.danger || C.warn) : C.inkDim} />
+              <MetricBlock label="Upcoming"        value={drawerStats.upcomingCount} tone={C.info} />
+              <div style={{ padding: `${S[2]}px ${S[3]}px`, ...T.caption, color: C.inkFaint }}>
+                Fuel · efficiency · uptime feeds wire in once truck telemetry lands.
+              </div>
+            </div>
+          )}
+
+          {/* === Hover tooltip === */}
+          {hover && !pinned && (() => {
             const r = hover.route;
             const W = 240, H = 130;
             const cw = containerRef.current ? containerRef.current.clientWidth : 600;
@@ -2610,31 +2842,65 @@ function AdminProjects({ db, setDb, navigate }) {
             return (
               <div style={{
                 position: 'absolute', left, top, width: W, padding: S[3],
-                background: C.surface, border: `1px solid ${C.ruleHi}`,
+                background: 'rgba(8, 12, 14, 0.94)', border: `1px solid ${C.ruleHi}`,
                 borderRadius: R.md, pointerEvents: 'none', zIndex: 5,
-                boxShadow: '0 10px 28px rgba(0,0,0,0.4)',
+                boxShadow: '0 10px 30px rgba(0,0,0,0.5)',
               }}>
                 <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{r.name}</div>
-                <div style={{ ...T.caption, color: C.inkDim, marginBottom: S[2] }}>
-                  {r.pickupAddress} → {r.dumpAddress}
+                <div style={{ ...T.caption, color: C.inkDim, marginBottom: S[2] }}>{r.pickupAddress} → {r.dumpAddress}</div>
+                <div style={{ ...T.caption, color: C.inkFaint, fontStyle: 'italic' }}>Click route to pin details</div>
+              </div>
+            );
+          })()}
+
+          {/* === Pinned operational info card === */}
+          {pinned && (() => {
+            const r = pinned;
+            const color = routeColor(r.routeStatus);
+            return (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  position: 'absolute', left: 12, bottom: 12, width: 320,
+                  background: 'rgba(8, 12, 14, 0.96)', border: `1px solid ${C.ruleHi}`,
+                  borderRadius: R.md, boxShadow: '0 14px 36px rgba(0,0,0,0.5), 0 0 24px -10px ' + color,
+                  zIndex: 6, overflow: 'hidden',
+                }}
+              >
+                <div style={{ padding: `${S[2]}px ${S[3]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, boxShadow: `0 0 8px ${color}` }} />
+                    <span style={{ ...T.caption, fontFamily: F.mono, color: color, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700 }}>{STATUS_DEF[r.routeStatus].label}</span>
+                  </div>
+                  <button onClick={() => setPinned(null)} aria-label="Dismiss" style={{ background: 'transparent', border: 'none', color: C.inkDim, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}>×</button>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], ...T.caption, color: C.inkDim }}>
-                  <div>Material<br/><span style={{ color: C.ink, fontWeight: 600 }}>{r.materialType}</span></div>
-                  <div>Trucks<br/><span style={{ color: C.ink, fontWeight: 600 }}>{r.trucksActive} / {r.trucksAssigned}</span></div>
-                  <div>Loads<br/><span style={{ color: C.ink, fontWeight: 600 }}>{r.loadsCompleted} / {r.loadsTarget}</span></div>
-                  <div>ETA<br/><span style={{ color: C.ink, fontWeight: 600 }}>{r.estimatedCompletion}</span></div>
-                  <div style={{ gridColumn: '1 / span 2' }}>Drive<br/><span style={{ color: C.ink, fontWeight: 600 }}>{r.estimatedDriveMinutes} min · {r.routeDistanceMiles} mi</span></div>
+                <div style={{ padding: S[3] }}>
+                  <div style={{ ...T.h4, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{r.name}</div>
+                  <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>{r.pickupAddress} → {r.dumpAddress}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[3], ...T.caption, color: C.inkFaint }}>
+                    <div>Distance<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.routeDistanceMiles} mi</span></div>
+                    <div>One-way drive<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.estimatedDriveMinutes} min</span></div>
+                    <div>Round trip<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.roundTripMinutes} min</span></div>
+                    <div>Loads / day<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.loadsPerDay}</span></div>
+                    <div>Trucks<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.trucksActive} / {r.trucksAssigned}</span></div>
+                    <div>CY / day<br/><span style={{ ...T.body, fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>{r.cyPerDay > 0 ? r.cyPerDay.toLocaleString() : '—'}</span></div>
+                    <div style={{ gridColumn: '1 / span 2' }}>Material<br/><span style={{ ...T.body, color: C.ink, fontWeight: 700 }}>{r.materialType}</span></div>
+                  </div>
+                  <div style={{ marginTop: S[3], display: 'flex', justifyContent: 'flex-end', gap: S[2] }}>
+                    <Btn variant="primary" size="xs" onClick={() => navigate('/admin/p/' + r.id)}>Open dispatch</Btn>
+                  </div>
                 </div>
               </div>
             );
           })()}
         </div>
-        {/* MapLegend */}
+
+        {/* === Legend === */}
         <div style={{ padding: `${S[3]}px ${S[4]}px`, borderTop: `1px solid ${C.rule}`, display: 'flex', flexWrap: 'wrap', gap: S[4], ...T.caption, color: C.inkDim }}>
-          <span><span style={{ display: 'inline-block', width: 16, height: 2, background: C.accent, marginRight: 6, verticalAlign: 'middle' }} />Active route</span>
-          <span><span style={{ display: 'inline-block', width: 16, height: 2, background: C.info, marginRight: 6, verticalAlign: 'middle' }} />Upcoming route</span>
+          <span><span style={{ display: 'inline-block', width: 18, height: 2, background: C.accent, marginRight: 6, verticalAlign: 'middle', boxShadow: '0 0 6px ' + C.accent }} />Active route</span>
+          <span><span style={{ display: 'inline-block', width: 18, height: 2, background: C.info, marginRight: 6, verticalAlign: 'middle' }} />Upcoming route</span>
           <span><span style={{ display: 'inline-block', width: 10, height: 10, background: C.accent, borderRadius: '50%', marginRight: 6, verticalAlign: 'middle' }} />Pickup</span>
-          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.accent, marginRight: 6, verticalAlign: 'middle', transform: 'rotate(45deg)' }} />Dump site</span>
+          <span><span style={{ display: 'inline-block', width: 0, height: 0, borderLeft: '5px solid transparent', borderRight: '5px solid transparent', borderBottom: `8px solid ${C.accent}`, marginRight: 6, verticalAlign: 'middle' }} />Dump site</span>
           <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.ok, borderRadius: '50%', marginRight: 6, verticalAlign: 'middle' }} />Active truck</span>
           <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.danger || C.warn, borderRadius: '50%', marginRight: 6, verticalAlign: 'middle' }} />Alert / delay</span>
         </div>
