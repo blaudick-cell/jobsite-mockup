@@ -6535,15 +6535,22 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
     });
     const loadCount = db.loads.filter(l => l.projectId === projectId && l.status === 'approved').length;
     const totalCY = db.loads.filter(l => l.projectId === projectId && l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+    const hoursTotal = parseFloat(lineItems.reduce((s, li) => s + (li.hours || 0), 0).toFixed(2));
+    const amountTotal = parseFloat(lineItems.reduce((s, li) => s + (li.amount || 0), 0).toFixed(2));
     return {
       id: 'inv-' + Date.now(),
       haulerId: hauler.id, projectId,
       number: 'INV-' + String(Math.floor(Math.random() * 9000) + 1000),
       periodStart: today, periodEnd: today,
       issuedDate: today,
+      createdAt: new Date().toISOString(),
       billTo: project.gc,
       lineItems,
-      loadCount, totalCY,
+      hours: hoursTotal,
+      loads: loadCount,
+      loadCount,
+      totalCY,
+      amount: amountTotal,
       notes: '',
       status: 'draft',
     };
@@ -6557,7 +6564,10 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
   const removeLine = (idx) => setDraft(d => ({ ...d, lineItems: d.lineItems.filter((_, i) => i !== idx) }));
 
   const sendInvoice = () => {
-    const finalDraft = { ...draft, status: 'sent', sentAt: new Date().toISOString() };
+    const lineItemsFinal = draft.lineItems || [];
+    const recomputedHours = parseFloat(lineItemsFinal.reduce((s, li) => s + (li.hours || 0), 0).toFixed(2));
+    const recomputedAmount = parseFloat(lineItemsFinal.reduce((s, li) => s + (li.amount || 0), 0).toFixed(2));
+    const finalDraft = { ...draft, status: 'sent', sentAt: new Date().toISOString(), hours: recomputedHours, amount: recomputedAmount };
     setDb(prev => appendActivity(
       { ...prev, invoices: [...(prev.invoices || []), finalDraft] },
       {
