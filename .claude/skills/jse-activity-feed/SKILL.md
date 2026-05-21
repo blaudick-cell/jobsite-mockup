@@ -61,6 +61,7 @@ Dotted strings. Add new types freely — there's no type registry to update; the
 | `haulRequest.matched` | `admin` | "Matched 25 CY Clean Fill to Marcus / #447" |
 | `haulRequest.accepted` | `driver` | "M. Ortega accepted 18 CY of Clean Fill" |
 | `haulRequest.passed` | `driver` | "S. Park passed on 22 CY of Topsoil" |
+| `haul_request.updated` | `admin` | "Admin updated pickup location on hreq-001" |
 
 ## Helpers for summary text (Block 2)
 

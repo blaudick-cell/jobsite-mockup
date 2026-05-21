@@ -1031,24 +1031,55 @@ const DRIVERS_SEED = [
 // `matchedHaulerId` / `matchedTruckId` only populated for matched/accepted/completed.
 // `acceptedByDriver` set when the driver taps Accept (v7). `passedBy` tracks
 // driver IDs who passed on a pending request so we don't show it to them again.
+// Empty defaults for logistics fields (v12). Spread into rows that don't have
+// realistic seed values so every row carries the shape; the v11 → v12 migration
+// uses the same defaults for legacy payloads.
+const EMPTY_LOGISTICS = {
+  pickupLocation: { name: '', address: '' },
+  dropoffLocation: { name: '', address: '' },
+  timing: { startDate: '', endDate: '' },
+  siteAccess: { loading: { notes: '', equipment: '' }, dumping: { notes: '', equipment: '' } },
+};
+
 const HAUL_REQUESTS_SEED = [
-  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [] },
-  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [],
+    pickupLocation:  { name: 'Highline Pit',           address: '14200 Smith Rd, Aurora, CO 80011' },
+    dropoffLocation: { name: 'Winter Park job site',   address: '4421 Birch Rd, Winter Park, CO 80482' },
+    timing:          { startDate: TODAY_ISO, endDate: '' },
+    siteAccess: {
+      loading: { notes: 'Loader 962 on-site 6-2.',                       equipment: 'Cat 962M wheel loader' },
+      dumping: { notes: 'Truck access from south gate; spotter onsite.', equipment: 'Spotter only — no equipment at dump' },
+    } },
+  { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
     assignments: [
       { truckId: 'tk-611', haulerId: 'op-009', addedAt: 1716230000000,
         days: [{ date: TODAY_ISO, startTime: '08:05', loads: [] }] },
-    ] },
-  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+    ],
+    pickupLocation:  { name: 'Aggregate Industries — Santa Fe', address: '6100 N Broadway, Denver, CO 80216' },
+    dropoffLocation: { name: 'Capitol Hill Mixed-Use',          address: '1240 E 13th Ave, Denver, CO 80218' },
+    timing:          { startDate: TODAY_ISO, endDate: isoDaysAgo(-2) },
+    siteAccess: {
+      loading: { notes: 'Yard hours 5a-3p; show ticket at gate.',  equipment: 'Loader + scale operator' },
+      dumping: { notes: 'Tight alley off 13th; dump in NE bay.',   equipment: 'Skid steer to spread' },
+    } },
+  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '',
     assignments: [
       { truckId: 'tk-119', haulerId: 'op-006', addedAt: 1716231000000,
         days: [{ date: TODAY_ISO, startTime: '08:48', loads: [] }] },
       { truckId: 'tk-220', haulerId: 'op-008', addedAt: 1716232500000,
         days: [{ date: TODAY_ISO, startTime: '09:00', loads: [] }] },
-    ] },
-  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.', assignments: [] },
-  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+    ],
+    pickupLocation:  { name: 'GW Apartments — basement cut', address: '88 Greenway Blvd, Boulder, CO 80301' },
+    dropoffLocation: { name: 'Stuart Street spoils site',    address: '7501 Stuart St, Westminster, CO 80030' },
+    timing:          { startDate: TODAY_ISO, endDate: '' },
+    siteAccess: {
+      loading: { notes: 'Excavator pace ~1 load every 6min.', equipment: 'Cat 336 excavator' },
+      dumping: { notes: 'Open spoils field; no spotter.',     equipment: 'Bulldozer to grade end of day' },
+    } },
+  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.', assignments: [], ...EMPTY_LOGISTICS },
+  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.',
     assignments: [
       { truckId: 'tk-301', haulerId: 'op-002', addedAt: 1716220000000,
@@ -1057,13 +1088,20 @@ const HAUL_REQUESTS_SEED = [
           { id: 'hreq-load-h8a02', time: '10:38', cy: 9 },
           { id: 'hreq-load-h8a03', time: '11:05', cy: 10 },
         ] }] },
-    ] },
-  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [] },
+    ],
+    pickupLocation:  { name: 'Martin Marietta — Sand Creek', address: '12200 E 56th Ave, Denver, CO 80239' },
+    dropoffLocation: { name: 'GW Apartments — North parking', address: '88 Greenway Blvd, Boulder, CO 80301' },
+    timing:          { startDate: YESTERDAY_ISO, endDate: '' },
+    siteAccess: {
+      loading: { notes: 'Standard scale + ticket window.',    equipment: 'Yard loader' },
+      dumping: { notes: 'Stage in NE corner; grade tomorrow.', equipment: 'Skid steer' },
+    } },
+  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', acceptedByDriver: null,    passedBy: [], notes: 'Stockpile at SW corner.',
     assignments: [
       { truckId: 'tk-155', haulerId: 'op-002', addedAt: 1716233000000,
         days: [{ date: TODAY_ISO, startTime: '10:18', loads: [] }] },
-    ] },
+    ], ...EMPTY_LOGISTICS },
 ];
 
 // Invoices (v11). `status` flows draft → sent → paid (or void). `createdAt`
@@ -1320,7 +1358,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 11;
+const DB_SCHEMA_VERSION = 12;
 
 // Older values that lived in TRUCK_TYPES before specific rate bumps. The
 // migration uses this map to distinguish "user kept the old default" (safe to
@@ -1509,6 +1547,21 @@ function hydrateDb(raw) {
       }
       return withDefaults;
     };
+    // v11 → v12: backfill logistics fields (pickup/dropoff/timing/siteAccess) on
+    // haul requests. Defaults-first spread so any existing field wins. Also
+    // backfills nested shapes when only the parent key exists.
+    const migrateHaulRequestLogistics = (r) => {
+      if (!r || typeof r !== 'object') return r;
+      const pickupLocation  = { name: '', address: '', ...(r.pickupLocation  && typeof r.pickupLocation  === 'object' ? r.pickupLocation  : {}) };
+      const dropoffLocation = { name: '', address: '', ...(r.dropoffLocation && typeof r.dropoffLocation === 'object' ? r.dropoffLocation : {}) };
+      const timing          = { startDate: '', endDate: '', ...(r.timing     && typeof r.timing          === 'object' ? r.timing          : {}) };
+      const sa = r.siteAccess && typeof r.siteAccess === 'object' ? r.siteAccess : {};
+      const siteAccess = {
+        loading: { notes: '', equipment: '', ...(sa.loading && typeof sa.loading === 'object' ? sa.loading : {}) },
+        dumping: { notes: '', equipment: '', ...(sa.dumping && typeof sa.dumping === 'object' ? sa.dumping : {}) },
+      };
+      return { ...r, pickupLocation, dropoffLocation, timing, siteAccess };
+    };
     // v4 → v5: 'today' / 'yesterday' string labels → ISO date strings.
     const migrateDate = (val) => {
       if (val === 'today') return TODAY_ISO;
@@ -1538,12 +1591,14 @@ function hydrateDb(raw) {
       // populated `assignments`); only the legacy path builds a synthesized one.
       haulRequests: (Array.isArray(rest.haulRequests) ? rest.haulRequests : HAUL_REQUESTS_SEED).map(r => {
         if (!r) return r;
+        let row;
         // Already on v8 shape? leave it (defaults still applied for safety).
-        if (Array.isArray(r.assignments)) return { acceptedByDriver: null, passedBy: [], ...r };
-        // Legacy single-truck row → synthesize a one-truck, one-day, zero-loads assignment.
-        if (r.matchedTruckId) {
+        if (Array.isArray(r.assignments)) {
+          row = { acceptedByDriver: null, passedBy: [], ...r };
+        } else if (r.matchedTruckId) {
+          // Legacy single-truck row → synthesize a one-truck, one-day, zero-loads assignment.
           const truck = (Array.isArray(rest.trucks) ? rest.trucks : []).find(t => t.id === r.matchedTruckId);
-          return {
+          row = {
             acceptedByDriver: null, passedBy: [], ...r,
             assignments: [{
               truckId: r.matchedTruckId,
@@ -1552,9 +1607,11 @@ function hydrateDb(raw) {
               days: [{ date: TODAY_ISO, startTime: r.requestedAt || '08:00', loads: [] }],
             }],
           };
+        } else {
+          // Pending row, no truck matched yet → empty assignments.
+          row = { acceptedByDriver: null, passedBy: [], assignments: [], ...r };
         }
-        // Pending row, no truck matched yet → empty assignments.
-        return { acceptedByDriver: null, passedBy: [], assignments: [], ...r };
+        return migrateHaulRequestLogistics(row);
       }),
       // v5 → v6: add activity collection + activityLastReadAt mark-as-read pointer.
       activity: Array.isArray(rest.activity) ? rest.activity : ACTIVITY_SEED,
@@ -3713,6 +3770,33 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     haulRequests: prev.haulRequests.map(r => r.id === req.id ? mutator(r) : r),
   }));
 
+  // Logistics field updates (v12): emit a haul_request.updated activity event
+  // so the feed shows admin edits. `label` is the human-readable field name.
+  const updateLogistics = (mutator, label) => {
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? mutator(r) : r) },
+      { type: 'haul_request.updated', actorRole: 'admin', actorId: null,
+        summary: `Admin updated ${label} on ${req.id}`, refId: req.id }
+    ));
+  };
+  const pickup  = req.pickupLocation  || { name: '', address: '' };
+  const dropoff = req.dropoffLocation || { name: '', address: '' };
+  const timing  = req.timing          || { startDate: '', endDate: '' };
+  const loading = (req.siteAccess && req.siteAccess.loading) || { notes: '', equipment: '' };
+  const dumping = (req.siteAccess && req.siteAccess.dumping) || { notes: '', equipment: '' };
+  const fmtTimingISO = (iso) => {
+    if (!iso) return '';
+    try {
+      const d = new Date(iso + 'T00:00:00');
+      if (isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    } catch (e) { return iso; }
+  };
+  const timingDisplay = timing.startDate
+    ? (timing.endDate ? `${fmtTimingISO(timing.startDate)} – ${fmtTimingISO(timing.endDate)}` : fmtTimingISO(timing.startDate))
+    : 'Not set';
+  const dateInputStyle = { ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono };
+
   const assignTruck = (haulerId, truckId) => {
     const assignedHauler = db.haulers.find(h => h.id === haulerId);
     const assignedTruck = db.trucks.find(t => t.id === truckId);
@@ -3825,6 +3909,89 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         { label: 'Haul Requests', to: '/admin/requests' },
         { label: req.id },
       ]} navigate={navigate} />
+
+      {/* Logistics details (v12) — pickup, dropoff, timing, and loading/dumping site access. */}
+      <Card style={{ marginBottom: S[5] }}>
+        <div style={{ marginBottom: S[4] }}>
+          <Label color={C.accent}>Logistics</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Click any value to edit.</div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5], marginBottom: S[5] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Pickup location</Label>
+            <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+              <EditableText value={pickup.name}
+                placeholder="Site or yard name…"
+                onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>
+              <EditableText value={pickup.address}
+                placeholder="Street address…"
+                onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Dropoff location</Label>
+            <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+              <EditableText value={dropoff.name}
+                placeholder="Site or yard name…"
+                onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim }}>
+              <EditableText value={dropoff.address}
+                placeholder="Street address…"
+                onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
+            </div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: S[5] }}>
+          <Label style={{ marginBottom: S[2] }}>Timing</Label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+            <input type="date" value={timing.startDate}
+              onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
+              style={dateInputStyle} />
+            <span style={{ ...T.bodySm, color: C.inkFaint }}>→</span>
+            <input type="date" value={timing.endDate}
+              onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
+              min={timing.startDate || undefined}
+              style={dateInputStyle} />
+            <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2] }}>{timingDisplay}</span>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Site access — loading</Label>
+            <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+              <EditableText value={loading.notes} multiline
+                placeholder="Loading site notes…"
+                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, notes: v }, dumping } }), 'loading site notes')} />
+            </div>
+            <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's loading the haul</div>
+            <div style={{ ...T.bodySm, color: C.ink }}>
+              <EditableText value={loading.equipment}
+                placeholder="Equipment / loader…"
+                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, equipment: v }, dumping } }), 'loading equipment')} />
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Site access — dumping</Label>
+            <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+              <EditableText value={dumping.notes} multiline
+                placeholder="Dump site notes…"
+                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, notes: v } } }), 'dump site notes')} />
+            </div>
+            <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's needed at the dump site</div>
+            <div style={{ ...T.bodySm, color: C.ink }}>
+              <EditableText value={dumping.equipment}
+                placeholder="Equipment / spotter…"
+                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, equipment: v } } }), 'dump site equipment')} />
+            </div>
+          </div>
+        </div>
+      </Card>
 
       {/* Request summary */}
       <Card style={{ marginBottom: S[5] }}>

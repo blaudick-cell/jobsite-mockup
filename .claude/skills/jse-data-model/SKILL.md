@@ -19,7 +19,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 | `loads` | `LOADS_SEED` | `{ id, driverId, truckId, projectId, material, cy, ticketNo?, time, date, status }` |
 | `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, number, periodStart, periodEnd, issuedDate, billTo, status, createdAt, sentAt?, paidAt?, paymentRef?, lineItems: [], loadCount, totalCY, notes }` |
 | `rates` | `RATES_INIT` | `{ [truckType]: hourlyRate }` |
-| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?, passedBy: [], notes?, assignments: [{ truckId, haulerId, addedAt, days: [{ date, startTime, loads: [{ id, time, cy }] }] }] }` |
+| `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?, passedBy: [], notes?, assignments: [...], pickupLocation: { name, address }, dropoffLocation: { name, address }, timing: { startDate, endDate }, siteAccess: { loading: { notes, equipment }, dumping: { notes, equipment } } }` |
 | `activity` | `ACTIVITY_SEED` | `{ id, type, actorRole, actorId, summary, refId?, timestamp }` |
 
 ## Relationships
@@ -114,8 +114,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v8 → v9 | Backfilled `attachments: []` on every hauler (W-9, Insurance, MSA, Other docs). Backfilled missing `rates` keys from TRUCK_TYPES defaults (e.g. HS at $140). |
 | v9 → v10 | Restored seeded attachments by hauler id (v8→v9 over-blanked them). Bumped rates whose stored value still matches a `RATES_PREV_DEFAULTS` entry but not the current TRUCK_TYPES default — preserves user edits, refreshes unedited defaults. |
 | v10 → v11 | Added `status` / `createdAt` / `sentAt` / `paidAt` / `paymentRef` to invoices. Backfilled `status: 'sent'` and `createdAt: issuedDate+T09:00:00Z` for stale payloads (defaults-first spread so existing fields win). When migrated status is `'sent'` or `'paid'` and `sentAt` is missing, synthesizes it from `issuedDate+T15:00:00Z`. `paidAt` / `paymentRef` are never backfilled blindly. |
+| v11 → v12 | Added `pickupLocation` / `dropoffLocation` / `timing` / `siteAccess` to every haul request. Defaults-first nested spread so existing values win and partial pre-v12 payloads complete their nested shapes (`siteAccess.loading.notes`, etc.). `EMPTY_LOGISTICS` mirrors the migration defaults for new seed rows. |
 
-`DB_SCHEMA_VERSION = 11`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 12`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 
