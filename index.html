@@ -338,6 +338,21 @@
     @media (max-width: 700px) {
       .lom-filters { width: 100%; }
     }
+    /* === Haulers tab — fleet ops dashboard responsive shifts === */
+    @media (max-width: 1180px) {
+      .haulers-kpi-grid { grid-template-columns: repeat(4, 1fr) !important; }
+      .haulers-grid { grid-template-columns: 1fr !important; }
+    }
+    @media (max-width: 700px) {
+      .haulers-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      .haulers-drawer-grid { grid-template-columns: 1fr !important; }
+    }
+    /* Hover lift + glow on hauler cards */
+    .hauler-ops-card:hover {
+      border-color: rgba(179,230,53,0.55) !important;
+      box-shadow: 0 0 22px -10px rgba(179,230,53,0.55) !important;
+      transform: translateY(-1px);
+    }
   </style>
 </head>
 <body>
@@ -5664,54 +5679,475 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   );
 }
 
-function AdminHaulers({ db, navigate }) {
-  const haulers = db.haulers.map(op => {
+function AdminHaulers({ db, setDb, navigate }) {
+  // === Helpers — deterministic mock metrics so the UI feels operational.
+  //   Hash hauler id → stable response/reliability/on-time values across
+  //   renders. Real telemetry slots in here later.
+  const hash = (s) => {
+    let h = 0;
+    for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
+    return Math.abs(h);
+  };
+  const mockResponseMin = (id) => 4 + (hash(id) % 19);             // 4–22 min
+  const mockOnTimePct   = (id) => 78 + (hash(id) % 21);            // 78–98 %
+  const mockRating = (id) => {
+    const v = hash(id + ':r') % 10;
+    return v >= 9 ? 'A+' : v >= 7 ? 'A' : v >= 4 ? 'A-' : v >= 2 ? 'B+' : 'B';
+  };
+
+  // === Enrich every hauler with the operational signals the cards expose. ===
+  const todayLoads = (db.loads || []).filter(l => l.status === 'approved' && (l.date === TODAY_ISO));
+  const enriched = db.haulers.map(op => {
     const trucks = db.trucks.filter(t => t.haulerId === op.id);
-    return { ...op, truckCount: trucks.length, projectCount: op.projectIds.length };
+    const truckIds = new Set(trucks.map(t => t.id));
+    const openShifts = db.hours.filter(h => truckIds.has(h.truckId) && h.status === 'open');
+    const activeTruckIds = new Set(openShifts.map(h => h.truckId));
+    const activeTrucks = activeTruckIds.size;
+    const assignedTrucks = trucks.filter(t => t.driverId).length;
+    const offlineTrucks = trucks.length - assignedTrucks;
+    // "Active hauls" = unique projects this hauler has a clocked-in truck on.
+    const activeHaulProjectIds = new Set(openShifts.map(h => h.projectId));
+    const activeHauls = activeHaulProjectIds.size;
+    const completedToday = todayLoads.filter(l => truckIds.has(l.truckId)).length;
+    const cyToday = todayLoads.filter(l => truckIds.has(l.truckId)).reduce((s, l) => s + (l.cy || 0), 0);
+    // Insurance / verification surface.
+    const insuranceAtt = (op.attachments || []).find(a => a.type === 'insurance');
+    const w9Att        = (op.attachments || []).find(a => a.type === 'w9');
+    const msaAtt       = (op.attachments || []).find(a => a.type === 'msa');
+    const insuranceFresh = (() => {
+      if (!insuranceAtt || !insuranceAtt.uploadedAt) return false;
+      const today = new Date(TODAY_ISO);
+      const ts = new Date(insuranceAtt.uploadedAt);
+      const days = (today - ts) / (1000 * 60 * 60 * 24);
+      return days <= 180; // 6-month window
+    })();
+    const verified = insuranceFresh && !!w9Att;
+    // Health flags — does any active project this hauler is on look at risk?
+    const isOnDelayedProject = openShifts.some(h => {
+      const proj = db.projects.find(p => p.id === h.projectId);
+      if (!proj) return false;
+      const loads = db.loads.filter(l => l.projectId === proj.id);
+      const pendingLoads = loads.filter(l => l.status === 'pending').length;
+      return pendingLoads >= 3;
+    });
+    // Operational status — drives the status pill on the card.
+    let opsStatus = 'available';
+    if (trucks.length === 0)                   opsStatus = 'offline';
+    else if (assignedTrucks === 0)             opsStatus = 'offline';
+    else if (activeTrucks === 0)               opsStatus = 'standby';
+    else if (activeTrucks >= trucks.length)    opsStatus = 'deployed';
+    else if (activeTrucks > trucks.length / 2) opsStatus = 'partial';
+    if (isOnDelayedProject)                    opsStatus = 'delayed';
+    // Flags surfaced as inline pills on the card.
+    const flags = [];
+    if (verified)                              flags.push({ k: 'verified', label: 'Verified', tone: C.accent, soft: C.accentSoft });
+    if (insuranceAtt && !insuranceFresh)       flags.push({ k: 'ins-stale', label: 'Insurance update', tone: C.warn, soft: C.warnSoft });
+    if (!insuranceAtt)                         flags.push({ k: 'no-ins', label: 'No insurance on file', tone: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft });
+    // Trucks by capability — used for filtering.
+    const truckTypes = new Set(trucks.map(t => t.type));
+    return {
+      ...op,
+      trucks, truckIds, openShifts,
+      activeTrucks, assignedTrucks, offlineTrucks,
+      activeHauls, completedToday, cyToday,
+      insuranceAtt, w9Att, msaAtt, insuranceFresh, verified,
+      isOnDelayedProject, opsStatus,
+      truckTypes,
+      flags,
+      // Mock telemetry (stable per id).
+      responseMin: mockResponseMin(op.id),
+      onTimePct: mockOnTimePct(op.id),
+      reliability: mockRating(op.id),
+    };
   });
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
-        <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Haulers</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>All haulers in your network.</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>{haulers.length} hauler{haulers.length === 1 ? '' : 's'} on the roster.</div>
-        </div>
-        <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ New hauler</Btn>
+
+  // === Operational KPI strip data ===
+  const totalTrucks    = db.trucks.length;
+  const trucksActiveAll = (() => {
+    const activeIds = new Set(db.hours.filter(h => h.status === 'open').map(h => h.truckId));
+    return activeIds.size;
+  })();
+  const trucksAvailable = db.trucks.filter(t => t.driverId).length - trucksActiveAll;
+  const trucksOffline   = db.trucks.length - db.trucks.filter(t => t.driverId).length;
+  const avgResponse     = enriched.length ? Math.round(enriched.reduce((s, h) => s + h.responseMin, 0) / enriched.length) : 0;
+  const loadsToday      = todayLoads.length;
+  const cyTodayAll      = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
+  const kpis = [
+    { label: 'Haulers',          value: enriched.length,        tone: C.ink },
+    { label: 'Available now',    value: Math.max(0, trucksAvailable), tone: C.accent, sub: 'idle, driver-ready' },
+    { label: 'Trucks active',    value: trucksActiveAll,        tone: C.ok,     sub: 'clocked-in' },
+    { label: 'Trucks offline',   value: trucksOffline,          tone: trucksOffline > 0 ? C.warn : C.inkDim, sub: 'no driver' },
+    { label: 'Avg response',     value: avgResponse + ' min',   tone: C.info,   sub: 'mock telemetry' },
+    { label: 'Loads today',      value: loadsToday,             tone: C.accent },
+    { label: 'CY today',         value: cyTodayAll.toLocaleString(),    tone: C.ink, sub: 'across network' },
+  ];
+
+  // === Filter + sort state ===
+  const FILTERS_INIT = {
+    avail: false,         // Available trucks now (status === 'available' or 'partial')
+    verified: false,      // Insurance-verified
+    delayed: false,       // On a delayed project
+    typeTAN: false, typeSD: false, typeED: false, typeBD: false, typeHS: false,
+  };
+  const [filters, setFilters] = useState(FILTERS_INIT);
+  const [sort, setSort] = useState('rating'); // rating | response | trucks | name
+  const [search, setSearch] = useState('');
+  const [expanded, setExpanded] = useState(null); // hauler id of the open drawer
+
+  const filtered = enriched.filter(h => {
+    if (search) {
+      const s = search.toLowerCase();
+      if (!h.name.toLowerCase().includes(s) && !(h.email || '').toLowerCase().includes(s)) return false;
+    }
+    if (filters.avail && !(h.opsStatus === 'available' || h.opsStatus === 'partial' || h.opsStatus === 'standby')) return false;
+    if (filters.verified && !h.verified) return false;
+    if (filters.delayed && !h.isOnDelayedProject) return false;
+    const typeFlags = ['TAN','SD','ED','BD','HS'];
+    const activeTypeFilters = typeFlags.filter(t => filters['type' + t]);
+    if (activeTypeFilters.length > 0 && !activeTypeFilters.some(t => h.truckTypes.has(t))) return false;
+    return true;
+  });
+  const sorted = [...filtered].sort((a, b) => {
+    if (sort === 'rating') {
+      const order = { 'A+': 0, 'A': 1, 'A-': 2, 'B+': 3, 'B': 4 };
+      return (order[a.reliability] ?? 5) - (order[b.reliability] ?? 5);
+    }
+    if (sort === 'response') return a.responseMin - b.responseMin;
+    if (sort === 'trucks')   return b.trucks.length - a.trucks.length;
+    return a.name.localeCompare(b.name);
+  });
+
+  // === Visual primitives ===
+  const STATUS_DEF = {
+    available: { label: 'Available',        tone: C.accent, soft: C.accentSoft },
+    partial:   { label: 'Partially booked', tone: C.info,   soft: C.infoSoft },
+    deployed:  { label: 'Fully deployed',   tone: C.warn,   soft: C.warnSoft },
+    standby:   { label: 'Standby',          tone: C.inkDim, soft: 'rgba(255,255,255,0.06)' },
+    delayed:   { label: 'Delayed on haul',  tone: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft },
+    offline:   { label: 'Offline',          tone: C.inkFaint, soft: 'rgba(255,255,255,0.04)' },
+  };
+  const FleetMiniViz = ({ h, max = 10 }) => {
+    // Render small dots: green=active, blue=assigned-not-clocked, gray=no driver,
+    // red=on a delayed project. Pad to max with very-dim placeholder dots.
+    const trucks = h.trucks.slice(0, max);
+    const padCount = Math.max(0, Math.min(max, h.trucks.length) - trucks.length);
+    return (
+      <div style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+        {trucks.map(t => {
+          const hasOpen = h.openShifts.some(s => s.truckId === t.id);
+          const onDelayed = h.openShifts.some(s => {
+            if (s.truckId !== t.id) return false;
+            const projLoads = db.loads.filter(l => l.projectId === s.projectId);
+            return projLoads.filter(l => l.status === 'pending').length >= 3;
+          });
+          const color = !t.driverId ? C.inkFaint
+            : onDelayed             ? (C.danger || C.warn)
+            : hasOpen               ? C.ok
+            : C.info;
+          return (
+            <span key={t.id} title={`#${t.plate} · ${t.type}`} style={{
+              display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
+              background: color, boxShadow: hasOpen ? `0 0 6px ${color}` : 'none',
+            }} />
+          );
+        })}
+        {h.trucks.length > max && (
+          <span style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginLeft: 4 }}>+{h.trucks.length - max}</span>
+        )}
+        {padCount === 0 && h.trucks.length === 0 && (
+          <span style={{ ...T.caption, color: C.inkFaint, fontStyle: 'italic' }}>no fleet</span>
+        )}
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3] }}>
-        {haulers.map(h => (
-          <button key={h.id} onClick={() => navigate(`/admin/haulers/${h.id}`)} style={{
-            textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
-            padding: S[5], cursor: 'pointer', color: C.ink,
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
-            onMouseLeave={e => { e.currentTarget.style.background = C.surface; }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4] }}>
-              <Avatar name={h.name} color={C.accent} size={44} />
-              <div style={{ flex: 1 }}>
+    );
+  };
+
+  // === Expanded fleet drawer — truck list + dispatch timeline ===
+  const ExpandedFleetPanel = ({ h }) => {
+    const trucks = h.trucks;
+    return (
+      <div style={{ borderTop: `1px solid ${C.rule}`, background: 'rgba(0,0,0,0.35)', padding: S[4] }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4] }}
+             className="haulers-drawer-grid">
+          {/* Truck list */}
+          <div>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: S[2] }}>Fleet — {trucks.length} truck{trucks.length === 1 ? '' : 's'}</div>
+            {trucks.length === 0 ? (
+              <div style={{ ...T.bodySm, color: C.inkFaint, fontStyle: 'italic', padding: `${S[3]}px 0` }}>No trucks on roster for this hauler yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[1] }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '60px 1fr 90px 110px 1fr 80px', gap: S[2], ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', paddingBottom: S[1], borderBottom: `1px solid ${C.rule}` }}>
+                  <div>Plate</div><div>Driver</div><div>Type · Cap</div><div>Status</div><div>Assigned haul</div><div style={{ textAlign: 'right' }}>GPS</div>
+                </div>
+                {trucks.map(t => {
+                  const driver = db.drivers.find(d => d.id === t.driverId);
+                  const shift = h.openShifts.find(s => s.truckId === t.id);
+                  const proj = shift ? db.projects.find(p => p.id === shift.projectId) : null;
+                  const tt = TRUCK_TYPES.find(x => x.code === t.type);
+                  const status = !t.driverId ? 'Offline'
+                    : !shift                 ? 'Available'
+                    : 'En route';
+                  const statusColor = status === 'En route' ? C.ok : status === 'Available' ? C.info : C.inkFaint;
+                  return (
+                    <div key={t.id} onClick={() => navigate('/admin/p/' + (proj ? proj.id : '') + (proj ? '/o/' + h.id + '/t/' + t.id : ''))}
+                         style={{ display: 'grid', gridTemplateColumns: '60px 1fr 90px 110px 1fr 80px', gap: S[2], ...T.bodySm, padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`, alignItems: 'center', cursor: proj ? 'pointer' : 'default' }}>
+                      <div style={{ fontFamily: F.mono, color: C.accent, fontWeight: 700 }}>#{t.plate}</div>
+                      <div style={{ color: C.ink, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{driver ? driver.name : <span style={{ color: C.inkFaint }}>—</span>}</div>
+                      <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{t.type} · {tt ? tt.cap : '—'}</div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: statusColor, boxShadow: status === 'En route' ? `0 0 6px ${statusColor}` : 'none' }} />
+                        <span style={{ ...T.caption, color: statusColor, fontFamily: F.mono, letterSpacing: 0.3 }}>{status}</span>
+                      </div>
+                      <div style={{ color: proj ? C.ink : C.inkFaint, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{proj ? proj.name : '—'}</div>
+                      <div style={{ textAlign: 'right', ...T.caption, fontFamily: F.mono, color: shift ? C.ok : C.inkFaint }}>
+                        {shift ? '● live' : '○ idle'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* Dispatch timeline — synthesized from open shifts. Mock pacing
+              shows shift start → next pickup/dump cadence over the morning. */}
+          <div>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: S[2] }}>Dispatch timeline · today</div>
+            {h.openShifts.length === 0 ? (
+              <div style={{ ...T.bodySm, color: C.inkFaint, fontStyle: 'italic', padding: `${S[3]}px 0` }}>No live shifts to plot.</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+                {h.openShifts.slice(0, 3).map(s => {
+                  const truck = db.trucks.find(t => t.id === s.truckId);
+                  const proj = db.projects.find(p => p.id === s.projectId);
+                  const [sh, sm] = s.clockIn.split(':').map(Number);
+                  const start = sh * 60 + sm;
+                  const steps = [
+                    { t: start,        label: 'Clock-in',  c: C.info },
+                    { t: start + 35,   label: 'Pickup',    c: C.accent },
+                    { t: start + 95,   label: 'Dump',      c: C.accent },
+                    { t: start + 130,  label: 'Return',    c: C.inkDim },
+                    { t: start + 175,  label: 'Reload',    c: C.accent },
+                  ];
+                  const fmt = (m) => String(Math.floor(m / 60) % 24).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+                  return (
+                    <div key={s.id} style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md, padding: S[3] }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[2] }}>
+                        <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>
+                          <span style={{ fontFamily: F.mono, color: C.accent }}>#{truck ? truck.plate : '?'}</span>
+                          <span style={{ color: C.inkDim, fontWeight: 500, marginLeft: 6 }}>· {proj ? proj.name : '—'}</span>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'stretch', gap: 8 }}>
+                        {steps.map((step, i) => (
+                          <div key={i} style={{ flex: 1, position: 'relative', paddingTop: 12 }}>
+                            <div style={{ position: 'absolute', top: 4, left: 0, right: i === steps.length - 1 ? '50%' : 0, height: 2, background: i === 0 ? 'transparent' : C.rule }} />
+                            <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 10, height: 10, borderRadius: '50%', background: step.c, boxShadow: i < 3 ? `0 0 6px ${step.c}` : 'none' }} />
+                            <div style={{ textAlign: 'center', marginTop: S[1] }}>
+                              <div style={{ ...T.caption, fontFamily: F.mono, color: step.c, fontWeight: 700 }}>{fmt(step.t)}</div>
+                              <div style={{ ...T.caption, color: C.inkDim, marginTop: 1 }}>{step.label}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Future features placeholder rail */}
+            <div style={{ marginTop: S[4], padding: S[3], background: C.surface, border: `1px dashed ${C.rule}`, borderRadius: R.md }}>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: S[2] }}>Telemetry roadmap</div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {['E-ticketing', 'Live GPS', 'Geofence events', 'Fuel usage', 'Driver ratings', 'Auto-dispatch', 'AI truck match', 'Compliance alerts'].map(label => (
+                  <span key={label} style={{ ...T.caption, padding: '3px 8px', borderRadius: R.pill, background: 'rgba(255,255,255,0.03)', color: C.inkFaint, border: `1px solid ${C.rule}`, fontFamily: F.mono, letterSpacing: 0.3 }}>{label}</span>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // === Per-card status pill + filter pill helpers ===
+  const FilterPill = ({ k, label }) => {
+    const on = !!filters[k];
+    return (
+      <button onClick={() => setFilters(prev => ({ ...prev, [k]: !prev[k] }))} style={{
+        ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase',
+        background: on ? 'rgba(0,0,0,0.5)' : 'transparent',
+        color: on ? C.accent : C.inkDim,
+        border: `1px solid ${on ? C.accent : C.rule}`,
+        boxShadow: on ? `0 0 12px -4px ${C.accent}` : 'none',
+        borderRadius: R.pill, padding: '4px 10px', fontWeight: 700, cursor: 'pointer',
+      }}>{label}</button>
+    );
+  };
+
+  // === Hauler card — the operational unit of this page ===
+  const HaulerCard = ({ h, isExpanded }) => {
+    const stat = STATUS_DEF[h.opsStatus] || STATUS_DEF.offline;
+    return (
+      <div
+        onClick={() => setExpanded(isExpanded ? null : h.id)}
+        className="hauler-ops-card"
+        style={{
+          background: C.surface,
+          border: `1px solid ${isExpanded ? C.accent : C.rule}`,
+          borderRadius: R.lg, cursor: 'pointer',
+          boxShadow: isExpanded ? `0 0 24px -8px ${C.accent}` : 'none',
+          transition: 'border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease',
+        }}
+      >
+        <div style={{ padding: S[4] }}>
+          {/* Header: identity + status pill */}
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[3] }}>
+            <Avatar name={h.name} color={C.accent} size={40} />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                 <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
-                <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{h.phone}</div>
+                <Pill color={stat.tone} soft={stat.soft}>{stat.label}</Pill>
+              </div>
+              <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{h.phone} · {h.email}</div>
+            </div>
+          </div>
+
+          {/* Verification + insurance flags */}
+          {h.flags.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: S[3] }}>
+              {h.flags.map(f => (
+                <Pill key={f.k} color={f.tone} soft={f.soft}>{f.label}</Pill>
+              ))}
+              <Pill color={C.inkDim} soft="rgba(255,255,255,0.04)">Rating {h.reliability}</Pill>
+            </div>
+          )}
+
+          {/* Operational metrics row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[2], padding: `${S[3]}px ${S[3]}px`, background: 'rgba(0,0,0,0.25)', border: `1px solid ${C.rule}`, borderRadius: R.md, marginBottom: S[3] }}>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Trucks</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>
+                <span style={{ color: C.ok }}>{h.activeTrucks}</span>
+                <span style={{ color: C.inkDim }}> / {h.trucks.length}</span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-              <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: 4 }}>Hauls</Label>
-                <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{h.projectCount}</div>
-              </div>
-              <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: 4 }}>Trucks</Label>
-                <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{h.truckCount}</div>
-              </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Active hauls</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.activeHauls}</div>
             </div>
-          </button>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Loads today</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.completedToday}</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Response</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.info }}>{h.responseMin}m</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>On-time</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: h.onTimePct >= 92 ? C.ok : h.onTimePct >= 85 ? C.ink : C.warn }}>{h.onTimePct}%</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>CY today</div>
+              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.cyToday}</div>
+            </div>
+            <div style={{ gridColumn: 'span 2' }}>
+              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 2 }}>Fleet</div>
+              <FleetMiniViz h={h} />
+            </div>
+          </div>
+
+          {/* Quick actions */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
+            <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>
+              {isExpanded ? 'Click again to collapse' : 'Click to open dispatch detail'}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/haulers/' + h.id); }}>View fleet</Btn>
+              <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.alert('TODO: open assign-haul modal for ' + h.name); }}>Assign haul</Btn>
+              <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.location.href = 'mailto:' + (h.email || ''); }}>Message</Btn>
+            </div>
+          </div>
+        </div>
+        {isExpanded && <ExpandedFleetPanel h={h} />}
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
+
+      {/* === Header / ops summary bar === */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[4], gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler operations</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Fleet network · contractor command</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Pre-qualified hauling partners, their fleets, and real-time dispatch readiness.</div>
+        </div>
+        <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+          <Btn variant="secondary" size="sm" onClick={() => window.alert('TODO: invite-carrier modal')}>Invite carrier</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/trucks/active')}>Dispatch board</Btn>
+          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ Add hauler</Btn>
+        </div>
+      </div>
+
+      {/* === Ops KPI strip === */}
+      <div className="haulers-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: S[3], marginBottom: S[5] }}>
+        {kpis.map(k => (
+          <Card key={k.label} padding={S[3]}>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>{k.label}</div>
+            <div style={{ ...T.h3, fontWeight: 700, color: k.tone || C.ink, letterSpacing: -0.4, lineHeight: 1 }}>{k.value}</div>
+            {k.sub && <div style={{ ...T.caption, color: C.inkFaint, marginTop: 4 }}>{k.sub}</div>}
+          </Card>
         ))}
+      </div>
+
+      {/* === Filter rail === */}
+      <Card padding={0} style={{ marginBottom: S[4] }}>
+        <div style={{ padding: `${S[2]}px ${S[3]}px`, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+          <input
+            type="text" value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Search hauler / email"
+            style={{ ...T.bodySm, padding: '6px 10px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surfaceHi, color: C.ink, minWidth: 220, outline: 'none' }}
+          />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <FilterPill k="avail"     label="Available now" />
+            <FilterPill k="verified"  label="Insurance verified" />
+            <FilterPill k="delayed"   label="Delayed" />
+          </div>
+          <div style={{ width: 1, height: 22, background: C.rule, margin: '0 4px' }} />
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <FilterPill k="typeTAN" label="Tandem" />
+            <FilterPill k="typeSD"  label="Side dump" />
+            <FilterPill k="typeED"  label="End dump" />
+            <FilterPill k="typeBD"  label="Belly dump" />
+            <FilterPill k="typeHS"  label="High side" />
+          </div>
+          <div style={{ flex: 1 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+            <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase' }}>Sort</span>
+            <select value={sort} onChange={e => setSort(e.target.value)} style={{ ...T.caption, padding: '4px 6px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surfaceHi, color: C.ink, fontFamily: F.mono, letterSpacing: 0.3, outline: 'none' }}>
+              <option value="rating">Highest rated</option>
+              <option value="response">Fastest response</option>
+              <option value="trucks">Largest fleet</option>
+              <option value="name">A → Z</option>
+            </select>
+          </div>
+        </div>
+      </Card>
+
+      {/* === Hauler grid === */}
+      <div className="haulers-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: S[3] }}>
+        {sorted.length === 0 ? (
+          <Card><div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>No haulers match the current filters.</div></Card>
+        ) : sorted.map(h => <HaulerCard key={h.id} h={h} isExpanded={expanded === h.id} />)}
       </div>
     </div>
   );
 }
+
 
 function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const hauler = db.haulers.find(o => o.id === haulerId);
