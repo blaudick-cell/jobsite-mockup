@@ -2541,6 +2541,7 @@ function AdminProjects({ db, setDb, navigate }) {
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
+    const markersRef = useRef([]);
 
     // Resolve geocoded points from `db.geocode`. The cache is pre-seeded with
     // approximate coords for every known address; runtime Nominatim refines
@@ -2599,6 +2600,11 @@ function AdminProjects({ db, setDb, navigate }) {
     // without recreating the map.
     const routesSignature = projectRoutes.map(rt => rt.key + '#' + rt.coords.length + (rt.isStraight ? 's' : 'o')).join('|');
 
+    // Stable signature for the MARKERS effect: changes when the set of
+    // endpoints (or their coords) changes. Drives reconciliation of marker
+    // DOM elements so we don't rely on the one-shot `map.on('load')` capture.
+    const endpointsSignature = projectEndpoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5) + ':' + p.type + ':' + (p.status || '')).join('|');
+
     // Pending-route signature for the ASYNC-FETCH effect: changes when the set
     // of un-cached project routes changes. Used as a deps array so the effect
     // doesn't loop after a successful fetch.
@@ -2654,11 +2660,72 @@ function AdminProjects({ db, setDb, navigate }) {
       if (!src) return undefined;
       const features = projectRoutes.map(rt => ({
         type: 'Feature',
-        properties: { id: rt.id, status: rt.status, isStraight: rt.isStraight },
+        properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
         geometry: { type: 'LineString', coordinates: rt.coords },
       }));
       try { src.setData({ type: 'FeatureCollection', features }); } catch (e) { /* ignore */ }
     }, [routesSignature]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Markers effect — separated from the one-shot `map.on('load')` so the
+    // markers re-render when projectEndpoints changes (e.g., when OSRM
+    // resolves and updates the coord set). Previous architecture captured
+    // projectEndpoints in the map.on('load') closure at first render, so if
+    // data wasn't ready yet, markers never appeared.
+    //
+    // Builds halo+dot pin matched to jobsiteexchange.com's `.jx-haul-pin`
+    // recipe verbatim (see map-recon-haul-calc.md). Container is flex-
+    // centered so the dot's center sits at the container's center sits at
+    // the marker's geographic point. anchor:'center' is mandatory —
+    // MapLibre's default differs by element type and any drift means the
+    // pin walks across the map as the user zooms.
+    useEffect(() => {
+      if (!mlAvailable) return undefined;
+      const map = mapRef.current;
+      if (!map) return undefined;
+      const mkHaloDotEl = (haloColor, dotColor) => {
+        const el = document.createElement('div');
+        el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+        const halo = document.createElement('span');
+        halo.className = 'jx-pin-halo';
+        halo.style.background = haloColor;
+        halo.style.opacity = '0.45';
+        const dot = document.createElement('span');
+        dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
+        el.appendChild(halo);
+        el.appendChild(dot);
+        return el;
+      };
+      const colorFor = (type) => type === 'pickup' ? '#ef5b5b' : '#B3E635';
+      // Remove any previously-added markers so we don't accumulate duplicates
+      // when projectEndpoints changes.
+      markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
+      markersRef.current = [];
+      // Defer marker add until the map's first 'load' event fires (tiles ready).
+      // map.loaded() lets us check synchronously; otherwise listen once.
+      const addAll = () => {
+        try {
+          projectEndpoints.forEach(pt => {
+            const c = colorFor(pt.type);
+            const el = mkHaloDotEl(c, c);
+            const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
+              .setLngLat([pt.coord.lng, pt.coord.lat])
+              .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
+              .addTo(map);
+            markersRef.current.push(marker);
+          });
+        } catch (e) { /* swallow — partial markers are better than no markers */ }
+      };
+      if (map.loaded && map.loaded()) {
+        addAll();
+      } else {
+        map.once && map.once('load', addAll);
+      }
+      // Cleanup: remove markers when the effect re-runs OR component unmounts.
+      return () => {
+        markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
+        markersRef.current = [];
+      };
+    }, [endpointsSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
       if (!mlAvailable || !containerRef.current) return;
@@ -2745,59 +2812,6 @@ function AdminProjects({ db, setDb, navigate }) {
           layout: { 'line-cap': 'round', 'line-join': 'round' },
         }); } catch (e) { /* ignore */ }
 
-        // === Markers — halo+dot pin matched to jobsiteexchange.com's
-        //   `.jx-haul-pin` recipe verbatim (see map-recon-haul-calc.md).
-        //   Container is flex-centered so the DOT's center sits at the
-        //   container's center sits at the marker's geographic point.
-        //   anchor:'center' is mandatory — MapLibre's default differs by
-        //   element type and any drift means the pin walks across the map
-        //   as the user zooms.
-        const mkHaloDotEl = (haloColor, dotColor) => {
-          const el = document.createElement('div');
-          // Flex-centered 40px box; dot + halo both centered via flex layout.
-          // No transforms on the outer container — visual center == geometric
-          // center, which MapLibre needs for stable lat/lng anchoring with
-          // anchor:'center'. Larger container (40px vs prior 28px) makes the
-          // pulsing halo more visible against the dark CartoCDN map.
-          el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
-          // Animated halo. Class-based so the @keyframes (jx-pin-halo-pulse)
-          // in <style> can target it; inline-styled halos can't get keyframes.
-          // Solid-color background with 0.45 opacity reads brighter against
-          // the near-black CartoCDN dark_all tiles than a radial-gradient
-          // (which fades out before reaching the visible edge of the halo).
-          const halo = document.createElement('span');
-          halo.className = 'jx-pin-halo';
-          halo.style.background = haloColor;
-          halo.style.opacity = '0.45';
-          // Solid bright center dot — sits above the halo via z-index/relative.
-          // 14px keeps the visual weight balanced with the 36px halo.
-          const dot = document.createElement('span');
-          dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
-          el.appendChild(halo);
-          el.appendChild(dot);
-          return el;
-        };
-        const mkPickupEl = () => mkHaloDotEl('#ef5b5b', '#ef5b5b');
-        const mkDumpEl   = () => mkHaloDotEl('#B3E635', '#B3E635');
-
-        // NOTE: previously we rendered a separate blue diamond for each
-        //   project (`projectPoints`). The real jobsiteexchange.com haul-calc
-        //   doesn't show project sites separately — it shows origin (pickup)
-        //   + destination (dump) endpoints with a route between, and that's
-        //   it. Each project's `address` field equals either its
-        //   `pickupLocation` (HAS projects) or its `dumpLocation` (NEEDS
-        //   projects), so the blue diamond was always sitting on the exact
-        //   same coords as one of the endpoint halo+dots — visual noise
-        //   without adding info. Dropped per Robert's complaint.
-        try {
-          projectEndpoints.forEach(pt => {
-            const el = pt.type === 'pickup' ? mkPickupEl() : mkDumpEl();
-            new window.maplibregl.Marker({ element: el, anchor: 'center' })
-              .setLngLat([pt.coord.lng, pt.coord.lat])
-              .setPopup(new window.maplibregl.Popup({ offset: 18, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
-              .addTo(map);
-          });
-        } catch (e) { /* a single marker failure shouldn't blank the whole layer */ }
       });
 
       // Resize observer — MapLibre needs explicit resize() on container changes.
