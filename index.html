@@ -433,7 +433,7 @@ const TRUCK_TYPES = [
   { code: 'SD',  label: 'Side Dump',  axles: 'Semi',   cap: '20-24 yd', rate: 125 },
   { code: 'ED',  label: 'End Dump',   axles: 'Semi',   cap: '20-24 yd', rate: 125 },
   { code: 'BD',  label: 'Belly Dump', axles: 'Semi',   cap: '22-26 yd', rate: 125 },
-  { code: 'HS',  label: 'High Side',  axles: 'Semi',   cap: '24-28 yd', rate: 140 },
+  { code: 'HS',  label: 'High Side (Scrap/Trash)', axles: 'Semi',   cap: '24-28 yd', rate: 140 },
 ];
 const RATES_INIT = Object.fromEntries(TRUCK_TYPES.map(t => [t.code, t.rate]));
 
@@ -4127,6 +4127,20 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
   const attachments = hauler.attachments || [];
   const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
+  const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
+  const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
+  const removeTruck = (id) => {
+    if (!confirm('Remove this truck from the hauler? This will detach it from any haul or driver assignment.')) return;
+    setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
+  };
+  const editTruck = (t) => {
+    if (t.projectId) {
+      navigate(`/admin/p/${t.projectId}/o/${hauler.id}/t/${t.id}`);
+    } else {
+      alert('This truck is on the bench. Assign it to a haul to open the full edit view; meanwhile use the inline fields (plate, type, rate) to edit on this page.');
+    }
+  };
+  const truckTypeOptions = TRUCK_TYPES.map(tt => ({ value: tt.code, label: tt.label }));
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const totalRevenue = hours.reduce((s, h) => {
     const t = trucks.find(x => x.id === h.truckId);
@@ -4230,6 +4244,47 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs`} /></Card>
       </div>
 
+      {/* Trucks under this hauler — moved to top of the page, inline-editable, with Edit/Remove. */}
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+        <Label>Trucks under this hauler</Label>
+        <span style={{ ...T.bodySm, color: C.inkDim }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} · click any value to edit · rate updates all trucks of that type</span>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        {trucks.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th>Driver</Th><Th align="right"></Th></tr></thead>
+            <tbody>
+              {trucks.map(t => {
+                const driver = db.drivers.find(d => d.id === t.driverId);
+                const project = db.projects.find(p => p.id === t.projectId);
+                return (
+                  <Tr key={t.id}>
+                    <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
+                    <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={truckTypeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
+                    <Td align="right" mono>$<EditableText value={String(db.rates[t.type] || 0)} onSave={(v) => updateRate(t.type, v)} mono />/hr</Td>
+                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
+                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
+                    <Td align="right">
+                      <div style={{ display: 'inline-flex', gap: S[2] }}>
+                        <Btn variant="secondary" size="xs" onClick={(e) => { e.stopPropagation(); editTruck(t); }}>Edit</Btn>
+                        <Btn variant="danger" size="xs" onClick={(e) => { e.stopPropagation(); removeTruck(t.id); }}>Remove</Btn>
+                      </div>
+                    </Td>
+                  </Tr>
+                );
+              })}
+              <tr onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)} style={{ cursor: 'pointer' }}
+                onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td colSpan={6} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck for {hauler.name}</td>
+              </tr>
+            </tbody>
+          </table>
+        )}
+      </Card>
+
       {/* Attachments — W-9, Insurance, MSA, Other. Mockup-only upload (generates ISO-named pdf). */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
         <div>
@@ -4332,34 +4387,6 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         );
       })()}
 
-      <div style={{ marginBottom: S[3] }}><Label>All trucks</Label></div>
-      <Card padding={0} style={{ marginBottom: S[4] }}>
-        {trucks.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th>Driver</Th></tr></thead>
-            <tbody>
-              {trucks.map(t => {
-                const driver = db.drivers.find(d => d.id === t.driverId);
-                const project = db.projects.find(p => p.id === t.projectId);
-                return (
-                  <Tr key={t.id}>
-                    <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
-                    <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
-                    <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
-                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
-                    <Td>{driver ? driver.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
-                  </Tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </Card>
-      <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: S[6] }}>
-        <Btn variant="primary" size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck for {hauler.name}</Btn>
-      </div>
     </div>
   );
 }
