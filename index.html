@@ -5418,6 +5418,42 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         onClick={() => go('/admin/activity')}
       />
       <Item
+        icon={<HaulerIcon size={20} />}
+        label="Haulers"
+        active={onHaulers}
+        expandable
+        expanded={haulersExpanded}
+        onToggleExpand={() => setHaulersExpanded(v => !v)}
+        onClick={() => go('/admin/haulers')}
+      />
+      {haulersExpanded && (
+        <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
+          {sortedHaulers.map(op => (
+            <button key={op.id} onClick={() => go(`/admin/haulers/${op.id}`)} style={{
+              ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+              padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.inkDim,
+            }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; }}
+            >{op.name}</button>
+          ))}
+          <button onClick={() => go('/admin/haulers/new')} style={{
+            ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
+            padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.accent,
+            fontFamily: F.display, fontWeight: 600,
+          }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
+            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+          >+ Add hauler</button>
+        </div>
+      )}
+      <Item
+        icon={<ActiveTruckIcon size={20} />}
+        label="Active Trucks"
+        active={onActiveTrucks}
+        onClick={() => go('/admin/trucks/active')}
+      />
+      <Item
         icon={<ReportingIcon size={20} />}
         label="Reports"
         active={onReportsAny}
@@ -5452,42 +5488,6 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         active={onPayments}
         onClick={() => go('/admin/payments')}
       />
-      <Item
-        icon={<ActiveTruckIcon size={20} />}
-        label="Active Trucks"
-        active={onActiveTrucks}
-        onClick={() => go('/admin/trucks/active')}
-      />
-      <Item
-        icon={<HaulerIcon size={20} />}
-        label="Haulers"
-        active={onHaulers}
-        expandable
-        expanded={haulersExpanded}
-        onToggleExpand={() => setHaulersExpanded(v => !v)}
-        onClick={() => go('/admin/haulers')}
-      />
-      {haulersExpanded && (
-        <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
-          {sortedHaulers.map(op => (
-            <button key={op.id} onClick={() => go(`/admin/haulers/${op.id}`)} style={{
-              ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
-              padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.inkDim,
-            }}
-              onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; e.currentTarget.style.color = C.ink; }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = C.inkDim; }}
-            >{op.name}</button>
-          ))}
-          <button onClick={() => go('/admin/haulers/new')} style={{
-            ...T.bodySm, background: 'transparent', border: 'none', textAlign: 'left',
-            padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', color: C.accent,
-            fontFamily: F.display, fontWeight: 600,
-          }}
-            onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
-            onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-          >+ Add hauler</button>
-        </div>
-      )}
     </nav>
   );
 }
