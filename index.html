@@ -563,7 +563,7 @@ function StatusPill({ status }) {
     active:    { color: C.accent, soft: C.accentSoft, label: 'Active' },
     pending:   { color: C.warn,   soft: C.warnSoft,   label: 'Pending' },
     approved:  { color: C.ok,     soft: C.okSoft,     label: 'Approved' },
-    matched:   { color: C.ok,     soft: C.okSoft,     label: 'Matched' },
+    matched:   { color: C.ok,     soft: C.okSoft,     label: 'Active' },
     accepted:  { color: C.info,   soft: C.infoSoft,   label: 'Accepted' },
     closed:    { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Closed' },
     upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
@@ -3594,28 +3594,79 @@ function AdminReports({ db, navigate }) {
 // Haul Requests — admin views (v3)
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate }) {
-  const [filter, setFilter] = useState('all'); // all | pending | matched | accepted | completed
   const requests = db.haulRequests || [];
-  const counts = {
-    all: requests.length,
-    pending: requests.filter(r => r.status === 'pending').length,
-    matched: requests.filter(r => r.status === 'matched').length,
-    accepted: requests.filter(r => r.status === 'accepted').length,
-    completed: requests.filter(r => r.status === 'completed').length,
-  };
-  const visible = filter === 'all' ? requests : requests.filter(r => r.status === filter);
+  // Group by status into three buckets, displayed in fixed order:
+  //   Pending → Active (matched + accepted) → Completed.
+  // The middle "Active" bucket combines `matched` (admin-assigned a hauler)
+  // and `accepted` (driver opted in); both are mid-flight states and
+  // collapsing them removes the user-confusing type filter previously here.
+  const pending   = requests.filter(r => r.status === 'pending');
+  const active    = requests.filter(r => r.status === 'matched' || r.status === 'accepted');
+  const completed = requests.filter(r => r.status === 'completed');
 
-  const Tab = ({ k, label }) => {
-    const active = filter === k;
+  const renderRow = (req) => {
+    const project = db.projects.find(p => p.id === req.projectId);
+    const material = MATERIALS.find(m => m.code === req.materialCode);
+    const hauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
+    const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
     return (
-      <button onClick={() => setFilter(k)} style={{
-        ...T.bodySm, background: active ? C.accent : 'transparent',
-        color: active ? C.bg : C.inkDim,
-        border: `1px solid ${active ? C.accent : C.ruleHi}`,
-        borderRadius: R.pill, padding: '6px 14px', fontWeight: 600, cursor: 'pointer',
-      }}>{label} <span style={{ opacity: 0.65, marginLeft: 4 }}>({counts[k]})</span></button>
+      <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
+        <Td mono><span style={{ color: C.accent }}>{req.id}</span></Td>
+        <Td>{project ? project.name : '—'}</Td>
+        <Td>{material ? material.label : req.materialCode}</Td>
+        <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
+        <Td mono dim>{req.requestedAt}</Td>
+        <Td>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <StatusPill status={req.status} />
+            {req.status === 'pending' && (req.passedBy || []).length > 0 && (
+              <Pill color={C.inkDim} soft={'rgba(255,255,255,0.06)'}>Passed by {req.passedBy.length}</Pill>
+            )}
+          </span>
+        </Td>
+        <Td align="right">
+          {req.status === 'pending' ? (
+            <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
+          ) : hauler && truck ? (
+            <span style={{ ...T.caption }}>{hauler.name} / #{truck.plate}</span>
+          ) : <span style={{ color: C.inkFaint }}>—</span>}
+        </Td>
+      </Tr>
     );
   };
+
+  const head = (
+    <thead>
+      <tr>
+        <Th>Request ID</Th>
+        <Th>Haul</Th>
+        <Th>Material</Th>
+        <Th align="right">Volume</Th>
+        <Th>Requested</Th>
+        <Th>Status</Th>
+        <Th align="right">Action</Th>
+      </tr>
+    </thead>
+  );
+
+  const Section = ({ label, color, rows, emptyText }) => (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+        <Label color={color}>{label}</Label>
+        <div style={{ flex: 1, height: 1, background: C.rule }} />
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{rows.length}</span>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          {head}
+          <tbody>
+            {rows.map(req => renderRow(req))}
+            {rows.length === 0 && <tr><td colSpan={7} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>{emptyText}</td></tr>}
+          </tbody>
+        </table>
+      </Card>
+    </>
+  );
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -3625,66 +3676,9 @@ function AdminHaulRequests({ db, setDb, navigate }) {
         <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming requests to available haulers.</div>
       </div>
-      <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[4] }}>
-        <Tab k="all" label="All" />
-        <Tab k="pending" label="Pending" />
-        <Tab k="matched" label="Matched" />
-        <Tab k="accepted" label="Accepted" />
-        <Tab k="completed" label="Completed" />
-      </div>
-      <Card padding={0}>
-        {visible.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[6], textAlign: 'center', color: C.inkDim}}>
-            No {filter === 'all' ? '' : filter + ' '}requests.
-          </div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <Th>Request ID</Th>
-                <Th>Haul</Th>
-                <Th>Material</Th>
-                <Th align="right">Volume</Th>
-                <Th>Requested</Th>
-                <Th>Status</Th>
-                <Th align="right">Action</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {visible.map(req => {
-                const project = db.projects.find(p => p.id === req.projectId);
-                const material = MATERIALS.find(m => m.code === req.materialCode);
-                const hauler = req.matchedHaulerId ? db.haulers.find(o => o.id === req.matchedHaulerId) : null;
-                const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
-                return (
-                  <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
-                    <Td mono><span style={{ color: C.accent }}>{req.id}</span></Td>
-                    <Td>{project ? project.name : '—'}</Td>
-                    <Td>{material ? material.label : req.materialCode}</Td>
-                    <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
-                    <Td mono dim>{req.requestedAt}</Td>
-                    <Td>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <StatusPill status={req.status} />
-                        {req.status === 'pending' && (req.passedBy || []).length > 0 && (
-                          <Pill color={C.inkDim} soft={'rgba(255,255,255,0.06)'}>Passed by {req.passedBy.length}</Pill>
-                        )}
-                      </span>
-                    </Td>
-                    <Td align="right">
-                      {req.status === 'pending' ? (
-                        <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/requests/${req.id}`); }}>Match</Btn>
-                      ) : hauler && truck ? (
-                        <span style={{ ...T.caption }}>{hauler.name} / #{truck.plate}</span>
-                      ) : <span style={{ color: C.inkFaint }}>—</span>}
-                    </Td>
-                  </Tr>
-                );
-              })}
-            </tbody>
-          </table>
-        )}
-      </Card>
+      <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests." />
+      <Section label="Active"    color={C.accent} rows={active}    emptyText="No active requests." />
+      <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests." />
     </div>
   );
 }
