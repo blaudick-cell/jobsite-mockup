@@ -17,7 +17,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 | `trucks` | `TRUCKS_SEED` | `{ id, plate, type, hauler, projectId, haulerId, driverId?, make?, model?, capacityCY? }` |
 | `hours` | `HOURS_SEED` | `{ id, driverId, truckId, projectId, clockIn, clockOut?, breakMin, status, date }` |
 | `loads` | `LOADS_SEED` | `{ id, driverId, truckId, projectId, material, cy, ticketNo?, time, date, status }` |
-| `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, ..., lineItems: [] }` |
+| `invoices` | `INVOICES_SEED` | `{ id, haulerId, projectId, number, periodStart, periodEnd, issuedDate, billTo, status, createdAt, sentAt?, paidAt?, paymentRef?, lineItems: [], loadCount, totalCY, notes }` |
 | `rates` | `RATES_INIT` | `{ [truckType]: hourlyRate }` |
 | `haulRequests` | `HAUL_REQUESTS_SEED` | `{ id, projectId, materialCode, volumeCY, requestedAt, status, matchedHaulerId?, matchedTruckId?, acceptedByDriver?, passedBy: [], notes?, assignments: [{ truckId, haulerId, addedAt, days: [{ date, startTime, loads: [{ id, time, cy }] }] }] }` |
 | `activity` | `ACTIVITY_SEED` | `{ id, type, actorRole, actorId, summary, refId?, timestamp }` |
@@ -113,8 +113,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v7 → v8 | Added `assignments[]` to every haul request — multi-truck, multi-day, per-truck load lists. Legacy `matchedTruckId` synthesizes a one-truck zero-loads assignment for old payloads. |
 | v8 → v9 | Backfilled `attachments: []` on every hauler (W-9, Insurance, MSA, Other docs). Backfilled missing `rates` keys from TRUCK_TYPES defaults (e.g. HS at $140). |
 | v9 → v10 | Restored seeded attachments by hauler id (v8→v9 over-blanked them). Bumped rates whose stored value still matches a `RATES_PREV_DEFAULTS` entry but not the current TRUCK_TYPES default — preserves user edits, refreshes unedited defaults. |
+| v10 → v11 | Added `status` / `createdAt` / `sentAt` / `paidAt` / `paymentRef` to invoices. Backfilled `status: 'sent'` and `createdAt: issuedDate+T09:00:00Z` for stale payloads (defaults-first spread so existing fields win). When migrated status is `'sent'` or `'paid'` and `sentAt` is missing, synthesizes it from `issuedDate+T15:00:00Z`. `paidAt` / `paymentRef` are never backfilled blindly. |
 
-`DB_SCHEMA_VERSION = 10`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 11`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 

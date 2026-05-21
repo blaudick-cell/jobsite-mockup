@@ -52,7 +52,8 @@ Dotted strings. Add new types freely — there's no type registry to update; the
 | `hours.approved` | `hauler` | "Marcus Lane approved 8.5h on #447" |
 | `shift.started` | `driver` | "J. Bui clocked in on #155" |
 | `shift.ended` | `driver` | "M. Ortega clocked out — 7.2h" |
-| `invoice.sent` | `hauler` | "Priya Sharma sent invoice INV-2026-04 to GC" |
+| `invoice.sent` | `hauler` / `admin` | "Priya Sharma sent invoice INV-2026-04 to GC" / "Admin sent invoice INV-3050 to Lake Trail Homes (Marcus Lane)" |
+| `invoice.paid` | `admin` | "Admin marked invoice INV-3041 paid (ref: ACH-44291) for Marcus Lane" |
 | `project.created` | `admin` | "Admin created project Capitol Hill Mixed-Use" |
 | `hauler.created` | `admin` | "Admin added Acme Hauling as a hauler" |
 | `driver.created` | `admin` | "Admin added M. Ortega as a driver" |

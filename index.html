@@ -570,6 +570,11 @@ function StatusPill({ status }) {
     completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
     inservice: { color: C.ok,     soft: C.okSoft,     label: 'In service' },
     idle:      { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Idle' },
+    // Invoice statuses (v11)
+    draft:     { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Draft' },
+    sent:      { color: C.accent, soft: C.accentSoft, label: 'Sent' },
+    paid:      { color: C.ok,     soft: C.okSoft,     label: 'Paid' },
+    void:      { color: C.warn,   soft: C.warnSoft,   label: 'Void' },
   };
   const v = map[status] || map.closed;
   return <Pill color={v.color} soft={v.soft}>{v.label}</Pill>;
@@ -1061,18 +1066,92 @@ const HAUL_REQUESTS_SEED = [
     ] },
 ];
 
+// Invoices (v11). `status` flows draft → sent → paid (or void). `createdAt`
+// stamps the moment a draft was generated. `sentAt` / `paidAt` / `paymentRef`
+// fill in as status advances. Legacy v10-and-earlier payloads are backfilled
+// by the v10 → v11 migration.
 const INVOICES_SEED = [
-  { id: 'inv-9001', haulerId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes', status: 'paid',
+  // === PAID (5) ===
+  { id: 'inv-9001', haulerId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes',     status: 'paid',
+    createdAt: '2026-05-08T09:12:00Z', sentAt: '2026-05-08T15:40:00Z', paidAt: '2026-05-14T11:20:00Z', paymentRef: 'ACH-44291',
     lineItems: [
-      { id: 'li-a1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega', hours: 42.5, rate: 115, amount: 4887.5 },
-      { id: 'li-a2', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',    hours: 38.0, rate: 115, amount: 4370.0 },
-      { id: 'li-a3', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski', hours: 41.0, rate: 135, amount: 5535.0 },
+      { id: 'li-9001-1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega',   hours: 42.5, rate: 115, amount: 4887.5 },
+      { id: 'li-9001-2', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',      hours: 38.0, rate: 115, amount: 4370.0 },
+      { id: 'li-9001-3', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski', hours: 41.0, rate: 135, amount: 5535.0 },
     ], loadCount: 184, totalCY: 2760, notes: 'Includes Saturday work on 5/3.' },
-  { id: 'inv-9002', haulerId: 'op-002', projectId: 'GW', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction', status: 'sent',
+  { id: 'inv-9003', haulerId: 'op-005', projectId: 'WP', number: 'INV-3043', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Lake Trail Homes',     status: 'paid',
+    createdAt: '2026-04-22T08:50:00Z', sentAt: '2026-04-22T13:15:00Z', paidAt: '2026-04-30T09:45:00Z', paymentRef: 'ACH-44102',
     lineItems: [
-      { id: 'li-b1', truckPlate: '301', truckType: 'TAN',  driverName: 'A. Reyes', hours: 36.0, rate: 95,  amount: 3420.0 },
-      { id: 'li-b2', truckPlate: '318', truckType: 'SD',  driverName: 'T. Hall',  hours: 39.5, rate: 115, amount: 4542.5 },
+      { id: 'li-9003-1', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',     hours: 39.5, rate: 115, amount: 4542.5 },
+      { id: 'li-9003-2', truckPlate: '503', truckType: 'SD', driverName: 'S. Park',    hours: 32.0, rate: 115, amount: 3680.0 },
+    ], loadCount: 142, totalCY: 2130, notes: '' },
+  { id: 'inv-9004', haulerId: 'op-002', projectId: 'GW', number: 'INV-3044', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Avere Construction',   status: 'paid',
+    createdAt: '2026-04-22T09:30:00Z', sentAt: '2026-04-23T10:05:00Z', paidAt: '2026-05-05T14:18:00Z', paymentRef: 'WIRE-2026-0418',
+    lineItems: [
+      { id: 'li-9004-1', truckPlate: '301', truckType: 'TAN', driverName: 'A. Reyes',  hours: 35.0, rate: 125, amount: 4375.0 },
+      { id: 'li-9004-2', truckPlate: '155', truckType: 'TAN', driverName: 'S. Park',   hours: 30.5, rate: 125, amount: 3812.5 },
+    ], loadCount: 88, totalCY: 1452, notes: '' },
+  { id: 'inv-9005', haulerId: 'op-006', projectId: 'GW', number: 'INV-3045', periodStart: '2026-04-22', periodEnd: '2026-04-28', issuedDate: '2026-04-29', billTo: 'Avere Construction',   status: 'paid',
+    createdAt: '2026-04-29T10:10:00Z', sentAt: '2026-04-29T16:25:00Z', paidAt: '2026-05-11T08:30:00Z', paymentRef: 'ACH-44188',
+    lineItems: [
+      { id: 'li-9005-1', truckPlate: '119', truckType: 'ED', driverName: 'C. Yoon',    hours: 41.5, rate: 135, amount: 5602.5 },
+      { id: 'li-9005-2', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski',hours: 36.0, rate: 135, amount: 4860.0 },
+    ], loadCount: 168, totalCY: 2520, notes: 'Two long days on the south access road.' },
+  { id: 'inv-9006', haulerId: 'op-009', projectId: 'CH', number: 'INV-3046', periodStart: '2026-04-29', periodEnd: '2026-05-05', issuedDate: '2026-05-06', billTo: 'Pinnacle Construction', status: 'paid',
+    createdAt: '2026-05-06T08:20:00Z', sentAt: '2026-05-06T11:40:00Z', paidAt: '2026-05-15T10:05:00Z', paymentRef: 'CHK-7733',
+    lineItems: [
+      { id: 'li-9006-1', truckPlate: '611', truckType: 'ED', driverName: 'P. Larsen',  hours: 38.5, rate: 135, amount: 5197.5 },
+    ], loadCount: 72, totalCY: 1080, notes: '' },
+
+  // === SENT (4) — 2 recent, 2 overdue (>30d since sentAt vs TODAY 2026-05-19) ===
+  { id: 'inv-9002', haulerId: 'op-002', projectId: 'GW', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction',   status: 'sent',
+    createdAt: '2026-05-08T10:00:00Z', sentAt: '2026-05-08T15:55:00Z',
+    lineItems: [
+      { id: 'li-9002-1', truckPlate: '301', truckType: 'TAN', driverName: 'A. Reyes',  hours: 36.0, rate: 125, amount: 4500.0 },
+      { id: 'li-9002-2', truckPlate: '318', truckType: 'SD',  driverName: 'T. Hall',   hours: 39.5, rate: 115, amount: 4542.5 },
     ], loadCount: 96, totalCY: 1488, notes: '' },
+  { id: 'inv-9007', haulerId: 'op-010', projectId: 'CH', number: 'INV-3047', periodStart: '2026-05-06', periodEnd: '2026-05-12', issuedDate: '2026-05-13', billTo: 'Pinnacle Construction', status: 'sent',
+    createdAt: '2026-05-13T08:45:00Z', sentAt: '2026-05-13T14:10:00Z',
+    lineItems: [
+      { id: 'li-9007-1', truckPlate: '612', truckType: 'SD', driverName: 'N. Cabrera', hours: 40.0, rate: 115, amount: 4600.0 },
+    ], loadCount: 78, totalCY: 1170, notes: 'Spread crew worked Saturday 5/9.' },
+  // Overdue (sentAt > 30 days before TODAY_ISO = 2026-05-19)
+  { id: 'inv-9008', haulerId: 'op-008', projectId: 'GW', number: 'INV-3048', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-08', billTo: 'Avere Construction',   status: 'sent',
+    createdAt: '2026-04-08T09:00:00Z', sentAt: '2026-04-08T16:30:00Z',
+    lineItems: [
+      { id: 'li-9008-1', truckPlate: '220', truckType: 'SD', driverName: 'M. Ortega',  hours: 37.0, rate: 115, amount: 4255.0 },
+    ], loadCount: 64, totalCY: 960, notes: 'GC asked for net-45 terms.' },
+  { id: 'inv-9009', haulerId: 'op-007', projectId: 'AS', number: 'INV-3049', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-09', billTo: 'Heritage Builders',     status: 'sent',
+    createdAt: '2026-04-09T10:30:00Z', sentAt: '2026-04-09T15:00:00Z',
+    lineItems: [
+      { id: 'li-9009-1', truckPlate: '502', truckType: 'BD', driverName: 'F. Okafor',  hours: 34.5, rate: 145, amount: 5002.5 },
+    ], loadCount: 58, totalCY: 1160, notes: '' },
+
+  // === DRAFT (3) — no sentAt/paidAt ===
+  { id: 'inv-9010', haulerId: 'op-001', projectId: 'WP', number: 'INV-3050', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-15', billTo: 'Lake Trail Homes',     status: 'draft',
+    createdAt: '2026-05-15T08:10:00Z',
+    lineItems: [
+      { id: 'li-9010-1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega',   hours: 41.0, rate: 115, amount: 4715.0 },
+      { id: 'li-9010-2', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski', hours: 38.5, rate: 135, amount: 5197.5 },
+    ], loadCount: 152, totalCY: 2280, notes: '' },
+  { id: 'inv-9011', haulerId: 'op-002', projectId: 'RR', number: 'INV-3051', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-16', billTo: 'Cowgirl Demo',         status: 'draft',
+    createdAt: '2026-05-16T09:25:00Z',
+    lineItems: [
+      { id: 'li-9011-1', truckPlate: '155', truckType: 'TAN', driverName: 'S. Park',      hours: 39.5, rate: 125, amount: 4937.5 },
+      { id: 'li-9011-2', truckPlate: '156', truckType: 'TAN', driverName: 'L. Velazquez', hours: 35.0, rate: 125, amount: 4375.0 },
+    ], loadCount: 102, totalCY: 1530, notes: 'Pending GC review of stockpile location.' },
+  { id: 'inv-9012', haulerId: 'op-005', projectId: 'AS', number: 'INV-3052', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-17', billTo: 'Heritage Builders',    status: 'draft',
+    createdAt: '2026-05-17T10:45:00Z',
+    lineItems: [
+      { id: 'li-9012-1', truckPlate: '503', truckType: 'SD', driverName: 'S. Park',     hours: 33.0, rate: 115, amount: 3795.0 },
+    ], loadCount: 56, totalCY: 840, notes: '' },
+
+  // === VOID (1) ===
+  { id: 'inv-9013', haulerId: 'op-004', projectId: 'GW', number: 'INV-3038', periodStart: '2026-04-08', periodEnd: '2026-04-14', issuedDate: '2026-04-15', billTo: 'Avere Construction',   status: 'void',
+    createdAt: '2026-04-15T09:00:00Z',
+    lineItems: [
+      { id: 'li-9013-1', truckPlate: '318', truckType: 'SD', driverName: 'T. Hall',     hours: 18.0, rate: 115, amount: 2070.0 },
+    ], loadCount: 32, totalCY: 480, notes: 'Voided — duplicate of INV-3037. Reissued separately.' },
 ];
 
 const HOURS_SEED = [
@@ -1241,7 +1320,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 10;
+const DB_SCHEMA_VERSION = 11;
 
 // Older values that lived in TRUCK_TYPES before specific rate bumps. The
 // migration uses this map to distinguish "user kept the old default" (safe to
@@ -1373,6 +1452,13 @@ function hydrateDb(raw) {
     //            attachments array is empty (fixes v8→v9 which over-blanked them).
     //            Promote any rate that still matches a `RATES_PREV_DEFAULTS` entry
     //            but not the current TRUCK_TYPES default (e.g. HS $125 → $140).
+    //  v10 → v11: backfill invoice payment fields (`status`, `createdAt`,
+    //            `sentAt`, `paidAt`, `paymentRef`). Defaults-first / real-second
+    //            spread so existing values win. Old payloads (which only carried
+    //            `status: 'paid' | 'sent'`) get a stamped `createdAt` derived
+    //            from `issuedDate`, and a synthesized `sentAt` when status is
+    //            already 'sent' or 'paid'. We do NOT reseed INVOICES_SEED on
+    //            top of user data — only backfill the new fields.
     const { operators: legacyOperators, ...rest } = parsed;
     const haulersBeforeRestore = (Array.isArray(rest.haulers)
       ? rest.haulers
@@ -1409,6 +1495,20 @@ function hydrateDb(raw) {
           return { ...restRow, haulerId: operatorId };
         })
       : rows;
+    // v10 → v11: backfill invoice payment fields. Defaults-first spread so any
+    // existing field wins; synthesize `sentAt` from `issuedDate` only when the
+    // status is sent/paid AND `sentAt` isn't already set. Never overwrite
+    // `paidAt` or `paymentRef`.
+    const migrateInvoice = (inv) => {
+      if (!inv || typeof inv !== 'object') return inv;
+      const baseCreatedAt = inv.issuedDate ? inv.issuedDate + 'T09:00:00Z' : new Date(0).toISOString();
+      const withDefaults = { status: 'sent', createdAt: baseCreatedAt, ...inv };
+      // If migrated to sent/paid but no sentAt, synthesize one from issuedDate.
+      if ((withDefaults.status === 'sent' || withDefaults.status === 'paid') && !withDefaults.sentAt && inv.issuedDate) {
+        withDefaults.sentAt = inv.issuedDate + 'T15:00:00Z';
+      }
+      return withDefaults;
+    };
     // v4 → v5: 'today' / 'yesterday' string labels → ISO date strings.
     const migrateDate = (val) => {
       if (val === 'today') return TODAY_ISO;
@@ -1421,7 +1521,10 @@ function hydrateDb(raw) {
       haulers: migratedHaulers,
       rates: migratedRates,
       trucks: renameOpField(rest.trucks),
-      invoices: renameOpField(rest.invoices),
+      invoices: (() => {
+        const renamed = renameOpField(rest.invoices);
+        return Array.isArray(renamed) ? renamed.map(migrateInvoice) : renamed;
+      })(),
       loads: Array.isArray(rest.loads)
         ? rest.loads.map(l => l ? { ...l, date: isoBackfill(l.date) } : l)
         : rest.loads,
@@ -4198,6 +4301,43 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         )}
       </Card>
 
+      {(() => {
+        const haulerInvoices = (db.invoices || []).filter(i => i.haulerId === hauler.id);
+        const recent = [...haulerInvoices].sort((a, b) => {
+          const akey = a.createdAt || (a.issuedDate ? a.issuedDate + 'T00:00:00Z' : '');
+          const bkey = b.createdAt || (b.issuedDate ? b.issuedDate + 'T00:00:00Z' : '');
+          return bkey.localeCompare(akey);
+        }).slice(0, 5);
+        return (
+          <>
+            <div style={{ marginBottom: S[3] }}><Label>Invoices ({haulerInvoices.length})</Label></div>
+            <Card padding={0} style={{ marginBottom: S[6] }}>
+              {haulerInvoices.length === 0 ? (
+                <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No invoices for this hauler yet.</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead><tr><Th>Invoice</Th><Th>Period</Th><Th align="right">Amount</Th><Th>Status</Th><Th></Th></tr></thead>
+                  <tbody>
+                    {recent.map(inv => {
+                      const total = (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
+                      return (
+                        <Tr key={inv.id} onClick={() => navigate(`/admin/payments/${inv.id}`)}>
+                          <Td mono><span style={{ color: C.accent }}>{inv.number}</span></Td>
+                          <Td mono dim>{inv.periodStart} {'→'} {inv.periodEnd}</Td>
+                          <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(total)}</Td>
+                          <Td><StatusPill status={inv.status} /></Td>
+                          <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
+                        </Tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </Card>
+          </>
+        );
+      })()}
+
       <div style={{ marginBottom: S[3] }}><Label>All trucks</Label></div>
       <Card padding={0} style={{ marginBottom: S[4] }}>
         {trucks.length === 0 ? (
@@ -4240,13 +4380,13 @@ function AdminReporting({ db, navigate }) {
   // realistic-looking until the real reports get wired up.
   const invoices = db.invoices || [];
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
-  const openTotal = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
-  const openCount = invoices.filter(i => i.status !== 'paid').length;
+  const openTotal = invoices.filter(i => i.status === 'sent').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+  const openCount = invoices.filter(i => i.status === 'sent').length;
   const totalCY = (db.loads || []).filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
 
   const placeholderCards = [
     { label: 'Hauler payouts', value: fmtMoney(paidTotal), sub: `${invoices.filter(i => i.status === 'paid').length} invoices paid YTD`, hint: 'Weekly + monthly disbursement statements per hauler.' },
-    { label: 'Outstanding A/R', value: fmtMoney(openTotal), sub: `${openCount} invoice${openCount === 1 ? '' : 's'} unpaid`, hint: 'Aging buckets (0–30 / 30–60 / 60+) and GC follow-up.' },
+    { label: 'Outstanding A/R', value: fmtMoney(openTotal), sub: `${openCount} invoice${openCount === 1 ? '' : 's'} unpaid`, hint: 'Aging buckets (0–30 / 30–60 / 60+) and GC follow-up.', to: '/admin/payments?filter=sent' },
     { label: 'Tonnage hauled', value: totalCY.toLocaleString() + ' CY', sub: 'all-time approved loads', hint: 'Period-over-period change by material + project.' },
     { label: 'Margin estimate', value: '— coming soon', sub: 'rate × hours minus payouts', hint: 'Per-haul gross margin + cost-plus markup math.' },
   ];
@@ -4271,12 +4411,20 @@ function AdminReporting({ db, navigate }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[6] }}>
-        {placeholderCards.map(c => (
-          <Card key={c.label} padding={S[4]}>
-            <Stat label={c.label} value={c.value} sub={c.sub} />
-            <div style={{ ...T.caption, color: C.inkFaint, marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>{c.hint}</div>
-          </Card>
-        ))}
+        {placeholderCards.map(c => {
+          const clickable = !!c.to;
+          return (
+            <Card key={c.label} padding={0}>
+              <div
+                onClick={clickable ? () => navigate(c.to) : undefined}
+                style={{ padding: S[4], cursor: clickable ? 'pointer' : 'default' }}
+              >
+                <Stat label={c.label} value={c.value} sub={c.sub} />
+                <div style={{ ...T.caption, color: C.inkFaint, marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>{c.hint}</div>
+              </div>
+            </Card>
+          );
+        })}
       </div>
 
       <div style={{ marginBottom: S[3] }}><Label>Available reports</Label></div>
@@ -4305,26 +4453,165 @@ function AdminReporting({ db, navigate }) {
 }
 
 // =====================================================================
-// AdminPayments — placeholder cards for hauler payouts + GC billing at
-// /admin/payments. Separate from /admin/reporting which is the printable
-// statement view; this is the in-app "what needs paying / who paid"
-// dashboard for the ops lead.
+// AdminPayments — KPI dashboard + invoice table at /admin/payments. Reads
+// db.invoices (v11 schema: draft → sent → paid, plus void). Status-conditional
+// actions (Generate / Mark paid / View receipt) emit appendActivity events.
+// Filter tab state can be initialized from `?filter=<status>` on the URL so
+// other views (e.g. AdminReporting's "Outstanding A/R" card) can deep-link.
 // =====================================================================
-function AdminPayments({ db, navigate }) {
+function AdminPayments({ db, setDb, navigate, hash }) {
   const invoices = db.invoices || [];
   const invoiceTotal = (inv) => (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
-  const paidThisMonth = invoices.filter(i => i.status === 'paid');
-  const openInvoices = invoices.filter(i => i.status !== 'paid');
-  const paidAmount = paidThisMonth.reduce((s, i) => s + invoiceTotal(i), 0);
-  const openAmount = openInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
-  const haulersWithBalance = new Set(openInvoices.map(i => i.haulerId)).size;
+  const invoiceHours = (inv) => (inv.lineItems || []).reduce((s, li) => s + (li.hours || 0), 0);
+
+  // === KPI computations ===
+  const sentInvoices  = invoices.filter(i => i.status === 'sent');
+  const paidInvoices  = invoices.filter(i => i.status === 'paid');
+  const draftInvoices = invoices.filter(i => i.status === 'draft');
+  const outstandingAmount = sentInvoices.reduce((s, i) => s + invoiceTotal(i), 0);
+  // "Paid this period" = paidAt within current month of TODAY_ISO (2026-05-*)
+  const monthPrefix = TODAY_ISO.slice(0, 7); // '2026-05'
+  const paidThisMonth = paidInvoices.filter(i => i.paidAt && i.paidAt.slice(0, 7) === monthPrefix);
+  const paidThisMonthAmount = paidThisMonth.reduce((s, i) => s + invoiceTotal(i), 0);
+  // Overdue: status=sent AND sentAt more than 30 days before TODAY_ISO
+  const isOverdue = (inv) => {
+    if (inv.status !== 'sent' || !inv.sentAt) return false;
+    const sentDay = inv.sentAt.slice(0, 10);
+    return sentDay <= isoDaysAgo(30);
+  };
+  const overdueInvoices = sentInvoices.filter(isOverdue);
 
   const kpiCards = [
-    { label: 'Outstanding to haulers', value: fmtMoney(openAmount), sub: `${openInvoices.length} invoice${openInvoices.length === 1 ? '' : 's'} pending` },
-    { label: 'Haulers awaiting payout', value: haulersWithBalance, sub: 'with at least one open invoice' },
-    { label: 'Paid this period', value: fmtMoney(paidAmount), sub: `${paidThisMonth.length} invoice${paidThisMonth.length === 1 ? '' : 's'} cleared` },
-    { label: 'Next batch run', value: '— scheduled', sub: 'ACH batch placeholder' },
+    { label: 'Outstanding balance', value: fmtMoney(outstandingAmount), sub: `${sentInvoices.length} sent invoice${sentInvoices.length === 1 ? '' : 's'}` },
+    { label: 'Paid this month',     value: fmtMoney(paidThisMonthAmount), sub: `${paidThisMonth.length} cleared in ${monthPrefix}` },
+    { label: 'Invoices in draft',   value: draftInvoices.length, sub: 'awaiting send' },
+    { label: 'Overdue',             value: overdueInvoices.length, sub: '> 30 days since sent' },
   ];
+
+  // === Filter state — initialized from ?filter=<status> on the hash ===
+  const initialFilter = (() => {
+    const params = new URLSearchParams((hash || '').split('?')[1] || '');
+    const f = params.get('filter') || 'all';
+    return ['all', 'draft', 'sent', 'paid', 'void', 'overdue'].includes(f) ? f : 'all';
+  })();
+  const [filter, setFilter] = useState(initialFilter);
+
+  const filtered = (() => {
+    if (filter === 'all') return invoices;
+    if (filter === 'overdue') return invoices.filter(isOverdue);
+    return invoices.filter(i => i.status === filter);
+  })();
+  const counts = {
+    all: invoices.length,
+    draft: draftInvoices.length,
+    sent: sentInvoices.length,
+    paid: paidInvoices.length,
+    void: invoices.filter(i => i.status === 'void').length,
+    overdue: overdueInvoices.length,
+  };
+
+  const sortedFiltered = [...filtered].sort((a, b) => {
+    const akey = a.createdAt || (a.issuedDate ? a.issuedDate + 'T00:00:00Z' : '');
+    const bkey = b.createdAt || (b.issuedDate ? b.issuedDate + 'T00:00:00Z' : '');
+    return bkey.localeCompare(akey);
+  });
+
+  const Tab = ({ k, label }) => {
+    const active = filter === k;
+    return (
+      <button onClick={() => setFilter(k)} style={{
+        ...T.bodySm, background: active ? C.accent : 'transparent',
+        color: active ? C.bg : C.inkDim,
+        border: `1px solid ${active ? C.accent : C.ruleHi}`,
+        borderRadius: R.pill, padding: '6px 14px', fontWeight: 600, cursor: 'pointer',
+      }}>{label} <span style={{ opacity: 0.65, marginLeft: 4 }}>({counts[k]})</span></button>
+    );
+  };
+
+  // === Status transition helpers ===
+  const sendDraft = (inv) => {
+    const sentAt = new Date().toISOString();
+    const h = db.haulers.find(x => x.id === inv.haulerId);
+    const hName = h ? h.name : 'A hauler';
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        invoices: prev.invoices.map(i => i.id === inv.id ? { ...i, status: 'sent', sentAt } : i),
+      },
+      {
+        type: 'invoice.sent',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin sent invoice ${inv.number} to ${inv.billTo} (${hName})`,
+        refId: null,
+      }
+    ));
+    alert('Invoice ' + inv.number + ' sent to ' + inv.billTo + '.');
+  };
+
+  const markPaid = (inv) => {
+    const ref = window.prompt('Payment reference (ACH / check / wire #) for ' + inv.number + '?');
+    if (ref == null) return;
+    const trimmed = ref.trim();
+    if (!trimmed) { alert('Payment reference is required.'); return; }
+    const paidAt = new Date().toISOString();
+    const h = db.haulers.find(x => x.id === inv.haulerId);
+    const hName = h ? h.name : 'A hauler';
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        invoices: prev.invoices.map(i => i.id === inv.id ? { ...i, status: 'paid', paidAt, paymentRef: trimmed } : i),
+      },
+      {
+        type: 'invoice.paid',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin marked invoice ${inv.number} paid (ref: ${trimmed}) for ${hName}`,
+        refId: null,
+      }
+    ));
+  };
+
+  // === Run payout batch modal ===
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchSel, setBatchSel] = useState({}); // { [invId]: true }
+  const toggleBatchSel = (id) => setBatchSel(prev => ({ ...prev, [id]: !prev[id] }));
+  const openBatch = () => {
+    // Pre-select every draft so the default action is "send them all".
+    const next = {};
+    draftInvoices.forEach(i => { next[i.id] = true; });
+    setBatchSel(next);
+    setShowBatch(true);
+  };
+  const closeBatch = () => { setShowBatch(false); setBatchSel({}); };
+  const selectedDraftIds = Object.keys(batchSel).filter(id => batchSel[id]);
+  const confirmBatch = () => {
+    if (selectedDraftIds.length === 0) return;
+    const sentAt = new Date().toISOString();
+    const selectedInvs = invoices.filter(i => selectedDraftIds.includes(i.id) && i.status === 'draft');
+    setDb(prev => {
+      let next = {
+        ...prev,
+        invoices: prev.invoices.map(i => selectedDraftIds.includes(i.id) && i.status === 'draft'
+          ? { ...i, status: 'sent', sentAt }
+          : i),
+      };
+      // One activity event per transitioned invoice.
+      selectedInvs.forEach(inv => {
+        const h = (prev.haulers || []).find(x => x.id === inv.haulerId);
+        const hName = h ? h.name : 'A hauler';
+        next = appendActivity(next, {
+          type: 'invoice.sent',
+          actorRole: 'admin',
+          actorId: null,
+          summary: `Admin sent invoice ${inv.number} to ${inv.billTo} (${hName}) via payout batch`,
+          refId: null,
+        });
+      });
+      return next;
+    });
+    closeBatch();
+  };
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -4333,12 +4620,10 @@ function AdminPayments({ db, navigate }) {
         <div>
           <Label color={C.accent} style={{ marginBottom: 6 }}>Payments</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauler payouts &amp; GC billing.</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Who's owed money, who owes us, and when the next batch goes out.</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Who's owed money, who owes us, and what to send next.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
-          <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">Coming soon</Pill>
-          <Btn variant="ghost" size="sm" disabled>Run payout batch</Btn>
-          <Btn variant="ghost" size="sm" disabled>Send GC statements</Btn>
+          <Btn variant="primary" size="sm" onClick={openBatch} disabled={draftInvoices.length === 0}>Run payout batch</Btn>
         </div>
       </div>
 
@@ -4350,55 +4635,342 @@ function AdminPayments({ db, navigate }) {
         ))}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}>
-          <Label style={{ marginBottom: S[2] }}>Open hauler invoices</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>{openInvoices.length} invoice{openInvoices.length === 1 ? '' : 's'} waiting on disbursement.</div>
-          {openInvoices.length === 0 ? (
-            <div style={{ ...T.bodySm, color: C.inkFaint, padding: `${S[3]}px 0` }}>Nothing pending — all haulers paid through last period.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-              {openInvoices.slice(0, 6).map(inv => {
+      <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[4] }}>
+        <Tab k="all" label="All" />
+        <Tab k="draft" label="Draft" />
+        <Tab k="sent" label="Sent" />
+        <Tab k="paid" label="Paid" />
+        <Tab k="void" label="Void" />
+        <Tab k="overdue" label="Overdue" />
+      </div>
+
+      <Card padding={0}>
+        {sortedFiltered.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[6], textAlign: 'center', color: C.inkDim }}>
+            No invoices match this filter.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Invoice</Th>
+                <Th>Hauler</Th>
+                <Th>Period</Th>
+                <Th align="right">Hours</Th>
+                <Th align="right">Loads</Th>
+                <Th align="right">Amount</Th>
+                <Th>Status</Th>
+                <Th align="right">Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {sortedFiltered.map(inv => {
                 const h = db.haulers.find(x => x.id === inv.haulerId);
+                const hName = h ? h.name : '—';
+                const total = invoiceTotal(inv);
+                const hrs = invoiceHours(inv);
                 return (
-                  <div key={inv.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-                    <div>
-                      <div style={{ ...T.bodySm, fontWeight: 600, color: C.ink }}>{h ? h.name : '—'}</div>
-                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{inv.number} · {inv.periodStart} → {inv.periodEnd}</div>
-                    </div>
-                    <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.accent }}>{fmtMoney(invoiceTotal(inv))}</div>
-                  </div>
+                  <Tr key={inv.id} onClick={() => navigate(`/admin/payments/${inv.id}`)}>
+                    <Td mono><span style={{ color: C.accent }}>{inv.number}</span></Td>
+                    <Td>{hName}</Td>
+                    <Td mono dim>{inv.periodStart} {'→'} {inv.periodEnd}</Td>
+                    <Td align="right" mono>{fmtHours(hrs)}</Td>
+                    <Td align="right" mono>{inv.loadCount || 0}</Td>
+                    <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(total)}</Td>
+                    <Td><StatusPill status={inv.status} /></Td>
+                    <Td align="right">
+                      {inv.status === 'draft' && (
+                        <Btn size="xs" onClick={(e) => { e.stopPropagation(); sendDraft(inv); }}>Generate</Btn>
+                      )}
+                      {inv.status === 'sent' && (
+                        <Btn size="xs" onClick={(e) => { e.stopPropagation(); markPaid(inv); }}>Mark paid</Btn>
+                      )}
+                      {inv.status === 'paid' && (
+                        <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/payments/${inv.id}`); }}>View receipt</Btn>
+                      )}
+                      {inv.status === 'void' && (
+                        <span style={{ color: C.inkFaint }}>—</span>
+                      )}
+                    </Td>
+                  </Tr>
                 );
               })}
-            </div>
-          )}
-        </Card>
+            </tbody>
+          </table>
+        )}
+      </Card>
 
-        <Card padding={S[4]}>
-          <Label style={{ marginBottom: S[2] }}>Payment methods (placeholder)</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>Where outbound payouts and inbound GC payments will land.</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-            {[
-              { label: 'ACH (outbound to haulers)', detail: 'Stripe Connect — connect bank account', status: 'Not connected' },
-              { label: 'Check run (outbound)',     detail: 'Weekly mailed checks',                  status: 'Disabled' },
-              { label: 'Card on file (GC)',        detail: 'Accept GC payment via Stripe',          status: 'Coming soon' },
-              { label: 'Wire instructions (GC)',   detail: 'Routing + account printed on invoice',  status: 'Coming soon' },
-            ].map(row => (
-              <div key={row.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-                <div>
-                  <div style={{ ...T.bodySm, fontWeight: 600, color: C.ink }}>{row.label}</div>
-                  <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{row.detail}</div>
-                </div>
-                <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{row.status}</Pill>
+      {showBatch && (
+        <div role="dialog" aria-modal="true" aria-label="Run payout batch"
+          onClick={closeBatch}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200,
+            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4] }}>
+          <div onClick={e => e.stopPropagation()}
+            style={{ background: C.bg, borderRadius: R.lg, width: 'min(560px, 100%)', maxHeight: '90vh',
+              overflow: 'auto', border: `1px solid ${C.ruleHi}`, boxShadow: '0 24px 64px rgba(0,0,0,0.5)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
+              <div>
+                <Label color={C.accent}>Run payout batch</Label>
+                <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>Pick draft invoices to send.</div>
               </div>
-            ))}
+              <button onClick={closeBatch} aria-label="Close" style={{
+                background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
+                width: 32, height: 32, borderRadius: R.sm, fontSize: 22, lineHeight: 1, padding: 0,
+              }}
+                onMouseEnter={e => { e.currentTarget.style.color = C.ink; e.currentTarget.style.background = C.surfaceHi; }}
+                onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
+              >×</button>
+            </div>
+            <div style={{ padding: S[4] }}>
+              {draftInvoices.length === 0 ? (
+                <div style={{ ...T.bodySm, color: C.inkDim, padding: `${S[4]}px 0`, textAlign: 'center' }}>
+                  No draft invoices to send.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                  {draftInvoices.map(inv => {
+                    const h = db.haulers.find(x => x.id === inv.haulerId);
+                    const hName = h ? h.name : '—';
+                    const total = invoiceTotal(inv);
+                    const checked = !!batchSel[inv.id];
+                    return (
+                      <label key={inv.id} style={{
+                        display: 'flex', alignItems: 'center', gap: S[3],
+                        padding: `${S[2]}px ${S[3]}px`, borderRadius: R.sm,
+                        background: C.surface, border: `1px solid ${C.rule}`, cursor: 'pointer',
+                      }}>
+                        <input type="checkbox" checked={checked} onChange={() => toggleBatchSel(inv.id)}
+                          style={{ accentColor: C.accent, width: 16, height: 16, cursor: 'pointer' }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ ...T.bodySm, fontWeight: 600, color: C.ink }}>{hName}</div>
+                          <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{inv.number} · {inv.periodStart} {'→'} {inv.periodEnd}</div>
+                        </div>
+                        <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.accent }}>{fmtMoney(total)}</div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: S[2], padding: `${S[3]}px ${S[4]}px`, borderTop: `1px solid ${C.rule}` }}>
+              <Btn variant="ghost" size="sm" onClick={closeBatch}>Cancel</Btn>
+              <Btn variant="primary" size="sm" onClick={confirmBatch} disabled={selectedDraftIds.length === 0}>
+                Send {selectedDraftIds.length} invoice{selectedDraftIds.length === 1 ? '' : 's'}
+              </Btn>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// =====================================================================
+// AdminInvoiceDetail — single-invoice view at /admin/payments/:id. Routed
+// under the `payments` namespace; the component name keeps the "invoice"
+// vocabulary because that's the entity being shown.
+// =====================================================================
+function AdminInvoiceDetail({ invoiceId, db, setDb, navigate }) {
+  const inv = (db.invoices || []).find(i => i.id === invoiceId);
+  if (!inv) {
+    return (
+      <div style={{ padding: S[6], maxWidth: 720, margin: '0 auto' }}>
+        <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Payments', to: '/admin/payments' }, { label: 'Not found' }]} navigate={navigate} />
+        <EmptyState
+          title="Invoice not found"
+          body="That invoice id doesn't exist (or it was reset)."
+          action={<Btn onClick={() => navigate('/admin/payments')}>{'←'} Back to Payments</Btn>}
+        />
+      </div>
+    );
+  }
+
+  const hauler = db.haulers.find(x => x.id === inv.haulerId);
+  const project = db.projects.find(p => p.id === inv.projectId);
+  const invoiceTotal = (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
+  const invoiceHours = (inv.lineItems || []).reduce((s, li) => s + (li.hours || 0), 0);
+
+  const sendDraft = () => {
+    const sentAt = new Date().toISOString();
+    const hName = hauler ? hauler.name : 'A hauler';
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        invoices: prev.invoices.map(i => i.id === inv.id ? { ...i, status: 'sent', sentAt } : i),
+      },
+      {
+        type: 'invoice.sent',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin sent invoice ${inv.number} to ${inv.billTo} (${hName})`,
+        refId: null,
+      }
+    ));
+    alert('Invoice ' + inv.number + ' sent to ' + inv.billTo + '.');
+  };
+
+  const markPaid = () => {
+    const ref = window.prompt('Payment reference (ACH / check / wire #) for ' + inv.number + '?');
+    if (ref == null) return;
+    const trimmed = ref.trim();
+    if (!trimmed) { alert('Payment reference is required.'); return; }
+    const paidAt = new Date().toISOString();
+    const hName = hauler ? hauler.name : 'A hauler';
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        invoices: prev.invoices.map(i => i.id === inv.id ? { ...i, status: 'paid', paidAt, paymentRef: trimmed } : i),
+      },
+      {
+        type: 'invoice.paid',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin marked invoice ${inv.number} paid (ref: ${trimmed}) for ${hName}`,
+        refId: null,
+      }
+    ));
+  };
+
+  const ActionBtn = () => {
+    if (inv.status === 'draft') return <Btn size="sm" onClick={sendDraft}>Generate</Btn>;
+    if (inv.status === 'sent')  return <Btn size="sm" onClick={markPaid}>Mark paid</Btn>;
+    if (inv.status === 'paid')  return <Btn variant="ghost" size="sm" onClick={() => window.print()}>View receipt</Btn>;
+    return null;
+  };
+
+  // Status timeline node helpers
+  const dot = (filled, label) => (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1, minWidth: 80 }}>
+      <div style={{
+        width: 12, height: 12, borderRadius: R.pill,
+        background: filled ? C.accent : 'transparent',
+        border: `2px solid ${filled ? C.accent : C.ruleHi}`,
+      }} />
+      <div style={{ ...T.caption, color: filled ? C.ink : C.inkFaint, fontWeight: filled ? 600 : 500 }}>{label}</div>
+    </div>
+  );
+  const bar = (filled) => (
+    <div style={{ height: 2, flex: 1, background: filled ? C.accent : C.ruleHi, marginTop: 5 }} />
+  );
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1100, margin: '0 auto' }}>
+      <Crumbs items={[
+        { label: 'Admin', to: '/admin' },
+        { label: 'Payments', to: '/admin/payments' },
+        { label: inv.number },
+      ]} navigate={navigate} />
+
+      {/* === Header === */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[5] }}>
+        <div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Invoice</Label>
+          <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink, fontFamily: F.display }}>{inv.number}</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginTop: S[2] }}>
+            <StatusPill status={inv.status} />
+            <div style={{ ...T.bodySm, color: C.inkDim }}>
+              {hauler ? hauler.name : '—'} · {project ? project.name : '—'}
+            </div>
+          </div>
+        </div>
+        <div><ActionBtn /></div>
+      </div>
+
+      {/* === Meta cards === */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: S[3], marginBottom: S[5] }}>
+        <Card padding={S[4]}>
+          <Label style={{ marginBottom: S[2] }}>From / Bill to</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 4 }}>From hauler</div>
+          <div style={{ ...T.body, fontWeight: 600, color: C.ink, marginBottom: S[3] }}>{hauler ? hauler.name : '—'}</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 4 }}>On haul</div>
+          <div style={{ ...T.body, fontWeight: 600, color: C.ink, marginBottom: S[3] }}>{project ? project.name : '—'}</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 4 }}>Bill to</div>
+          <div style={{ ...T.body, fontWeight: 600, color: C.ink }}>{inv.billTo}</div>
+        </Card>
+        <Card padding={S[4]}>
+          <Label style={{ marginBottom: S[2] }}>Dates &amp; payment</Label>
+          <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: `${S[2]}px ${S[3]}px`, ...T.bodySm }}>
+            <div style={{ color: C.inkDim }}>Period</div>
+            <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.periodStart} {'→'} {inv.periodEnd}</div>
+            <div style={{ color: C.inkDim }}>Issued</div>
+            <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.issuedDate || '—'}</div>
+            <div style={{ color: C.inkDim }}>Created</div>
+            <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.createdAt ? inv.createdAt.slice(0, 10) : '—'}</div>
+            {inv.sentAt && (<>
+              <div style={{ color: C.inkDim }}>Sent</div>
+              <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.sentAt.slice(0, 10)}</div>
+            </>)}
+            {inv.paidAt && (<>
+              <div style={{ color: C.inkDim }}>Paid</div>
+              <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.paidAt.slice(0, 10)}</div>
+            </>)}
+            {inv.paymentRef && (<>
+              <div style={{ color: C.inkDim }}>Ref</div>
+              <div style={{ color: C.ink, fontFamily: F.mono }}>{inv.paymentRef}</div>
+            </>)}
           </div>
         </Card>
       </div>
 
-      <div style={{ padding: S[5], background: C.surfaceHi, borderRadius: R.md, ...T.bodySm, color: C.inkDim }}>
-        <Label style={{ marginBottom: S[2] }}>Roadmap</Label>
-        Payments wires the existing <a href="#/admin/reporting" style={{ color: C.accent, textDecoration: 'none' }}>Reports</a> view into actual money movement: schedule a batch payout, record a GC's wire receipt, mark an invoice paid. Right now this is the shell.
+      {/* === Timeline === */}
+      {inv.status === 'void' ? (
+        <Card padding={S[4]} style={{ marginBottom: S[5], border: `1px solid ${C.warn}` }}>
+          <Label color={C.warn} style={{ marginBottom: S[2] }}>Voided</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>
+            This invoice was voided{inv.notes ? '. ' + inv.notes : '.'}
+          </div>
+        </Card>
+      ) : (
+        <Card padding={S[4]} style={{ marginBottom: S[5] }}>
+          <Label style={{ marginBottom: S[3] }}>Status timeline</Label>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[2] }}>
+            {dot(true, 'Created')}
+            {bar(inv.status === 'sent' || inv.status === 'paid')}
+            {dot(inv.status === 'sent' || inv.status === 'paid', 'Sent')}
+            {bar(inv.status === 'paid')}
+            {dot(inv.status === 'paid', 'Paid')}
+          </div>
+        </Card>
+      )}
+
+      {/* === Line items === */}
+      <div style={{ marginBottom: S[3] }}><Label>Line items</Label></div>
+      <Card padding={0} style={{ marginBottom: S[5] }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr><Th>Truck</Th><Th>Type</Th><Th>Driver</Th><Th align="right">Hours</Th><Th align="right">Rate</Th><Th align="right">Amount</Th></tr></thead>
+          <tbody>
+            {(inv.lineItems || []).map(li => (
+              <Tr key={li.id}>
+                <Td mono><span style={{ color: C.accent }}>#{li.truckPlate}</span></Td>
+                <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{li.truckType}</Pill></Td>
+                <Td dim>{li.driverName}</Td>
+                <Td align="right" mono>{fmtHours(li.hours)}</Td>
+                <Td align="right" mono>${li.rate}</Td>
+                <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(li.amount)}</Td>
+              </Tr>
+            ))}
+            <tr style={{ background: C.surfaceHi }}>
+              <td colSpan={3} style={{ ...T.body, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, textAlign: 'right', fontFamily: F.display, fontWeight: 600, color: C.ink }}>Total</td>
+              <Td align="right" mono style={{ fontWeight: 600 }}>{fmtHours(invoiceHours)}</Td>
+              <Td></Td>
+              <Td align="right" mono style={{ ...T.h4, fontWeight: 700, color: C.accent }}>{fmtMoney(invoiceTotal)}</Td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+
+      {/* === Notes === */}
+      {inv.notes && (
+        <Card padding={S[4]} style={{ marginBottom: S[5] }}>
+          <Label style={{ marginBottom: S[2] }}>Notes</Label>
+          <div style={{ ...T.bodySm, color: C.ink }}>{inv.notes}</div>
+        </Card>
+      )}
+
+      {/* === Footer action === */}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: S[2] }}>
+        <Btn variant="ghost" size="sm" onClick={() => navigate('/admin/payments')}>Back to payments</Btn>
+        <ActionBtn />
       </div>
     </div>
   );
@@ -4921,7 +5493,9 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
 }
 
 function AdminShell({ db, setDb, navigate, hash }) {
-  const parts = hash.split('/').filter(Boolean);
+  // Strip query string so route matchers below ignore `?filter=...` etc.
+  const pathOnly = hash.split('?')[0];
+  const parts = pathOnly.split('/').filter(Boolean);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [haulersExpanded, setHaulersExpanded] = useState(false);
   const [reportsExpanded, setReportsExpanded] = useState(() => parts[1] === 'reports' || parts[1] === 'reporting');
@@ -4964,7 +5538,8 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} navigate={navigate} />}
-          {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+          {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
@@ -5884,7 +6459,7 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
                     <Td>{inv.billTo}</Td>
                     <Td align="right" mono>{inv.lineItems.length}</Td>
                     <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(total)}</Td>
-                    <Td><Pill color={inv.status === 'paid' ? C.ok : C.accent} soft={inv.status === 'paid' ? C.okSoft : C.accentSoft}>{inv.status}</Pill></Td>
+                    <Td><StatusPill status={inv.status} /></Td>
                   </Tr>
                 );
               })}
@@ -6740,7 +7315,14 @@ function App() {
     if (h === '/' || h === '') title = 'Jobsite Exchange';
     else if (h.startsWith('/admin/reporting')) title = 'JSE — Reports';
     else if (h.startsWith('/admin/reports')) title = 'JSE — Live stats';
-    else if (h.startsWith('/admin/payments')) title = 'JSE — Payments';
+    else if (h.startsWith('/admin/payments')) {
+      if (parts[2] && db && db.invoices) {
+        const i = db.invoices.find(x => x.id === parts[2]);
+        title = i ? `JSE — Invoice ${i.number}` : 'JSE — Payments';
+      } else {
+        title = 'JSE — Payments';
+      }
+    }
     else if (h.startsWith('/admin/trucks/active')) title = 'JSE — Active Trucks';
     else if (h.startsWith('/admin/trucks/new/for/') && parts[4] && db && db.haulers) {
       const op = db.haulers.find(o => o.id === parts[4]);
