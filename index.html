@@ -642,15 +642,33 @@ function Stat({ label, value, sub, align = 'left' }) {
   );
 }
 
-function Avatar({ name, size = 28, color }) {
-  const initials = name.split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase();
+function Avatar({ name, size = 28, color, logo }) {
+  // v15: when `logo` is a non-empty string (e.g. '/logos/Dominguez_logo.png'),
+  // render the bitmap inside the same circular footprint. Falls back to the
+  // initials chip on missing / failed load so a broken image never leaves a
+  // gaping hole in the chrome.
+  const initials = (name || '').split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase();
+  const baseStyle = {
+    width: size, height: size, borderRadius: '50%',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: F.display, fontSize: size * 0.42, fontWeight: 700,
+    overflow: 'hidden', flexShrink: 0,
+  };
+  if (logo) {
+    // Letterbox bg so transparent-PNG logos still read against the dark chrome.
+    return (
+      <div style={{ ...baseStyle, background: '#FFFFFF' }} title={name}>
+        <img
+          src={logo}
+          alt={name + ' logo'}
+          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+          onError={(e) => { e.currentTarget.style.display = 'none'; const p = e.currentTarget.parentElement; if (p) { p.style.background = color || C.surfaceMax; p.style.color = color ? C.bg : C.ink; p.textContent = initials; } }}
+        />
+      </div>
+    );
+  }
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%',
-      background: color || C.surfaceMax, color: color ? C.bg : C.ink,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: F.display, fontSize: size * 0.42, fontWeight: 700,
-    }}>{initials}</div>
+    <div style={{ ...baseStyle, background: color || C.surfaceMax, color: color ? C.bg : C.ink }}>{initials}</div>
   );
 }
 
@@ -987,68 +1005,40 @@ const PROJECTS_SEED = [
   { id: 'AS', code: 'AS-09', name: 'Aurora Square',  gc: 'Heritage Builders',   address: '7700 E Iliff Ave, Aurora, CO',    startDate: '2026-08-01', status: 'upcoming',  material: ['CF','CR'] },
 ];
 
+// === v15: real Denver-area haulers replacing the synthetic seed.
+// Sourced from Robert's JSE_Haulers_Table.xlsx. The `logo` field references
+// a PNG copied into the repo's /logos/ folder (Netlify serves it statically).
+// `contact` carries the human contact name when known; `name` is the company
+// for display. Old op-001..op-010 IDs are remapped on hydrate (see v14→v15
+// migration in hydrateDb) so legacy stored payloads keep working.
 const HAULERS_SEED = [
-  { id: 'op-001', name: 'Marcus Lane',         phone: '(303) 555-0142', email: 'marcus@lakehomes.co',     projectIds: ['WP'],
-    attachments: [
-      { id: 'att-001', type: 'w9',        filename: 'lakehomes-w9-2026.pdf',      uploadedAt: '2026-01-12' },
-      { id: 'att-002', type: 'insurance', filename: 'lakehomes-coi-2026.pdf',     uploadedAt: '2026-04-03' },
-      { id: 'att-003', type: 'msa',       filename: 'lakehomes-msa-signed.pdf',   uploadedAt: '2025-11-08' },
-    ] },
-  { id: 'op-002', name: 'Priya Sharma',        phone: '(303) 555-0188', email: 'priya@avere.co',          projectIds: ['GW','RR','CH'],
-    attachments: [
-      { id: 'att-004', type: 'w9',        filename: 'avere-w9-2026.pdf',          uploadedAt: '2026-02-21' },
-      { id: 'att-005', type: 'insurance', filename: 'avere-coi-2026Q2.pdf',       uploadedAt: '2026-04-15' },
-      { id: 'att-006', type: 'msa',       filename: 'avere-msa-v3-signed.pdf',    uploadedAt: '2025-09-14' },
-      { id: 'att-007', type: 'other',     filename: 'avere-safety-cert.pdf',      uploadedAt: '2026-03-02' },
-    ] },
-  { id: 'op-003', name: 'Eli Brennan',         phone: '(303) 555-0114', email: 'eli@heritagebld.com',     projectIds: ['AS'],
-    attachments: [
-      { id: 'att-008', type: 'w9',        filename: 'heritage-w9.pdf',            uploadedAt: '2026-03-30' },
-      { id: 'att-009', type: 'insurance', filename: 'heritage-coi.pdf',           uploadedAt: '2026-03-30' },
-    ] },
-  { id: 'op-004', name: 'Dana Whitaker',       phone: '(720) 555-0166', email: 'dana@avere.co',           projectIds: ['GW'], attachments: [] },
-  { id: 'op-005', name: 'Oz Trucking',         phone: '(303) 555-0210', email: 'dispatch@oztrucking.co',  projectIds: ['WP','GW','RR','AS','CH'],
-    attachments: [
-      { id: 'att-010', type: 'w9',        filename: 'oz-w9-2026.pdf',             uploadedAt: '2026-01-04' },
-      { id: 'att-011', type: 'insurance', filename: 'oz-coi-2026.pdf',            uploadedAt: '2026-04-22' },
-      { id: 'att-012', type: 'msa',       filename: 'oz-msa-2025-12.pdf',         uploadedAt: '2025-12-18' },
-    ] },
-  { id: 'op-006', name: '5 Angels Transport, LLC', phone: '(720) 555-0211', email: 'ops@5angels.co',      projectIds: ['WP','GW','RR','AS','CH'],
-    attachments: [
-      { id: 'att-013', type: 'w9',        filename: '5angels-w9.pdf',             uploadedAt: '2026-02-14' },
-      { id: 'att-014', type: 'insurance', filename: '5angels-coi-Q2.pdf',         uploadedAt: '2026-04-08' },
-    ] },
-  { id: 'op-007', name: 'Dominguez',           phone: '(303) 555-0212', email: 'jorge@dominguezhauling.com', projectIds: ['WP','GW','RR','AS'], attachments: [] },
-  { id: 'op-008', name: 'Z&Z Hauling',         phone: '(720) 555-0213', email: 'dispatch@zandz.co',       projectIds: ['WP','GW','RR','AS'],
-    attachments: [
-      { id: 'att-015', type: 'w9',        filename: 'zz-w9-2026.pdf',             uploadedAt: '2026-01-19' },
-      { id: 'att-016', type: 'msa',       filename: 'zz-msa-signed.pdf',          uploadedAt: '2025-10-22' },
-    ] },
-  { id: 'op-009', name: 'Cordillera Hauling',  phone: '(720) 555-0224', email: 'rachel@cordillerahaul.com', projectIds: ['CH'], attachments: [] },
-  { id: 'op-010', name: 'Front Range Logistics', phone: '(303) 555-0231', email: 'dispatch@frontrangelogistics.com', projectIds: ['WP','CH'],
-    attachments: [
-      { id: 'att-017', type: 'w9',        filename: 'frl-w9.pdf',                 uploadedAt: '2026-02-05' },
-      { id: 'att-018', type: 'insurance', filename: 'frl-coi.pdf',                uploadedAt: '2026-04-19' },
-      { id: 'att-019', type: 'msa',       filename: 'frl-msa-v2.pdf',             uploadedAt: '2026-01-30' },
-    ] },
+  { id: 'op-001', name: 'Dominguez',         contact: 'Antonio Dominguez', phone: '720-439-1097', email: 'antonguez3187@gmail.com',     address: '391 S. 31st Ave, Brighton, CO 80601',           projectIds: ['WP','GW','RR'],       logo: '/logos/Dominguez_logo.png',       attachments: [] },
+  { id: 'op-002', name: 'Z&Z Hauling LLC',   contact: '',                  phone: '',             email: '',                            address: 'PO Box 357, Fort Lupton, CO',                   projectIds: ['GW','RR','AS'],       logo: '/logos/Z_Z_Hauling_logo.png',     attachments: [] },
+  { id: 'op-003', name: 'OZ Trucking',       contact: '',                  phone: '720-628-2678', email: 'Jubalin74@gmail.com',         address: '978 S Osceola St, Denver, CO 80219',            projectIds: ['WP','AS','CH'],       logo: '/logos/Oz_Trucking_logo.png',     attachments: [] },
+  { id: 'op-004', name: 'Tecos Trucking',    contact: '',                  phone: '720-692-1945', email: 'tecostrucking@gmail.com',     address: '5557 Troy St, Denver, CO 80239',                projectIds: ['CH','GW'],            logo: '/logos/Tecos_Trucking_logo.png',  attachments: [] },
+  { id: 'op-005', name: 'Garcia Trucking',   contact: '',                  phone: '303-210-9325', email: 'garciatrucking4891@gmail.com', address: '13565 County Rd 2 1/2, Brighton, CO 80603',    projectIds: ['WP','AS','RR','CH'],  logo: '/logos/Garcia_Trucking_logo.png', attachments: [] },
+  { id: 'op-006', name: 'J&C Trucking, LLC', contact: '',                  phone: '720-628-9560', email: '',                            address: '1500 W. Thornton Pkwy #252, Thornton, CO 80260', projectIds: ['WP','GW','AS','CH'], logo: '/logos/J_C_Trucking_logo.png',    attachments: [] },
 ];
 
+// v15 truck remap — distribution across the 6 real haulers. Legacy `hauler`
+// free-text string updated to match the new haulerId so any UI still reading
+// truck.hauler stays consistent. Type/project/driver pairings preserved.
 const TRUCKS_SEED = [
-  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'RB Trucking',          projectId: 'WP', haulerId: 'op-001', driverId: 'dr-001' },
-  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'WP', haulerId: 'op-005', driverId: 'dr-002' },
-  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: '5 Angels Transport',   projectId: 'WP', haulerId: 'op-006', driverId: 'dr-003' },
-  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',            projectId: 'WP', haulerId: 'op-007', driverId: 'dr-004' },
-  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Mountain Aggregate',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-005' },
-  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Mountain Aggregate',   projectId: 'GW', haulerId: 'op-004', driverId: 'dr-006' },
-  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: '5 Angels Transport',   projectId: 'GW', haulerId: 'op-006', driverId: 'dr-007' },
-  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling',          projectId: 'GW', haulerId: 'op-008', driverId: 'dr-001' },
-  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', haulerId: 'op-002', driverId: 'dr-008' },
-  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Greenline',            projectId: 'RR', haulerId: 'op-002', driverId: 'dr-009' },
-  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'Apex Hauling',         projectId: 'AS', haulerId: 'op-003', driverId: 'dr-010' },
-  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',            projectId: 'AS', haulerId: 'op-007', driverId: 'dr-011' },
-  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Oz Trucking',          projectId: 'AS', haulerId: 'op-005', driverId: 'dr-008' },
-  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'Cordillera Hauling',   projectId: 'CH', haulerId: 'op-009', driverId: 'dr-013' },
-  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Front Range Logistics', projectId: 'CH', haulerId: 'op-010', driverId: 'dr-014' },
+  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'WP', haulerId: 'op-001', driverId: 'dr-001' },
+  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'WP', haulerId: 'op-005', driverId: 'dr-002' },
+  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'WP', haulerId: 'op-006', driverId: 'dr-003' },
+  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'WP', haulerId: 'op-001', driverId: 'dr-004' },
+  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-005' },
+  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GW', haulerId: 'op-004', driverId: 'dr-006' },
+  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'GW', haulerId: 'op-006', driverId: 'dr-007' },
+  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-001' },
+  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-008' },
+  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-009' },
+  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'AS', haulerId: 'op-003', driverId: 'dr-010' },
+  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'AS', haulerId: 'op-001', driverId: 'dr-011' },
+  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'AS', haulerId: 'op-005', driverId: 'dr-008' },
+  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'CH', haulerId: 'op-003', driverId: 'dr-013' },
+  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'CH', haulerId: 'op-004', driverId: 'dr-014' },
   { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
@@ -1099,9 +1089,9 @@ const HAUL_REQUESTS_SEED = [
       dumping: { notes: 'Truck access from south gate; spotter onsite.', equipment: 'Spotter only — no equipment at dump' },
     } },
   { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
-  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-009', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
+  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-003', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
     assignments: [
-      { truckId: 'tk-611', haulerId: 'op-009', addedAt: 1716230000000,
+      { truckId: 'tk-611', haulerId: 'op-003', addedAt: 1716230000000,
         days: [{ date: TODAY_ISO, startTime: '08:05', loads: [] }] },
     ],
     pickupLocation:  { name: 'Aggregate Industries — Santa Fe', address: '6100 N Broadway, Denver, CO 80216' },
@@ -1116,7 +1106,7 @@ const HAUL_REQUESTS_SEED = [
     assignments: [
       { truckId: 'tk-119', haulerId: 'op-006', addedAt: 1716231000000,
         days: [{ date: TODAY_ISO, startTime: '08:48', loads: [] }] },
-      { truckId: 'tk-220', haulerId: 'op-008', addedAt: 1716232500000,
+      { truckId: 'tk-220', haulerId: 'op-002', addedAt: 1716232500000,
         days: [{ date: TODAY_ISO, startTime: '09:00', loads: [] }] },
     ],
     pickupLocation:  { name: 'GW Apartments — basement cut', address: '88 Greenway Blvd, Boulder, CO 80301' },
@@ -1183,7 +1173,7 @@ const INVOICES_SEED = [
       { id: 'li-9005-1', truckPlate: '119', truckType: 'ED', driverName: 'C. Yoon',    hours: 41.5, rate: 135, amount: 5602.5 },
       { id: 'li-9005-2', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski',hours: 36.0, rate: 135, amount: 4860.0 },
     ], loadCount: 168, totalCY: 2520, notes: 'Two long days on the south access road.' },
-  { id: 'inv-9006', haulerId: 'op-009', projectId: 'CH', number: 'INV-3046', periodStart: '2026-04-29', periodEnd: '2026-05-05', issuedDate: '2026-05-06', billTo: 'Pinnacle Construction', status: 'paid',
+  { id: 'inv-9006', haulerId: 'op-003', projectId: 'CH', number: 'INV-3046', periodStart: '2026-04-29', periodEnd: '2026-05-05', issuedDate: '2026-05-06', billTo: 'Pinnacle Construction', status: 'paid',
     createdAt: '2026-05-06T08:20:00Z', sentAt: '2026-05-06T11:40:00Z', paidAt: '2026-05-15T10:05:00Z', paymentRef: 'CHK-7733',
     lineItems: [
       { id: 'li-9006-1', truckPlate: '611', truckType: 'ED', driverName: 'P. Larsen',  hours: 38.5, rate: 135, amount: 5197.5 },
@@ -1196,18 +1186,18 @@ const INVOICES_SEED = [
       { id: 'li-9002-1', truckPlate: '301', truckType: 'TAN', driverName: 'A. Reyes',  hours: 36.0, rate: 125, amount: 4500.0 },
       { id: 'li-9002-2', truckPlate: '318', truckType: 'SD',  driverName: 'T. Hall',   hours: 39.5, rate: 115, amount: 4542.5 },
     ], loadCount: 96, totalCY: 1488, notes: '' },
-  { id: 'inv-9007', haulerId: 'op-010', projectId: 'CH', number: 'INV-3047', periodStart: '2026-05-06', periodEnd: '2026-05-12', issuedDate: '2026-05-13', billTo: 'Pinnacle Construction', status: 'sent',
+  { id: 'inv-9007', haulerId: 'op-004', projectId: 'CH', number: 'INV-3047', periodStart: '2026-05-06', periodEnd: '2026-05-12', issuedDate: '2026-05-13', billTo: 'Pinnacle Construction', status: 'sent',
     createdAt: '2026-05-13T08:45:00Z', sentAt: '2026-05-13T14:10:00Z',
     lineItems: [
       { id: 'li-9007-1', truckPlate: '612', truckType: 'SD', driverName: 'N. Cabrera', hours: 40.0, rate: 115, amount: 4600.0 },
     ], loadCount: 78, totalCY: 1170, notes: 'Spread crew worked Saturday 5/9.' },
   // Overdue (sentAt > 30 days before TODAY_ISO = 2026-05-19)
-  { id: 'inv-9008', haulerId: 'op-008', projectId: 'GW', number: 'INV-3048', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-08', billTo: 'Avere Construction',   status: 'sent',
+  { id: 'inv-9008', haulerId: 'op-002', projectId: 'GW', number: 'INV-3048', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-08', billTo: 'Avere Construction',   status: 'sent',
     createdAt: '2026-04-08T09:00:00Z', sentAt: '2026-04-08T16:30:00Z',
     lineItems: [
       { id: 'li-9008-1', truckPlate: '220', truckType: 'SD', driverName: 'M. Ortega',  hours: 37.0, rate: 115, amount: 4255.0 },
     ], loadCount: 64, totalCY: 960, notes: 'GC asked for net-45 terms.' },
-  { id: 'inv-9009', haulerId: 'op-007', projectId: 'AS', number: 'INV-3049', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-09', billTo: 'Heritage Builders',     status: 'sent',
+  { id: 'inv-9009', haulerId: 'op-001', projectId: 'AS', number: 'INV-3049', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-09', billTo: 'Heritage Builders',     status: 'sent',
     createdAt: '2026-04-09T10:30:00Z', sentAt: '2026-04-09T15:00:00Z',
     lineItems: [
       { id: 'li-9009-1', truckPlate: '502', truckType: 'BD', driverName: 'F. Okafor',  hours: 34.5, rate: 145, amount: 5002.5 },
@@ -1416,7 +1406,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 14;
+const DB_SCHEMA_VERSION = 15;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -1677,7 +1667,7 @@ function hydrateDb(raw) {
       return val; // already ISO, or null/undefined (handled by v1→v2 backfill below)
     };
     const isoBackfill = (val) => val == null ? YESTERDAY_ISO : migrateDate(val);
-    return {
+    const out = {
       ...rest,
       haulers: migratedHaulers,
       rates: migratedRates,
@@ -1734,6 +1724,45 @@ function hydrateDb(raw) {
       })(),
       schemaVersion: DB_SCHEMA_VERSION,
     };
+    // v14 → v15: replace haulers entirely with the new 6-record real seed
+    // (Robert's request — "erase existing, don't merge"). Reassign downstream
+    // FKs: any stored op-007..op-010 references → mapped to op-001..op-004 so
+    // no orphan refs remain. Stored trucks/invoices/haulRequests written
+    // against an old hauler id are still attached to a real hauler after
+    // migration. New rows referencing the kept ids (op-001..op-006) pass
+    // through untouched.
+    try {
+      const HAULER_ID_REMAP = { 'op-007': 'op-001', 'op-008': 'op-002', 'op-009': 'op-003', 'op-010': 'op-004' };
+      const remap = (id) => (id && HAULER_ID_REMAP[id]) || id;
+      const haulerNameById = (id) => { const h = HAULERS_SEED.find(x => x.id === id); return h ? h.name : null; };
+      out.haulers = HAULERS_SEED;
+      if (Array.isArray(out.trucks)) {
+        out.trucks = out.trucks.map(t => {
+          if (!t || typeof t !== 'object') return t;
+          const newId = remap(t.haulerId);
+          if (newId === t.haulerId) return t;
+          const newName = haulerNameById(newId) || t.hauler;
+          return { ...t, haulerId: newId, hauler: newName };
+        });
+      }
+      if (Array.isArray(out.invoices)) {
+        out.invoices = out.invoices.map(i => (i && typeof i === 'object' && i.haulerId && remap(i.haulerId) !== i.haulerId) ? { ...i, haulerId: remap(i.haulerId) } : i);
+      }
+      if (Array.isArray(out.haulRequests)) {
+        out.haulRequests = out.haulRequests.map(r => {
+          if (!r || typeof r !== 'object') return r;
+          let next = r;
+          if (r.matchedHaulerId && remap(r.matchedHaulerId) !== r.matchedHaulerId) {
+            next = { ...next, matchedHaulerId: remap(r.matchedHaulerId) };
+          }
+          if (Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId && remap(a.haulerId) !== a.haulerId)) {
+            next = { ...next, assignments: r.assignments.map(a => (a && a.haulerId && remap(a.haulerId) !== a.haulerId) ? { ...a, haulerId: remap(a.haulerId) } : a) };
+          }
+          return next;
+        });
+      }
+    } catch (e) { /* if anything throws during v15 remap, fall through with the v14 shape */ }
+    return out;
   } catch (e) {
     return seed;
   }
@@ -3537,7 +3566,7 @@ function AdminProject({ projectId, db, setDb, navigate }) {
                 <Tr key={op.id} onClick={() => navigate(`/admin/p/${projectId}/o/${op.id}`)}>
                   <Td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                      <Avatar name={op.name} color={C.accent} />
+                      <Avatar name={op.name} color={C.accent} logo={op.logo} />
                       <div>
                         <div style={{ fontWeight: 600 }}>{op.name}</div>
                         <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} hauls` : '1 haul'}</div>
@@ -3778,7 +3807,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0,
                     }}>{selected ? 'âœ“' : ''}</div>
-                    <Avatar name={op.name} color={C.accent} />
+                    <Avatar name={op.name} color={C.accent} logo={op.logo} />
                     <div style={{ flex: 1, minWidth: 140 }}>
                       <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
@@ -3876,7 +3905,7 @@ function AdminNewProject({ db, setDb, navigate }) {
                   const op = db.haulers.find(o => o.id === opId);
                   return op ? (
                     <div key={opId} style={{ display: 'flex', alignItems: 'center', gap: S[3], background: C.surfaceHi, borderRadius: R.md, padding: S[3] }}>
-                      <Avatar name={op.name} color={C.accent} />
+                      <Avatar name={op.name} color={C.accent} logo={op.logo} />
                       <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
                       <div style={{ ...T.monoSm, color: C.inkDim }}>{op.phone}</div>
                     </div>
@@ -5855,7 +5884,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                   background: isMatched ? C.accentSoft : 'transparent',
                 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-                    <Avatar name={op.name} color={C.accent} />
+                    <Avatar name={op.name} color={C.accent} logo={op.logo} />
                     <div style={{ flex: 1, minWidth: 200 }}>
                       <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{op.name}</div>
                       <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
@@ -6218,7 +6247,7 @@ function AdminHaulers({ db, setDb, navigate }) {
         <div style={{ padding: S[4] }}>
           {/* Header: identity + status pill */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[3] }}>
-            <Avatar name={h.name} color={C.accent} size={40} />
+            <Avatar name={h.name} color={C.accent} size={40} logo={h.logo} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                 <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
@@ -6469,7 +6498,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         </Card>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5], flexWrap: 'wrap' }}>
-          <Avatar name={hauler.name} size={56} color={C.accent} />
+          <Avatar name={hauler.name} size={56} color={C.accent} logo={hauler.logo} />
           <div style={{ flex: 1, minWidth: 240 }}>
             <Label color={C.accent}>Hauler</Label>
             <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{hauler.name}</h1>
@@ -6838,7 +6867,7 @@ function AdminReporting({ db, setDb, navigate }) {
           return (
             <Card key={hauler.id} padding={S[5]}>
               <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4], flexWrap: 'wrap' }}>
-                <Avatar name={hauler.name} color={C.accent} size={40} />
+                <Avatar name={hauler.name} color={C.accent} size={40} logo={hauler.logo} />
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{hauler.name}</div>
                   <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
@@ -8123,7 +8152,7 @@ function HaulerLanding({ db, navigate }) {
             onMouseLeave={e => { e.currentTarget.style.background = C.surface; }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4] }}>
-              <Avatar name={op.name} color={C.accent} size={44} />
+              <Avatar name={op.name} color={C.accent} size={44} logo={op.logo} />
               <div style={{ flex: 1 }}>
                 <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{op.name}</div>
                 <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{op.phone}</div>
@@ -8165,7 +8194,7 @@ function HaulerHome({ haulerId, db, navigate }) {
         { label: op.name },
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
-        <Avatar name={op.name} size={56} color={C.accent} />
+        <Avatar name={op.name} size={56} color={C.accent} logo={op.logo} />
         <div style={{ flex: 1 }}>
           <Label color={C.accent}>Hauler dashboard</Label>
           <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{op.name}</h1>

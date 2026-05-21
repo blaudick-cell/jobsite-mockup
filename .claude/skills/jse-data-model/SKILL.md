@@ -12,7 +12,7 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 | key | seed | shape |
 |---|---|---|
 | `projects` | `PROJECTS_SEED` | `{ id, code, name, gc, address, startDate, status, material: [] }` |
-| `haulers` | `HAULERS_SEED` | `{ id, name, phone, email, projectIds: [], company?, attachments: [{ id, type: 'w9'\|'insurance'\|'msa'\|'other', filename, uploadedAt }] }` |
+| `haulers` | `HAULERS_SEED` | `{ id, name, contact?, phone, email, address?, projectIds: [], logo?, attachments: [{ id, type: 'w9'\|'insurance'\|'msa'\|'other', filename, uploadedAt }] }` — v15: seed replaced with 6 real Denver-area haulers (Dominguez, Z&Z Hauling LLC, OZ Trucking, Tecos Trucking, Garcia Trucking, J&C Trucking, LLC). `logo` is a path under `/logos/<file>.png` served by Netlify; `contact` is the human-contact name when known. |
 | `drivers` | `DRIVERS_SEED` | `{ id, name, phone, licenseNumber? }` |
 | `trucks` | `TRUCKS_SEED` | `{ id, plate, type, hauler, projectId, haulerId, driverId?, make?, model?, capacityCY? }` |
 | `hours` | `HOURS_SEED` | `{ id, driverId, truckId, projectId, clockIn, clockOut?, breakMin, status, date }` |
@@ -117,8 +117,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v11 → v12 | Added `pickupLocation` / `dropoffLocation` / `timing` / `siteAccess` to every haul request. Defaults-first nested spread so existing values win and partial pre-v12 payloads complete their nested shapes (`siteAccess.loading.notes`, etc.). `EMPTY_LOGISTICS` mirrors the migration defaults for new seed rows. |
 | v12 → v13 | Added nullable `haulRequestId` to invoices. Pre-v13 invoices are project-scoped and migrate to `haulRequestId: null`. The Reports tab's per-hauler invoice generator stamps `haulRequestId` on new invoices so they can be traced back to a specific haul. `INVOICE_CY_RATE` (TAN 18, SD/ED/BD 22, HS 26) introduces a per-CY billing model alongside the existing hours-based `db.rates`. |
 | v13 → v14 | Added `geocode` collection — plain object keyed by raw address string, values `{ lat, lng }`. Backs the MapLibre `LiveOperationsTileMap` so the tile map can place pickup/dropoff/project markers without waiting on Nominatim. Pre-seeded via `GEOCODE_SEED` (~12 known seed addresses). Stale payloads merge `GEOCODE_SEED` defaults under any stored user-added resolutions, so user edits win but new seed addresses still fill in. Real geocoding via Nominatim can be added per-EditableText-onSave later; for now the seed covers every visible address. |
+| v14 → v15 | Replaced `db.haulers` seed entirely with 6 real Denver-area haulers (op-001..op-006). Added `logo` field (PNG path under `/logos/`) and `contact` field (human-contact name when known). Reassigned all downstream FK refs: stored op-007..op-010 → mapped to op-001..op-004 across `db.trucks.haulerId`, `db.invoices.haulerId`, `db.haulRequests.matchedHaulerId`, and `db.haulRequests.assignments[].haulerId`. `truck.hauler` legacy free-text field also updated to match the new haulerId's name. Avatar component extended to render the bitmap when `logo` is present, fallback to initials chip on missing / failed load. Activity-feed seed entries that reference op-007..op-010 in `refId` are left as historical no-op clicks. |
 
-`DB_SCHEMA_VERSION = 14`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 15`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 
