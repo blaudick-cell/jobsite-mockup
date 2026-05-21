@@ -997,12 +997,16 @@ function ChevronRight({ size = 18 }) {
 
   <script type="text/babel" data-presets="react">
 // === BLOCK 2: SEEDS + PERSISTENCE ===
+// === v16: 3 real Denver-area projects replacing the synthetic 5.
+// `haulType: 'NEEDS' | 'HAS'` is the new explicit haul-direction field
+// (NEEDS = import, HAS = export). `volumeCYNeeded` is nullable when
+// unknown — Robert's Geos Neighborhood is "unknown CY" so we mark
+// `volumeCYKnown: false` so the UI can render "—" instead of "0 CY".
+// `contactName/Phone/Email` mirror the Supabase columns we just added.
 const PROJECTS_SEED = [
-  { id: 'RR', code: 'RR-03', name: '5800 Federal',          gc: 'Cowgirl Demo',        address: '5800 Federal Blvd, Denver, CO',   startDate: '2026-05-02', status: 'active',    material: ['EX'] },
-  { id: 'WP', code: 'WP-24', name: 'Winter Park',    gc: 'Lake Trail Homes',    address: '4421 Birch Rd, Winter Park, CO',  startDate: '2026-04-12', status: 'active',    material: ['CF','TS'] },
-  { id: 'CH', code: 'CH-18', name: 'Capitol Hill Mixed-Use', gc: 'Pinnacle Construction', address: '1240 E 13th Ave, Denver, CO', startDate: '2026-05-10', status: 'active',    material: ['CF','EX','CR'] },
-  { id: 'GW', code: 'GW-12', name: 'GW Apartments',  gc: 'Avere Construction',  address: '88 Greenway Blvd, Boulder, CO',   startDate: '2026-03-01', status: 'completed', material: ['CR','EX'] },
-  { id: 'AS', code: 'AS-09', name: 'Aurora Square',  gc: 'Heritage Builders',   address: '7700 E Iliff Ave, Aurora, CO',    startDate: '2026-08-01', status: 'upcoming',  material: ['CF','CR'] },
+  { id: 'RR', code: 'RR-01', name: '5800 Federal',       gc: 'Cowgirl Demolition', address: '5800 Federal Blvd, Denver, CO',          startDate: '2026-05-02', status: 'active',   material: ['CF'], haulType: 'NEEDS', contactName: 'Jessica', contactPhone: '',             contactEmail: '',                            volumeCYNeeded: 100000, volumeCYKnown: true },
+  { id: 'RG', code: 'RG-02', name: '1105 Rogers Street', gc: 'Jobsite Exchange',   address: '1105 Rogers Street, Golden, CO',         startDate: '2026-06-10', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: 200,    volumeCYKnown: true },
+  { id: 'GE', code: 'GE-03', name: 'Geos Neighborhood',  gc: 'Jobsite Exchange',   address: '15185 W 68th Pl, Arvada, CO 80007',      startDate: '2026-07-01', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: null,   volumeCYKnown: false },
 ];
 
 // === v15: real Denver-area haulers replacing the synthetic seed.
@@ -1012,33 +1016,33 @@ const PROJECTS_SEED = [
 // for display. Old op-001..op-010 IDs are remapped on hydrate (see v14→v15
 // migration in hydrateDb) so legacy stored payloads keep working.
 const HAULERS_SEED = [
-  { id: 'op-001', name: 'Dominguez',         contact: 'Antonio Dominguez', phone: '720-439-1097', email: 'antonguez3187@gmail.com',     address: '391 S. 31st Ave, Brighton, CO 80601',           projectIds: ['WP','GW','RR'],       logo: '/logos/Dominguez_logo.png',       attachments: [] },
-  { id: 'op-002', name: 'Z&Z Hauling LLC',   contact: '',                  phone: '',             email: '',                            address: 'PO Box 357, Fort Lupton, CO',                   projectIds: ['GW','RR','AS'],       logo: '/logos/Z_Z_Hauling_logo.png',     attachments: [] },
-  { id: 'op-003', name: 'OZ Trucking',       contact: '',                  phone: '720-628-2678', email: 'Jubalin74@gmail.com',         address: '978 S Osceola St, Denver, CO 80219',            projectIds: ['WP','AS','CH'],       logo: '/logos/Oz_Trucking_logo.png',     attachments: [] },
-  { id: 'op-004', name: 'Tecos Trucking',    contact: '',                  phone: '720-692-1945', email: 'tecostrucking@gmail.com',     address: '5557 Troy St, Denver, CO 80239',                projectIds: ['CH','GW'],            logo: '/logos/Tecos_Trucking_logo.png',  attachments: [] },
-  { id: 'op-005', name: 'Garcia Trucking',   contact: '',                  phone: '303-210-9325', email: 'garciatrucking4891@gmail.com', address: '13565 County Rd 2 1/2, Brighton, CO 80603',    projectIds: ['WP','AS','RR','CH'],  logo: '/logos/Garcia_Trucking_logo.png', attachments: [] },
-  { id: 'op-006', name: 'J&C Trucking, LLC', contact: '',                  phone: '720-628-9560', email: '',                            address: '1500 W. Thornton Pkwy #252, Thornton, CO 80260', projectIds: ['WP','GW','AS','CH'], logo: '/logos/J_C_Trucking_logo.png',    attachments: [] },
+  { id: 'op-001', name: 'Dominguez',         contact: 'Antonio Dominguez', phone: '720-439-1097', email: 'antonguez3187@gmail.com',     address: '391 S. 31st Ave, Brighton, CO 80601',           projectIds: ['RR','RG'],            logo: '/logos/Dominguez_logo.png',       attachments: [] },
+  { id: 'op-002', name: 'Z&Z Hauling LLC',   contact: '',                  phone: '',             email: '',                            address: 'PO Box 357, Fort Lupton, CO',                   projectIds: ['RR','RG','GE'],       logo: '/logos/Z_Z_Hauling_logo.png',     attachments: [] },
+  { id: 'op-003', name: 'OZ Trucking',       contact: '',                  phone: '720-628-2678', email: 'Jubalin74@gmail.com',         address: '978 S Osceola St, Denver, CO 80219',            projectIds: ['RR','RG','GE'],       logo: '/logos/Oz_Trucking_logo.png',     attachments: [] },
+  { id: 'op-004', name: 'Tecos Trucking',    contact: '',                  phone: '720-692-1945', email: 'tecostrucking@gmail.com',     address: '5557 Troy St, Denver, CO 80239',                projectIds: ['RG','GE'],            logo: '/logos/Tecos_Trucking_logo.png',  attachments: [] },
+  { id: 'op-005', name: 'Garcia Trucking',   contact: '',                  phone: '303-210-9325', email: 'garciatrucking4891@gmail.com', address: '13565 County Rd 2 1/2, Brighton, CO 80603',    projectIds: ['RR','RG','GE'],       logo: '/logos/Garcia_Trucking_logo.png', attachments: [] },
+  { id: 'op-006', name: 'J&C Trucking, LLC', contact: '',                  phone: '720-628-9560', email: '',                            address: '1500 W. Thornton Pkwy #252, Thornton, CO 80260', projectIds: ['RR','RG','GE'],      logo: '/logos/J_C_Trucking_logo.png',    attachments: [] },
 ];
 
 // v15 truck remap — distribution across the 6 real haulers. Legacy `hauler`
 // free-text string updated to match the new haulerId so any UI still reading
 // truck.hauler stays consistent. Type/project/driver pairings preserved.
 const TRUCKS_SEED = [
-  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'WP', haulerId: 'op-001', driverId: 'dr-001' },
-  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'WP', haulerId: 'op-005', driverId: 'dr-002' },
-  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'WP', haulerId: 'op-006', driverId: 'dr-003' },
-  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'WP', haulerId: 'op-001', driverId: 'dr-004' },
-  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-005' },
-  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GW', haulerId: 'op-004', driverId: 'dr-006' },
-  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'GW', haulerId: 'op-006', driverId: 'dr-007' },
-  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'GW', haulerId: 'op-002', driverId: 'dr-001' },
+  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'dr-001' },
+  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'RG', haulerId: 'op-005', driverId: 'dr-002' },
+  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'dr-003' },
+  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'dr-004' },
+  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'dr-005' },
+  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'RG', haulerId: 'op-004', driverId: 'dr-006' },
+  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'dr-007' },
+  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'dr-001' },
   { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-008' },
   { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-009' },
-  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'AS', haulerId: 'op-003', driverId: 'dr-010' },
-  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'AS', haulerId: 'op-001', driverId: 'dr-011' },
-  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'AS', haulerId: 'op-005', driverId: 'dr-008' },
-  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'CH', haulerId: 'op-003', driverId: 'dr-013' },
-  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'CH', haulerId: 'op-004', driverId: 'dr-014' },
+  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'dr-010' },
+  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'GE', haulerId: 'op-001', driverId: 'dr-011' },
+  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'GE', haulerId: 'op-005', driverId: 'dr-008' },
+  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'dr-013' },
+  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GE', haulerId: 'op-004', driverId: 'dr-014' },
   { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
@@ -1080,7 +1084,7 @@ const EMPTY_LOGISTICS = {
 };
 
 const HAUL_REQUESTS_SEED = [
-  { id: 'hreq-001', projectId: 'WP', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [],
+  { id: 'hreq-001', projectId: 'RG', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [],
     pickupLocation:  { name: 'Highline Pit',           address: '14200 Smith Rd, Aurora, CO 80011' },
     dropoffLocation: { name: 'Winter Park job site',   address: '4421 Birch Rd, Winter Park, CO 80482' },
     timing:          { startDate: TODAY_ISO, endDate: '' },
@@ -1089,7 +1093,7 @@ const HAUL_REQUESTS_SEED = [
       dumping: { notes: 'Truck access from south gate; spotter onsite.', equipment: 'Spotter only — no equipment at dump' },
     } },
   { id: 'hreq-002', projectId: 'RR', materialCode: 'EX', volumeCY: 24, requestedAt: '07:42', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
-  { id: 'hreq-003', projectId: 'CH', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-003', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
+  { id: 'hreq-003', projectId: 'GE', materialCode: 'CR', volumeCY: 30, requestedAt: '08:05', status: 'matched',   matchedHaulerId: 'op-003', matchedTruckId: 'tk-611', acceptedByDriver: null,    passedBy: [], notes: 'Spread on north access road.',
     assignments: [
       { truckId: 'tk-611', haulerId: 'op-003', addedAt: 1716230000000,
         days: [{ date: TODAY_ISO, startTime: '08:05', loads: [] }] },
@@ -1101,8 +1105,8 @@ const HAUL_REQUESTS_SEED = [
       loading: { notes: 'Yard hours 5a-3p; show ticket at gate.',  equipment: 'Loader + scale operator' },
       dumping: { notes: 'Tight alley off 13th; dump in NE bay.',   equipment: 'Skid steer to spread' },
     } },
-  { id: 'hreq-004', projectId: 'WP', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
-  { id: 'hreq-005', projectId: 'GW', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '',
+  { id: 'hreq-004', projectId: 'RG', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
+  { id: 'hreq-005', projectId: 'RG', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '',
     assignments: [
       { truckId: 'tk-119', haulerId: 'op-006', addedAt: 1716231000000,
         days: [{ date: TODAY_ISO, startTime: '08:48', loads: [] }] },
@@ -1116,9 +1120,9 @@ const HAUL_REQUESTS_SEED = [
       loading: { notes: 'Excavator pace ~1 load every 6min.', equipment: 'Cat 336 excavator' },
       dumping: { notes: 'Open spoils field; no spotter.',     equipment: 'Bulldozer to grade end of day' },
     } },
-  { id: 'hreq-006', projectId: 'AS', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.', assignments: [], ...EMPTY_LOGISTICS },
-  { id: 'hreq-007', projectId: 'CH', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
-  { id: 'hreq-008', projectId: 'GW', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.',
+  { id: 'hreq-006', projectId: 'GE', materialCode: 'CF', volumeCY: 16, requestedAt: '09:10', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Site opens 09:30.', assignments: [], ...EMPTY_LOGISTICS },
+  { id: 'hreq-007', projectId: 'GE', materialCode: 'CF', volumeCY: 20, requestedAt: '09:25', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
+  { id: 'hreq-008', projectId: 'RG', materialCode: 'CR', volumeCY: 28, requestedAt: '09:50', status: 'completed', matchedHaulerId: 'op-002', matchedTruckId: 'tk-301', acceptedByDriver: 'dr-005', passedBy: [], notes: 'Delivered 11:05.',
     assignments: [
       { truckId: 'tk-301', haulerId: 'op-002', addedAt: 1716220000000,
         days: [{ date: TODAY_ISO, startTime: '09:50', loads: [
@@ -1134,7 +1138,7 @@ const HAUL_REQUESTS_SEED = [
       loading: { notes: 'Standard scale + ticket window.',    equipment: 'Yard loader' },
       dumping: { notes: 'Stage in NE corner; grade tomorrow.', equipment: 'Skid steer' },
     } },
-  { id: 'hreq-009', projectId: 'AS', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
+  { id: 'hreq-009', projectId: 'GE', materialCode: 'CR', volumeCY: 14, requestedAt: '10:02', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-010', projectId: 'RR', materialCode: 'EX', volumeCY: 26, requestedAt: '10:18', status: 'matched',   matchedHaulerId: 'op-002', matchedTruckId: 'tk-155', acceptedByDriver: null,    passedBy: [], notes: 'Stockpile at SW corner.',
     assignments: [
       { truckId: 'tk-155', haulerId: 'op-002', addedAt: 1716233000000,
@@ -1148,63 +1152,63 @@ const HAUL_REQUESTS_SEED = [
 // by the v10 → v11 migration.
 const INVOICES_SEED = [
   // === PAID (5) ===
-  { id: 'inv-9001', haulerId: 'op-001', projectId: 'WP', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes',     status: 'paid',
+  { id: 'inv-9001', haulerId: 'op-001', projectId: 'RG', number: 'INV-3041', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Lake Trail Homes',     status: 'paid',
     createdAt: '2026-05-08T09:12:00Z', sentAt: '2026-05-08T15:40:00Z', paidAt: '2026-05-14T11:20:00Z', paymentRef: 'ACH-44291',
     lineItems: [
       { id: 'li-9001-1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega',   hours: 42.5, rate: 115, amount: 4887.5 },
       { id: 'li-9001-2', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',      hours: 38.0, rate: 115, amount: 4370.0 },
       { id: 'li-9001-3', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski', hours: 41.0, rate: 135, amount: 5535.0 },
     ], loadCount: 184, totalCY: 2760, notes: 'Includes Saturday work on 5/3.' },
-  { id: 'inv-9003', haulerId: 'op-005', projectId: 'WP', number: 'INV-3043', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Lake Trail Homes',     status: 'paid',
+  { id: 'inv-9003', haulerId: 'op-005', projectId: 'RG', number: 'INV-3043', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Lake Trail Homes',     status: 'paid',
     createdAt: '2026-04-22T08:50:00Z', sentAt: '2026-04-22T13:15:00Z', paidAt: '2026-04-30T09:45:00Z', paymentRef: 'ACH-44102',
     lineItems: [
       { id: 'li-9003-1', truckPlate: '212', truckType: 'SD', driverName: 'J. Bui',     hours: 39.5, rate: 115, amount: 4542.5 },
       { id: 'li-9003-2', truckPlate: '503', truckType: 'SD', driverName: 'S. Park',    hours: 32.0, rate: 115, amount: 3680.0 },
     ], loadCount: 142, totalCY: 2130, notes: '' },
-  { id: 'inv-9004', haulerId: 'op-002', projectId: 'GW', number: 'INV-3044', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Avere Construction',   status: 'paid',
+  { id: 'inv-9004', haulerId: 'op-002', projectId: 'RG', number: 'INV-3044', periodStart: '2026-04-15', periodEnd: '2026-04-21', issuedDate: '2026-04-22', billTo: 'Avere Construction',   status: 'paid',
     createdAt: '2026-04-22T09:30:00Z', sentAt: '2026-04-23T10:05:00Z', paidAt: '2026-05-05T14:18:00Z', paymentRef: 'WIRE-2026-0418',
     lineItems: [
       { id: 'li-9004-1', truckPlate: '301', truckType: 'TAN', driverName: 'A. Reyes',  hours: 35.0, rate: 125, amount: 4375.0 },
       { id: 'li-9004-2', truckPlate: '155', truckType: 'TAN', driverName: 'S. Park',   hours: 30.5, rate: 125, amount: 3812.5 },
     ], loadCount: 88, totalCY: 1452, notes: '' },
-  { id: 'inv-9005', haulerId: 'op-006', projectId: 'GW', number: 'INV-3045', periodStart: '2026-04-22', periodEnd: '2026-04-28', issuedDate: '2026-04-29', billTo: 'Avere Construction',   status: 'paid',
+  { id: 'inv-9005', haulerId: 'op-006', projectId: 'RG', number: 'INV-3045', periodStart: '2026-04-22', periodEnd: '2026-04-28', issuedDate: '2026-04-29', billTo: 'Avere Construction',   status: 'paid',
     createdAt: '2026-04-29T10:10:00Z', sentAt: '2026-04-29T16:25:00Z', paidAt: '2026-05-11T08:30:00Z', paymentRef: 'ACH-44188',
     lineItems: [
       { id: 'li-9005-1', truckPlate: '119', truckType: 'ED', driverName: 'C. Yoon',    hours: 41.5, rate: 135, amount: 5602.5 },
       { id: 'li-9005-2', truckPlate: '88',  truckType: 'ED', driverName: 'D. Kowalski',hours: 36.0, rate: 135, amount: 4860.0 },
     ], loadCount: 168, totalCY: 2520, notes: 'Two long days on the south access road.' },
-  { id: 'inv-9006', haulerId: 'op-003', projectId: 'CH', number: 'INV-3046', periodStart: '2026-04-29', periodEnd: '2026-05-05', issuedDate: '2026-05-06', billTo: 'Pinnacle Construction', status: 'paid',
+  { id: 'inv-9006', haulerId: 'op-003', projectId: 'GE', number: 'INV-3046', periodStart: '2026-04-29', periodEnd: '2026-05-05', issuedDate: '2026-05-06', billTo: 'Pinnacle Construction', status: 'paid',
     createdAt: '2026-05-06T08:20:00Z', sentAt: '2026-05-06T11:40:00Z', paidAt: '2026-05-15T10:05:00Z', paymentRef: 'CHK-7733',
     lineItems: [
       { id: 'li-9006-1', truckPlate: '611', truckType: 'ED', driverName: 'P. Larsen',  hours: 38.5, rate: 135, amount: 5197.5 },
     ], loadCount: 72, totalCY: 1080, notes: '' },
 
   // === SENT (4) — 2 recent, 2 overdue (>30d since sentAt vs TODAY 2026-05-19) ===
-  { id: 'inv-9002', haulerId: 'op-002', projectId: 'GW', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction',   status: 'sent',
+  { id: 'inv-9002', haulerId: 'op-002', projectId: 'RG', number: 'INV-3042', periodStart: '2026-05-01', periodEnd: '2026-05-07', issuedDate: '2026-05-08', billTo: 'Avere Construction',   status: 'sent',
     createdAt: '2026-05-08T10:00:00Z', sentAt: '2026-05-08T15:55:00Z',
     lineItems: [
       { id: 'li-9002-1', truckPlate: '301', truckType: 'TAN', driverName: 'A. Reyes',  hours: 36.0, rate: 125, amount: 4500.0 },
       { id: 'li-9002-2', truckPlate: '318', truckType: 'SD',  driverName: 'T. Hall',   hours: 39.5, rate: 115, amount: 4542.5 },
     ], loadCount: 96, totalCY: 1488, notes: '' },
-  { id: 'inv-9007', haulerId: 'op-004', projectId: 'CH', number: 'INV-3047', periodStart: '2026-05-06', periodEnd: '2026-05-12', issuedDate: '2026-05-13', billTo: 'Pinnacle Construction', status: 'sent',
+  { id: 'inv-9007', haulerId: 'op-004', projectId: 'GE', number: 'INV-3047', periodStart: '2026-05-06', periodEnd: '2026-05-12', issuedDate: '2026-05-13', billTo: 'Pinnacle Construction', status: 'sent',
     createdAt: '2026-05-13T08:45:00Z', sentAt: '2026-05-13T14:10:00Z',
     lineItems: [
       { id: 'li-9007-1', truckPlate: '612', truckType: 'SD', driverName: 'N. Cabrera', hours: 40.0, rate: 115, amount: 4600.0 },
     ], loadCount: 78, totalCY: 1170, notes: 'Spread crew worked Saturday 5/9.' },
   // Overdue (sentAt > 30 days before TODAY_ISO = 2026-05-19)
-  { id: 'inv-9008', haulerId: 'op-002', projectId: 'GW', number: 'INV-3048', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-08', billTo: 'Avere Construction',   status: 'sent',
+  { id: 'inv-9008', haulerId: 'op-002', projectId: 'RG', number: 'INV-3048', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-08', billTo: 'Avere Construction',   status: 'sent',
     createdAt: '2026-04-08T09:00:00Z', sentAt: '2026-04-08T16:30:00Z',
     lineItems: [
       { id: 'li-9008-1', truckPlate: '220', truckType: 'SD', driverName: 'M. Ortega',  hours: 37.0, rate: 115, amount: 4255.0 },
     ], loadCount: 64, totalCY: 960, notes: 'GC asked for net-45 terms.' },
-  { id: 'inv-9009', haulerId: 'op-001', projectId: 'AS', number: 'INV-3049', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-09', billTo: 'Heritage Builders',     status: 'sent',
+  { id: 'inv-9009', haulerId: 'op-001', projectId: 'GE', number: 'INV-3049', periodStart: '2026-04-01', periodEnd: '2026-04-07', issuedDate: '2026-04-09', billTo: 'Heritage Builders',     status: 'sent',
     createdAt: '2026-04-09T10:30:00Z', sentAt: '2026-04-09T15:00:00Z',
     lineItems: [
       { id: 'li-9009-1', truckPlate: '502', truckType: 'BD', driverName: 'F. Okafor',  hours: 34.5, rate: 145, amount: 5002.5 },
     ], loadCount: 58, totalCY: 1160, notes: '' },
 
   // === DRAFT (3) — no sentAt/paidAt ===
-  { id: 'inv-9010', haulerId: 'op-001', projectId: 'WP', number: 'INV-3050', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-15', billTo: 'Lake Trail Homes',     status: 'draft',
+  { id: 'inv-9010', haulerId: 'op-001', projectId: 'RG', number: 'INV-3050', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-15', billTo: 'Lake Trail Homes',     status: 'draft',
     createdAt: '2026-05-15T08:10:00Z',
     lineItems: [
       { id: 'li-9010-1', truckPlate: '447', truckType: 'SD', driverName: 'M. Ortega',   hours: 41.0, rate: 115, amount: 4715.0 },
@@ -1216,14 +1220,14 @@ const INVOICES_SEED = [
       { id: 'li-9011-1', truckPlate: '155', truckType: 'TAN', driverName: 'S. Park',      hours: 39.5, rate: 125, amount: 4937.5 },
       { id: 'li-9011-2', truckPlate: '156', truckType: 'TAN', driverName: 'L. Velazquez', hours: 35.0, rate: 125, amount: 4375.0 },
     ], loadCount: 102, totalCY: 1530, notes: 'Pending GC review of stockpile location.' },
-  { id: 'inv-9012', haulerId: 'op-005', projectId: 'AS', number: 'INV-3052', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-17', billTo: 'Heritage Builders',    status: 'draft',
+  { id: 'inv-9012', haulerId: 'op-005', projectId: 'GE', number: 'INV-3052', periodStart: '2026-05-08', periodEnd: '2026-05-14', issuedDate: '2026-05-17', billTo: 'Heritage Builders',    status: 'draft',
     createdAt: '2026-05-17T10:45:00Z',
     lineItems: [
       { id: 'li-9012-1', truckPlate: '503', truckType: 'SD', driverName: 'S. Park',     hours: 33.0, rate: 115, amount: 3795.0 },
     ], loadCount: 56, totalCY: 840, notes: '' },
 
   // === VOID (1) ===
-  { id: 'inv-9013', haulerId: 'op-004', projectId: 'GW', number: 'INV-3038', periodStart: '2026-04-08', periodEnd: '2026-04-14', issuedDate: '2026-04-15', billTo: 'Avere Construction',   status: 'void',
+  { id: 'inv-9013', haulerId: 'op-004', projectId: 'RG', number: 'INV-3038', periodStart: '2026-04-08', periodEnd: '2026-04-14', issuedDate: '2026-04-15', billTo: 'Avere Construction',   status: 'void',
     createdAt: '2026-04-15T09:00:00Z',
     lineItems: [
       { id: 'li-9013-1', truckPlate: '318', truckType: 'SD', driverName: 'T. Hall',     hours: 18.0, rate: 115, amount: 2070.0 },
@@ -1232,181 +1236,181 @@ const INVOICES_SEED = [
 
 const HOURS_SEED = [
   // Yesterday's submitted shifts (drivers start fresh today; click Clock In to test live timer)
-  { id: 'hr-1',  driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-2',  driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:35', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-3',  driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:15', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-4',  driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', clockIn: '06:00', clockOut: '14:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-5',  driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '07:00', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-6',  driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '06:45', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-7',  driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', clockIn: '07:10', clockOut: '15:40', breakMin: 30, status: 'pending', date: YESTERDAY_ISO },
+  { id: 'hr-1',  driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-2',  driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', clockIn: '06:35', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-3',  driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', clockIn: '06:15', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-4',  driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', clockIn: '06:00', clockOut: '14:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-5',  driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', clockIn: '07:00', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-6',  driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', clockIn: '06:45', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-7',  driverId: 'dr-007', truckId: 'tk-119', projectId: 'RG', clockIn: '07:10', clockOut: '15:40', breakMin: 30, status: 'pending', date: YESTERDAY_ISO },
   { id: 'hr-8',  driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:45', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
   { id: 'hr-9',  driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:55', clockOut: '14:55', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-10', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:25', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-11', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-12', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:20', clockOut: '14:45', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-13', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-14', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-15', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '06:50', clockOut: '14:50', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-16', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '07:00', clockOut: '15:15', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-10', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', clockIn: '06:25', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-11', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', clockIn: '06:30', clockOut: '15:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-12', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:20', clockOut: '14:45', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-13', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-14', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-15', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', clockIn: '06:50', clockOut: '14:50', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-16', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', clockIn: '07:00', clockOut: '15:15', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
   { id: 'hr-17', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:30', clockOut: '14:30', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-18', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-19', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
-  { id: 'hr-20', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '06:55', clockOut: '15:25', breakMin: 30, status: 'pending', date: YESTERDAY_ISO },
+  { id: 'hr-18', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-19', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', clockIn: '06:40', clockOut: '15:10', breakMin: 30, status: 'closed',  date: YESTERDAY_ISO },
+  { id: 'hr-20', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', clockIn: '06:55', clockOut: '15:25', breakMin: 30, status: 'pending', date: YESTERDAY_ISO },
 
   // Today's already-clocked-out short hauls (early-morning runs that wrapped before NOW)
-  { id: 'hr-21', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', clockIn: '05:30', clockOut: '09:15', breakMin: 15, status: 'closed',  date: TODAY_ISO },
-  { id: 'hr-22', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '05:45', clockOut: '10:00', breakMin: 15, status: 'closed',  date: TODAY_ISO },
+  { id: 'hr-21', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', clockIn: '05:30', clockOut: '09:15', breakMin: 15, status: 'closed',  date: TODAY_ISO },
+  { id: 'hr-22', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', clockIn: '05:45', clockOut: '10:00', breakMin: 15, status: 'closed',  date: TODAY_ISO },
   { id: 'hr-23', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:00', clockOut: '10:30', breakMin: 30, status: 'pending', date: TODAY_ISO },
-  { id: 'hr-24', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '05:50', clockOut: '10:45', breakMin: 30, status: 'closed',  date: TODAY_ISO },
+  { id: 'hr-24', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', clockIn: '05:50', clockOut: '10:45', breakMin: 30, status: 'closed',  date: TODAY_ISO },
 
   // Currently-on-the-clock shifts as of NOW — drives Live Trucks KPI,
   // Live Truck Activity panel, in-flight load counts, avg cycle math.
-  { id: 'hr-25', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:20', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
-  { id: 'hr-26', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:35', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
-  { id: 'hr-27', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:30', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
-  { id: 'hr-28', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '06:50', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
-  { id: 'hr-29', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '07:00', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-25', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:20', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-26', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', clockIn: '06:35', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-27', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', clockIn: '06:30', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-28', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', clockIn: '06:50', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-29', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', clockIn: '07:00', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
   { id: 'hr-30', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:45', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
-  { id: 'hr-30b',driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:55', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-30b',driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', clockIn: '06:55', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
 
   // Multi-day hours — days 2-6 relative to TODAY_ISO. Powers the Hours sparkline.
-  { id: 'hr-31', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '14:45', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
-  { id: 'hr-32', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:20', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
-  { id: 'hr-33', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:25', clockOut: '15:10', breakMin: 30, status: 'closed', date: isoDaysAgo(3) },
-  { id: 'hr-34', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '06:50', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(3) },
+  { id: 'hr-31', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:30', clockOut: '14:45', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
+  { id: 'hr-32', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', clockIn: '06:20', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
+  { id: 'hr-33', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:25', clockOut: '15:10', breakMin: 30, status: 'closed', date: isoDaysAgo(3) },
+  { id: 'hr-34', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', clockIn: '06:50', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(3) },
   { id: 'hr-35', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:40', clockOut: '14:55', breakMin: 30, status: 'closed', date: isoDaysAgo(3) },
-  { id: 'hr-36', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '07:00', clockOut: '14:30', breakMin: 30, status: 'closed', date: isoDaysAgo(4) },
-  { id: 'hr-37', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
-  { id: 'hr-38', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
-  { id: 'hr-39', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
-  { id: 'hr-40', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:45', clockOut: '15:15', breakMin: 30, status: 'closed', date: isoDaysAgo(6) },
+  { id: 'hr-36', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', clockIn: '07:00', clockOut: '14:30', breakMin: 30, status: 'closed', date: isoDaysAgo(4) },
+  { id: 'hr-37', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
+  { id: 'hr-38', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', clockIn: '06:35', clockOut: '15:20', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
+  { id: 'hr-39', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', clockIn: '06:30', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(5) },
+  { id: 'hr-40', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', clockIn: '06:45', clockOut: '15:15', breakMin: 30, status: 'closed', date: isoDaysAgo(6) },
 ];
 
 const LOADS_SEED = [
   // Yesterday's loads (10 entries spread across drivers — for reporting context)
-  { id: 'ld-1001', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44721', time: '07:14', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1002', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 13, ticketNo: 'T-44731', time: '08:02', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1006', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44735', time: '08:11', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1010', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 20, ticketNo: 'T-44708', time: '06:55', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1016', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 26, ticketNo: 'T-44715', time: '07:25', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1019', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 10, ticketNo: 'G-22011', time: '07:48', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1001', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44721', time: '07:14', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1002', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 13, ticketNo: 'T-44731', time: '08:02', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1006', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44735', time: '08:11', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1010', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 20, ticketNo: 'T-44708', time: '06:55', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1016', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 26, ticketNo: 'T-44715', time: '07:25', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1019', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 10, ticketNo: 'G-22011', time: '07:48', date: YESTERDAY_ISO, status: 'approved' },
   { id: 'ld-1025', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 9,  ticketNo: 'R-1099',  time: '07:22', date: YESTERDAY_ISO, status: 'approved' },
   { id: 'ld-1027', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', material: 'EX', cy: 13, ticketNo: 'R-1102', time: '07:42', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1028', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 20, ticketNo: 'A-9911', time: '07:08', date: YESTERDAY_ISO, status: 'approved' },
-  { id: 'ld-1051', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 22, ticketNo: 'C-7701', time: '07:25', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1028', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 20, ticketNo: 'A-9911', time: '07:08', date: YESTERDAY_ISO, status: 'approved' },
+  { id: 'ld-1051', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 22, ticketNo: 'C-7701', time: '07:25', date: YESTERDAY_ISO, status: 'approved' },
 
   // Today's loads
-  { id: 'ld-1003', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 14, ticketNo: 'T-44742', time: '07:51', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1004', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44760', time: '08:38', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1005', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 13, ticketNo: 'T-44781', time: '09:22', date: TODAY_ISO, status: 'pending' },
-  { id: 'ld-1031', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44801', time: '10:08', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1003', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 14, ticketNo: 'T-44742', time: '07:51', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1004', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44760', time: '08:38', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1005', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 13, ticketNo: 'T-44781', time: '09:22', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1031', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 15, ticketNo: 'T-44801', time: '10:08', date: TODAY_ISO, status: 'pending' },
   // dr-001 also has tk-220 (multi-truck) — today's loads on tk-220 / GW
-  { id: 'ld-1101', driverId: 'dr-001', truckId: 'tk-220', projectId: 'GW', material: 'EX', cy: 18, ticketNo: 'G-22101', time: '07:35', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1102', driverId: 'dr-001', truckId: 'tk-220', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-22108', time: '08:22', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1101', driverId: 'dr-001', truckId: 'tk-220', projectId: 'RG', material: 'EX', cy: 18, ticketNo: 'G-22101', time: '07:35', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1102', driverId: 'dr-001', truckId: 'tk-220', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-22108', time: '08:22', date: TODAY_ISO, status: 'approved' },
 
-  { id: 'ld-1007', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44755', time: '09:05', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1008', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 14, ticketNo: 'T-44769', time: '09:47', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1009', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 17, ticketNo: 'T-44790', time: '10:35', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1007', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44755', time: '09:05', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1008', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 14, ticketNo: 'T-44769', time: '09:47', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1009', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 17, ticketNo: 'T-44790', time: '10:35', date: TODAY_ISO, status: 'pending' },
 
-  { id: 'ld-1011', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 19, ticketNo: 'T-44719', time: '07:40', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1012', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 21, ticketNo: 'T-44732', time: '08:24', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1013', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 19, ticketNo: 'T-44749', time: '09:08', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1014', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 19, ticketNo: 'T-44766', time: '09:52', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1015', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 18, ticketNo: 'T-44784', time: '10:40', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1011', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 19, ticketNo: 'T-44719', time: '07:40', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1012', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 21, ticketNo: 'T-44732', time: '08:24', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1013', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 19, ticketNo: 'T-44749', time: '09:08', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1014', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 19, ticketNo: 'T-44766', time: '09:52', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1015', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 18, ticketNo: 'T-44784', time: '10:40', date: TODAY_ISO, status: 'approved' },
 
-  { id: 'ld-1017', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 25, ticketNo: 'T-44740', time: '08:30', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1018', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 25, ticketNo: 'T-44763', time: '09:22', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1017', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 25, ticketNo: 'T-44740', time: '08:30', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1018', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 25, ticketNo: 'T-44763', time: '09:22', date: TODAY_ISO, status: 'approved' },
 
-  { id: 'ld-1020', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 9,  ticketNo: 'G-22025', time: '08:36', date: TODAY_ISO, status: 'pending' },
-  { id: 'ld-1021', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-22009', time: '07:32', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1022', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 14, ticketNo: 'G-22020', time: '08:15', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1023', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-22033', time: '09:01', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1024', driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-22041', time: '09:25', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1020', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 9,  ticketNo: 'G-22025', time: '08:36', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1021', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-22009', time: '07:32', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1022', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 14, ticketNo: 'G-22020', time: '08:15', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1023', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-22033', time: '09:01', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1024', driverId: 'dr-007', truckId: 'tk-119', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-22041', time: '09:25', date: TODAY_ISO, status: 'pending' },
 
   // dr-008 has both tk-155 (RR) and tk-503 (AS) today
   { id: 'ld-1026', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 13, ticketNo: 'R-1105', time: '08:00', date: TODAY_ISO, status: 'approved' },
   { id: 'ld-1043', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 11, ticketNo: 'R-1112', time: '08:42', date: TODAY_ISO, status: 'approved' },
   { id: 'ld-1044', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 12, ticketNo: 'R-1120', time: '09:20', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1201', driverId: 'dr-008', truckId: 'tk-503', projectId: 'AS', material: 'CR', cy: 21, ticketNo: 'A-9981', time: '07:18', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1202', driverId: 'dr-008', truckId: 'tk-503', projectId: 'AS', material: 'CR', cy: 22, ticketNo: 'A-9990', time: '08:05', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1201', driverId: 'dr-008', truckId: 'tk-503', projectId: 'GE', material: 'CR', cy: 21, ticketNo: 'A-9981', time: '07:18', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1202', driverId: 'dr-008', truckId: 'tk-503', projectId: 'GE', material: 'CR', cy: 22, ticketNo: 'A-9990', time: '08:05', date: TODAY_ISO, status: 'approved' },
 
-  { id: 'ld-1029', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 21, ticketNo: 'A-9925', time: '08:00', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1030', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', material: 'CR', cy: 24, ticketNo: 'A-9919', time: '07:33', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1032', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44812', time: '11:24', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1033', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44826', time: '12:10', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1034', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 20, ticketNo: 'T-44805', time: '11:18', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1035', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 25, ticketNo: 'T-44818', time: '11:42', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1036', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 26, ticketNo: 'T-44832', time: '12:30', date: TODAY_ISO, status: 'pending' },
-  { id: 'ld-1037', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 11, ticketNo: 'G-22048', time: '09:40', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1038', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 10, ticketNo: 'G-22055', time: '10:24', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1039', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 16, ticketNo: 'G-22061', time: '10:02', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1040', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 15, ticketNo: 'G-22070', time: '10:48', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1041', driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', material: 'EX', cy: 18, ticketNo: 'G-22075', time: '10:11', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1042', driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', material: 'EX', cy: 16, ticketNo: 'G-22084', time: '10:55', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1029', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 21, ticketNo: 'A-9925', time: '08:00', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1030', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', material: 'CR', cy: 24, ticketNo: 'A-9919', time: '07:33', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1032', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 15, ticketNo: 'T-44812', time: '11:24', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1033', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44826', time: '12:10', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1034', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 20, ticketNo: 'T-44805', time: '11:18', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1035', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 25, ticketNo: 'T-44818', time: '11:42', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1036', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 26, ticketNo: 'T-44832', time: '12:30', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1037', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 11, ticketNo: 'G-22048', time: '09:40', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1038', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 10, ticketNo: 'G-22055', time: '10:24', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1039', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 16, ticketNo: 'G-22061', time: '10:02', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1040', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 15, ticketNo: 'G-22070', time: '10:48', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1041', driverId: 'dr-007', truckId: 'tk-119', projectId: 'RG', material: 'EX', cy: 18, ticketNo: 'G-22075', time: '10:11', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1042', driverId: 'dr-007', truckId: 'tk-119', projectId: 'RG', material: 'EX', cy: 16, ticketNo: 'G-22084', time: '10:55', date: TODAY_ISO, status: 'pending' },
   { id: 'ld-1045', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', material: 'EX', cy: 14, ticketNo: 'R-1117', time: '08:28', date: TODAY_ISO, status: 'approved' },
   { id: 'ld-1046', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', material: 'EX', cy: 13, ticketNo: 'R-1128', time: '09:12', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1047', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 22, ticketNo: 'A-9932', time: '08:48', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1048', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 20, ticketNo: 'A-9945', time: '09:35', date: TODAY_ISO, status: 'pending' },
-  { id: 'ld-1049', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', material: 'CR', cy: 25, ticketNo: 'A-9938', time: '08:22', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1050', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', material: 'CR', cy: 23, ticketNo: 'A-9952', time: '09:18', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1052', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 21, ticketNo: 'C-7708', time: '08:14', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1053', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 23, ticketNo: 'C-7716', time: '09:02', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1054', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 22, ticketNo: 'C-7724', time: '09:50', date: TODAY_ISO, status: 'pending' },
-  { id: 'ld-1055', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7705', time: '07:50', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1056', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 16, ticketNo: 'C-7712', time: '08:35', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1057', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CR', cy: 14, ticketNo: 'C-7721', time: '09:24', date: TODAY_ISO, status: 'approved' },
-  { id: 'ld-1058', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CR', cy: 15, ticketNo: 'C-7730', time: '10:08', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1047', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 22, ticketNo: 'A-9932', time: '08:48', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1048', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 20, ticketNo: 'A-9945', time: '09:35', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1049', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', material: 'CR', cy: 25, ticketNo: 'A-9938', time: '08:22', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1050', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', material: 'CR', cy: 23, ticketNo: 'A-9952', time: '09:18', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1052', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 21, ticketNo: 'C-7708', time: '08:14', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1053', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 23, ticketNo: 'C-7716', time: '09:02', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1054', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 22, ticketNo: 'C-7724', time: '09:50', date: TODAY_ISO, status: 'pending' },
+  { id: 'ld-1055', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7705', time: '07:50', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1056', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 16, ticketNo: 'C-7712', time: '08:35', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1057', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CR', cy: 14, ticketNo: 'C-7721', time: '09:24', date: TODAY_ISO, status: 'approved' },
+  { id: 'ld-1058', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CR', cy: 15, ticketNo: 'C-7730', time: '10:08', date: TODAY_ISO, status: 'pending' },
 
   // ===== 7-day variance — days 2-6 relative to TODAY_ISO. Drives the bar chart + sparklines. =====
   // Day 2 (5 loads)
-  { id: 'ld-2001', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44601', time: '07:20', date: isoDaysAgo(2), status: 'approved' },
-  { id: 'ld-2002', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 18, ticketNo: 'T-44612', time: '08:15', date: isoDaysAgo(2), status: 'approved' },
-  { id: 'ld-2003', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-21901', time: '08:45', date: isoDaysAgo(2), status: 'approved' },
+  { id: 'ld-2001', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 15, ticketNo: 'T-44601', time: '07:20', date: isoDaysAgo(2), status: 'approved' },
+  { id: 'ld-2002', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 18, ticketNo: 'T-44612', time: '08:15', date: isoDaysAgo(2), status: 'approved' },
+  { id: 'ld-2003', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-21901', time: '08:45', date: isoDaysAgo(2), status: 'approved' },
   { id: 'ld-2004', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 12, ticketNo: 'R-1075',  time: '09:30', date: isoDaysAgo(2), status: 'approved' },
-  { id: 'ld-2005', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 22, ticketNo: 'C-7650',  time: '10:05', date: isoDaysAgo(2), status: 'approved' },
+  { id: 'ld-2005', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 22, ticketNo: 'C-7650',  time: '10:05', date: isoDaysAgo(2), status: 'approved' },
 
   // Day 3 (8 loads)
-  { id: 'ld-2006', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44551', time: '07:08', date: isoDaysAgo(3), status: 'approved' },
-  { id: 'ld-2007', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44562', time: '07:55', date: isoDaysAgo(3), status: 'approved' },
-  { id: 'ld-2008', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 19, ticketNo: 'T-44574', time: '08:40', date: isoDaysAgo(3), status: 'approved' },
-  { id: 'ld-2009', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 24, ticketNo: 'T-44585', time: '09:18', date: isoDaysAgo(3), status: 'approved' },
-  { id: 'ld-2010', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 16, ticketNo: 'G-21855', time: '08:22', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2006', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44551', time: '07:08', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2007', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 15, ticketNo: 'T-44562', time: '07:55', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2008', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 19, ticketNo: 'T-44574', time: '08:40', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2009', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 24, ticketNo: 'T-44585', time: '09:18', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2010', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 16, ticketNo: 'G-21855', time: '08:22', date: isoDaysAgo(3), status: 'approved' },
   { id: 'ld-2011', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 13, ticketNo: 'R-1058',  time: '09:00', date: isoDaysAgo(3), status: 'approved' },
   { id: 'ld-2012', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', material: 'EX', cy: 14, ticketNo: 'R-1063',  time: '09:45', date: isoDaysAgo(3), status: 'approved' },
-  { id: 'ld-2013', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7611',  time: '10:20', date: isoDaysAgo(3), status: 'approved' },
+  { id: 'ld-2013', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7611',  time: '10:20', date: isoDaysAgo(3), status: 'approved' },
 
   // Day 4 (4 loads — quiet day)
-  { id: 'ld-2014', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 14, ticketNo: 'T-44511', time: '07:32', date: isoDaysAgo(4), status: 'approved' },
-  { id: 'ld-2015', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 10, ticketNo: 'G-21801', time: '08:05', date: isoDaysAgo(4), status: 'approved' },
-  { id: 'ld-2016', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 21, ticketNo: 'A-9855',  time: '08:50', date: isoDaysAgo(4), status: 'approved' },
-  { id: 'ld-2017', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 20, ticketNo: 'C-7588',  time: '09:35', date: isoDaysAgo(4), status: 'approved' },
+  { id: 'ld-2014', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 14, ticketNo: 'T-44511', time: '07:32', date: isoDaysAgo(4), status: 'approved' },
+  { id: 'ld-2015', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 10, ticketNo: 'G-21801', time: '08:05', date: isoDaysAgo(4), status: 'approved' },
+  { id: 'ld-2016', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 21, ticketNo: 'A-9855',  time: '08:50', date: isoDaysAgo(4), status: 'approved' },
+  { id: 'ld-2017', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 20, ticketNo: 'C-7588',  time: '09:35', date: isoDaysAgo(4), status: 'approved' },
 
   // Day 5 (7 loads)
-  { id: 'ld-2018', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 16, ticketNo: 'T-44472', time: '07:14', date: isoDaysAgo(5), status: 'approved' },
-  { id: 'ld-2019', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', material: 'CF', cy: 14, ticketNo: 'T-44484', time: '08:01', date: isoDaysAgo(5), status: 'approved' },
-  { id: 'ld-2020', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 20, ticketNo: 'T-44495', time: '08:45', date: isoDaysAgo(5), status: 'approved' },
-  { id: 'ld-2021', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', material: 'EX', cy: 17, ticketNo: 'G-21755', time: '09:08', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2018', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 16, ticketNo: 'T-44472', time: '07:14', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2019', driverId: 'dr-002', truckId: 'tk-212', projectId: 'RG', material: 'CF', cy: 14, ticketNo: 'T-44484', time: '08:01', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2020', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 20, ticketNo: 'T-44495', time: '08:45', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2021', driverId: 'dr-006', truckId: 'tk-318', projectId: 'RG', material: 'EX', cy: 17, ticketNo: 'G-21755', time: '09:08', date: isoDaysAgo(5), status: 'approved' },
   { id: 'ld-2022', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 12, ticketNo: 'R-1042',  time: '09:32', date: isoDaysAgo(5), status: 'approved' },
-  { id: 'ld-2023', driverId: 'dr-011', truckId: 'tk-502', projectId: 'AS', material: 'CR', cy: 23, ticketNo: 'A-9821',  time: '08:18', date: isoDaysAgo(5), status: 'approved' },
-  { id: 'ld-2024', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CR', cy: 14, ticketNo: 'C-7548',  time: '10:02', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2023', driverId: 'dr-011', truckId: 'tk-502', projectId: 'GE', material: 'CR', cy: 23, ticketNo: 'A-9821',  time: '08:18', date: isoDaysAgo(5), status: 'approved' },
+  { id: 'ld-2024', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CR', cy: 14, ticketNo: 'C-7548',  time: '10:02', date: isoDaysAgo(5), status: 'approved' },
 
   // Day 6 (6 loads)
-  { id: 'ld-2025', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 15, ticketNo: 'T-44433', time: '07:25', date: isoDaysAgo(6), status: 'approved' },
-  { id: 'ld-2026', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', material: 'TS', cy: 19, ticketNo: 'T-44445', time: '08:14', date: isoDaysAgo(6), status: 'approved' },
-  { id: 'ld-2027', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', material: 'CR', cy: 11, ticketNo: 'G-21701', time: '08:42', date: isoDaysAgo(6), status: 'approved' },
+  { id: 'ld-2025', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 15, ticketNo: 'T-44433', time: '07:25', date: isoDaysAgo(6), status: 'approved' },
+  { id: 'ld-2026', driverId: 'dr-003', truckId: 'tk-088', projectId: 'RG', material: 'TS', cy: 19, ticketNo: 'T-44445', time: '08:14', date: isoDaysAgo(6), status: 'approved' },
+  { id: 'ld-2027', driverId: 'dr-005', truckId: 'tk-301', projectId: 'RG', material: 'CR', cy: 11, ticketNo: 'G-21701', time: '08:42', date: isoDaysAgo(6), status: 'approved' },
   { id: 'ld-2028', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', material: 'EX', cy: 13, ticketNo: 'R-1025',  time: '09:00', date: isoDaysAgo(6), status: 'approved' },
-  { id: 'ld-2029', driverId: 'dr-010', truckId: 'tk-501', projectId: 'AS', material: 'CR', cy: 22, ticketNo: 'A-9788',  time: '09:24', date: isoDaysAgo(6), status: 'approved' },
-  { id: 'ld-2030', driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', material: 'EX', cy: 21, ticketNo: 'C-7505',  time: '09:48', date: isoDaysAgo(6), status: 'approved' },
+  { id: 'ld-2029', driverId: 'dr-010', truckId: 'tk-501', projectId: 'GE', material: 'CR', cy: 22, ticketNo: 'A-9788',  time: '09:24', date: isoDaysAgo(6), status: 'approved' },
+  { id: 'ld-2030', driverId: 'dr-013', truckId: 'tk-611', projectId: 'GE', material: 'EX', cy: 21, ticketNo: 'C-7505',  time: '09:48', date: isoDaysAgo(6), status: 'approved' },
 
   // Day 7 (5 loads — completes the 7-day window oldest → newest)
-  { id: 'ld-2031', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', material: 'CF', cy: 14, ticketNo: 'T-44388', time: '07:18', date: isoDaysAgo(7), status: 'approved' },
-  { id: 'ld-2032', driverId: 'dr-004', truckId: 'tk-092', projectId: 'WP', material: 'CF', cy: 25, ticketNo: 'T-44401', time: '08:05', date: isoDaysAgo(7), status: 'approved' },
-  { id: 'ld-2033', driverId: 'dr-007', truckId: 'tk-119', projectId: 'GW', material: 'EX', cy: 18, ticketNo: 'G-21652', time: '08:35', date: isoDaysAgo(7), status: 'approved' },
+  { id: 'ld-2031', driverId: 'dr-001', truckId: 'tk-447', projectId: 'RG', material: 'CF', cy: 14, ticketNo: 'T-44388', time: '07:18', date: isoDaysAgo(7), status: 'approved' },
+  { id: 'ld-2032', driverId: 'dr-004', truckId: 'tk-092', projectId: 'RG', material: 'CF', cy: 25, ticketNo: 'T-44401', time: '08:05', date: isoDaysAgo(7), status: 'approved' },
+  { id: 'ld-2033', driverId: 'dr-007', truckId: 'tk-119', projectId: 'RG', material: 'EX', cy: 18, ticketNo: 'G-21652', time: '08:35', date: isoDaysAgo(7), status: 'approved' },
   { id: 'ld-2034', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', material: 'EX', cy: 14, ticketNo: 'R-1011',  time: '09:10', date: isoDaysAgo(7), status: 'approved' },
-  { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
+  { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 15;
+const DB_SCHEMA_VERSION = 16;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -1416,8 +1420,13 @@ const DB_SCHEMA_VERSION = 15;
 // edited via EditableText could be lazy-geocoded via fetch to Nominatim, but
 // for the demo the pre-seed covers every visible point.
 const GEOCODE_SEED = {
-  // Seed project addresses (PROJECTS_SEED.address values, verbatim)
+  // Seed project addresses (PROJECTS_SEED.address values, verbatim).
+  // v16 adds RG (1105 Rogers Street, Golden) and GE (15185 W 68th Pl, Arvada).
+  // Older WP/CH/GW/AS project addresses are retained — harmless and the
+  // haul-request seed's pickup/dropoff strings still reference some of them.
   '5800 Federal Blvd, Denver, CO':                  { lat: 39.7392, lng: -105.0250 },
+  '1105 Rogers Street, Golden, CO':                 { lat: 39.7555, lng: -105.2200 },
+  '15185 W 68th Pl, Arvada, CO 80007':              { lat: 39.8210, lng: -105.1540 },
   '4421 Birch Rd, Winter Park, CO':                 { lat: 39.8869, lng: -105.7625 },
   '1240 E 13th Ave, Denver, CO':                    { lat: 39.7406, lng: -104.9783 },
   '88 Greenway Blvd, Boulder, CO':                  { lat: 40.0150, lng: -105.2705 },
@@ -1762,6 +1771,27 @@ function hydrateDb(raw) {
         });
       }
     } catch (e) { /* if anything throws during v15 remap, fall through with the v14 shape */ }
+    // v15 → v16: replace projects entirely with the new 3-project real seed.
+    // Reassign downstream FKs: any stored 'WP'/'GW' → 'RG', 'CH'/'AS' → 'GE'.
+    // RR refs stay. Hauler `projectIds` arrays are remapped + deduplicated
+    // (same hauler may have had ['WP','GW'] which both → 'RG'). Wrapped in
+    // try/catch so any v16 throw falls through to the v15 shape rather than
+    // blanking state.
+    try {
+      const PROJECT_ID_REMAP = { 'WP': 'RG', 'GW': 'RG', 'CH': 'GE', 'AS': 'GE' };
+      const pmap = (id) => (id && PROJECT_ID_REMAP[id]) || id;
+      const remapArr = (arr) => Array.isArray(arr) ? [...new Set(arr.map(pmap))] : arr;
+      out.projects = PROJECTS_SEED;
+      if (Array.isArray(out.haulers)) {
+        out.haulers = out.haulers.map(h => (h && Array.isArray(h.projectIds)) ? { ...h, projectIds: remapArr(h.projectIds) } : h);
+      }
+      const remapProjectId = (row) => (row && row.projectId && pmap(row.projectId) !== row.projectId) ? { ...row, projectId: pmap(row.projectId) } : row;
+      if (Array.isArray(out.trucks))       out.trucks       = out.trucks.map(remapProjectId);
+      if (Array.isArray(out.hours))        out.hours        = out.hours.map(remapProjectId);
+      if (Array.isArray(out.loads))        out.loads        = out.loads.map(remapProjectId);
+      if (Array.isArray(out.haulRequests)) out.haulRequests = out.haulRequests.map(remapProjectId);
+      if (Array.isArray(out.invoices))     out.invoices     = out.invoices.map(remapProjectId);
+    } catch (e) { /* fall through with v15 shape */ }
     return out;
   } catch (e) {
     return seed;
@@ -2186,7 +2216,12 @@ function AdminProjects({ db, setDb, navigate }) {
       return m ? m.label : mc;
     });
     const materialType = matLabels[0] || 'Mixed';
-    const haulType = matCodes.includes('EX') ? 'Export'
+    // v16: project carries an explicit `haulType` (NEEDS=import, HAS=export).
+    // Prefer that when set; fall back to the material-code derivation for
+    // legacy / pre-v16 rows that never had the field stamped.
+    const haulType = p.haulType === 'NEEDS' ? 'Import'
+      : p.haulType === 'HAS' ? 'Export'
+      : matCodes.includes('EX') ? 'Export'
       : matCodes.includes('CF') ? 'Import'
       : matCodes.includes('CR') ? 'Aggregate Import'
       : matCodes.includes('TS') ? 'Topsoil'
@@ -2626,12 +2661,15 @@ function AdminProjects({ db, setDb, navigate }) {
     ];
 
     // -- Per-project pickup/dump preset (deterministic so map doesn't reshuffle).
+    // v16 project ids — RR keeps its needs-import route; RG/GE both export
+    // (HAS) so pickup is at-or-near the project site and dump trends
+    // outbound to nearby commercial waste/transfer destinations. Arvada
+    // isn't in the CITIES gazetteer so GE uses Denver→Westminster (closest
+    // pair flanking Arvada along US-36 / W 68th Pl).
     const ROUTE_PRESETS = {
-      'RR': { pickup: 'Denver',      dump: 'Commerce City' },
-      'WP': { pickup: 'Winter Park', dump: 'Granby'        },
-      'CH': { pickup: 'Denver',      dump: 'Aurora'        },
-      'AS': { pickup: 'Aurora',      dump: 'Bennett'       },
-      'GW': { pickup: 'Boulder',     dump: 'Brighton'      },
+      'RR': { pickup: 'Denver', dump: 'Commerce City' }, // 5800 Federal — needs CF brought in
+      'RG': { pickup: 'Golden', dump: 'Lakewood'      }, // 1105 Rogers — has CF to send out
+      'GE': { pickup: 'Denver', dump: 'Westminster'   }, // Geos — has CF to send out (Arvada area)
     };
     const FALLBACK_PRESET = { pickup: 'Denver', dump: 'Aurora' };
     const distMiles = (a, b) => {
