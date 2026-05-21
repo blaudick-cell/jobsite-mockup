@@ -353,6 +353,16 @@
       box-shadow: 0 0 22px -10px rgba(179,230,53,0.55) !important;
       transform: translateY(-1px);
     }
+
+    /* === LiveOperationsTileMap — MapLibre container sizing.
+       480px desktop, 320px mobile. MapLibre needs an explicit pixel height. */
+    .lom-tile-map { height: 480px; }
+    @media (max-width: 700px) {
+      .lom-tile-map { height: 320px !important; }
+    }
+    /* MapLibre default attribution can crowd the dispatch chrome — soften it. */
+    .lom-tile-map .maplibregl-ctrl-attrib { font-size: 10px; opacity: 0.7; }
+    .lom-tile-map .maplibregl-ctrl-attrib a { color: #B3E635; }
   </style>
 </head>
 <body>
@@ -370,6 +380,13 @@
   <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- MapLibre GL JS — vector/raster tile renderer for Live Operations Map.
+       Sourced to match jobsiteexchange.com's CartoCDN dark_all raster tiles
+       (recon found this URL template literally embedded in their bundle).
+       If the CDN fails, LiveOperationsTileMap falls back to the SVG mock. -->
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
 
   <script type="text/babel" data-presets="react">
 // === BLOCK 1: TOKENS + SHARED COMPONENTS ===
@@ -1399,7 +1416,31 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 13;
+const DB_SCHEMA_VERSION = 14;
+
+// === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
+// Pre-seeded with all known seed-project + seed-haul-request addresses so the
+// MapLibre tile map (LiveOperationsTileMap) renders instantly on first load
+// without hitting Nominatim. Matches jobsiteexchange.com's geocoding flow per
+// map-recon.md (their bundle references Nominatim three times). New addresses
+// edited via EditableText could be lazy-geocoded via fetch to Nominatim, but
+// for the demo the pre-seed covers every visible point.
+const GEOCODE_SEED = {
+  // Seed project addresses (PROJECTS_SEED.address values, verbatim)
+  '5800 Federal Blvd, Denver, CO':                  { lat: 39.7392, lng: -105.0250 },
+  '4421 Birch Rd, Winter Park, CO':                 { lat: 39.8869, lng: -105.7625 },
+  '1240 E 13th Ave, Denver, CO':                    { lat: 39.7406, lng: -104.9783 },
+  '88 Greenway Blvd, Boulder, CO':                  { lat: 40.0150, lng: -105.2705 },
+  '7700 E Iliff Ave, Aurora, CO':                   { lat: 39.6724, lng: -104.8581 },
+  // Haul-request pickup/dropoff addresses (HAUL_REQUESTS_SEED, verbatim with zip)
+  '14200 Smith Rd, Aurora, CO 80011':               { lat: 39.7850, lng: -104.7383 },
+  '4421 Birch Rd, Winter Park, CO 80482':           { lat: 39.8869, lng: -105.7625 },
+  '6100 N Broadway, Denver, CO 80216':              { lat: 39.8100, lng: -104.9874 },
+  '1240 E 13th Ave, Denver, CO 80218':              { lat: 39.7406, lng: -104.9783 },
+  '88 Greenway Blvd, Boulder, CO 80301':            { lat: 40.0150, lng: -105.2705 },
+  '7501 Stuart St, Westminster, CO 80030':          { lat: 39.8284, lng: -105.0413 },
+  '12200 E 56th Ave, Denver, CO 80239':             { lat: 39.7910, lng: -104.8439 },
+};
 // Per-CY billing rates by truck type. Used by the per-hauler / per-haul
 // invoice generator in the Reports tab — hauls track volume, not shift
 // hours, so we bill the delivered CY directly. Hours-based billing on
@@ -1411,7 +1452,7 @@ const INVOICE_CY_RATE = { TAN: 18, SD: 22, ED: 22, BD: 22, HS: 26 };
 // overwrite to the new default) vs "user edited the rate" (preserve). Only
 // codes whose default has actually changed need an entry here.
 const RATES_PREV_DEFAULTS = { HS: 125 };
-const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity'];
+const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity', 'geocode'];
 
 // =====================================================================
 // Activity feed
@@ -1509,6 +1550,7 @@ function buildSeed() {
     haulRequests: HAUL_REQUESTS_SEED,
     activity: ACTIVITY_SEED,
     activityLastReadAt: 0,
+    geocode: GEOCODE_SEED,
     schemaVersion: DB_SCHEMA_VERSION,
   };
 }
@@ -1682,6 +1724,14 @@ function hydrateDb(raw) {
       // v5 → v6: add activity collection + activityLastReadAt mark-as-read pointer.
       activity: Array.isArray(rest.activity) ? rest.activity : ACTIVITY_SEED,
       activityLastReadAt: typeof rest.activityLastReadAt === 'number' ? rest.activityLastReadAt : 0,
+      // v13 → v14: geocode cache for the MapLibre Live Operations tile map.
+      // Merge stale-payload geocode (if any) over GEOCODE_SEED so user-added
+      // resolutions win, but new seeded addresses (e.g. from a buildSeed bump)
+      // fill in. Plain object — keys are raw address strings.
+      geocode: (() => {
+        const stored = (rest.geocode && typeof rest.geocode === 'object' && !Array.isArray(rest.geocode)) ? rest.geocode : {};
+        return { ...GEOCODE_SEED, ...stored };
+      })(),
       schemaVersion: DB_SCHEMA_VERSION,
     };
   } catch (e) {
@@ -2317,6 +2367,172 @@ function AdminProjects({ db, setDb, navigate }) {
   //   helpers to the Mapbox `lng/lat` API, render the base layer with
   //   <mapboxgl.Map style="mapbox://styles/mapbox/dark-v11"> and keep the
   //   route/marker/tooltip code as overlays.
+  // =====================================================================
+  // LiveOperationsTileMap — MapLibre GL JS rendering CartoCDN `dark_all` raster
+  // tiles, EXACTLY matching jobsiteexchange.com's real map look (see
+  // map-recon.md for the tile URL we pulled out of their JS bundle). Overlays
+  // pickup/dropoff markers + bezier-style straight-line routes from the v12
+  // logistics fields. Falls back to the SVG `LiveOperationsMap` if MapLibre
+  // failed to load (e.g. CDN blocked) — keeps /admin shippable in any network
+  // condition. Geocoding via `db.geocode` pre-seeded cache (no live Nominatim
+  // calls on first render — see GEOCODE_SEED in Block 2).
+  // =====================================================================
+  const LiveOperationsTileMap = () => {
+    const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
+    const containerRef = useRef(null);
+    const mapRef = useRef(null);
+
+    // Resolve geocoded points from `db.geocode` for projects + haul requests.
+    // Each entry produces a pickup OR drop marker (or both) and a polyline.
+    const geocode = (db && db.geocode) || {};
+    const resolveCoord = (addr) => (addr && geocode[addr]) || null;
+
+    const projectPoints = (db.projects || []).map(p => {
+      const c = resolveCoord(p.address);
+      if (!c) return null;
+      return { id: 'proj-' + p.id, type: 'project', coord: c, label: p.name + ' · ' + (p.gc || ''), status: p.status || 'active' };
+    }).filter(Boolean);
+
+    const haulPoints = [];
+    const routes = [];
+    (db.haulRequests || []).forEach(r => {
+      const pickAddr = r.pickupLocation && r.pickupLocation.address;
+      const dropAddr = r.dropoffLocation && r.dropoffLocation.address;
+      const pickCoord = pickAddr ? resolveCoord(pickAddr) : null;
+      const dropCoord = dropAddr ? resolveCoord(dropAddr) : null;
+      if (pickCoord) haulPoints.push({ id: r.id + '-p', type: 'pickup', coord: pickCoord, label: (r.pickupLocation && r.pickupLocation.name) || pickAddr, status: r.status });
+      if (dropCoord) haulPoints.push({ id: r.id + '-d', type: 'dump', coord: dropCoord, label: (r.dropoffLocation && r.dropoffLocation.name) || dropAddr, status: r.status });
+      if (pickCoord && dropCoord) routes.push({ id: r.id, pick: pickCoord, drop: dropCoord, status: r.status });
+    });
+
+    useEffect(() => {
+      if (!mlAvailable || !containerRef.current) return;
+      if (mapRef.current) return;
+      const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+      const retina = dpr > 1 ? '@2x' : '';
+      // Tile URL template matches jobsiteexchange.com's bundle exactly (per map-recon.md).
+      const tileTemplate = `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${retina}.png`;
+      const subdomains = ['a', 'b', 'c', 'd'];
+      const tileUrls = subdomains.map(s => tileTemplate.replace('{s}', s));
+      let map;
+      try {
+        map = new window.maplibregl.Map({
+          container: containerRef.current,
+          style: {
+            version: 8,
+            sources: {
+              carto: {
+                type: 'raster',
+                tiles: tileUrls,
+                tileSize: 256,
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+              },
+            },
+            layers: [{ id: 'carto-layer', type: 'raster', source: 'carto' }],
+          },
+          center: [-105.0, 39.95],
+          zoom: 8.4,
+          attributionControl: { compact: true },
+        });
+        map.scrollZoom.disable();
+        map.addControl(new window.maplibregl.NavigationControl({ showCompass: false, visualizePitch: false }), 'top-right');
+      } catch (e) {
+        // MapLibre threw during init — leave the SVG fallback path active by
+        // simply not assigning mapRef. Render returns the fallback below.
+        return;
+      }
+      mapRef.current = map;
+
+      map.on('load', () => {
+        // === Routes — straight polylines (real site doesn't fetch OSRM per recon).
+        const routeFeatures = routes.map(rt => ({
+          type: 'Feature',
+          properties: { id: rt.id, status: rt.status },
+          geometry: { type: 'LineString', coordinates: [[rt.pick.lng, rt.pick.lat], [rt.drop.lng, rt.drop.lat]] },
+        }));
+        if (routeFeatures.length > 0) {
+          map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
+          // Underglow
+          map.addLayer({
+            id: 'routes-glow', type: 'line', source: 'routes',
+            paint: { 'line-color': '#B3E635', 'line-width': 7, 'line-opacity': 0.18, 'line-blur': 4 },
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+          });
+          // Bright line
+          map.addLayer({
+            id: 'routes-lines', type: 'line', source: 'routes',
+            paint: {
+              'line-color': ['match', ['get', 'status'],
+                'completed', '#5BC97C',
+                'pending',   '#FF6B47',
+                /* default */ '#B3E635',
+              ],
+              'line-width': 2.5, 'line-opacity': 0.85,
+            },
+            layout: { 'line-cap': 'round', 'line-join': 'round' },
+          });
+        }
+
+        // === Markers (DOM-based so we can match the JSE accent styling).
+        const mkPickupEl = () => {
+          const el = document.createElement('div');
+          el.style.cssText = 'width:14px;height:14px;border-radius:50%;background:#B3E635;border:2px solid rgba(10,10,10,0.85);box-shadow:0 0 14px rgba(179,230,53,0.7);cursor:pointer;';
+          return el;
+        };
+        const mkDumpEl = () => {
+          const el = document.createElement('div');
+          el.style.cssText = 'width:0;height:0;border-left:9px solid transparent;border-right:9px solid transparent;border-bottom:14px solid #FF6B47;filter:drop-shadow(0 0 8px rgba(255,107,71,0.65));cursor:pointer;';
+          return el;
+        };
+        const mkProjectEl = () => {
+          const el = document.createElement('div');
+          el.style.cssText = 'width:18px;height:18px;border-radius:4px;background:rgba(90,174,255,0.18);border:2px solid #5AAEFF;box-shadow:0 0 10px rgba(90,174,255,0.6);cursor:pointer;transform:rotate(45deg);';
+          return el;
+        };
+
+        projectPoints.forEach(pt => {
+          new window.maplibregl.Marker({ element: mkProjectEl() })
+            .setLngLat([pt.coord.lng, pt.coord.lat])
+            .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + pt.label.replace(/</g, '&lt;') + '</div>'))
+            .addTo(map);
+        });
+        haulPoints.forEach(pt => {
+          const el = pt.type === 'pickup' ? mkPickupEl() : mkDumpEl();
+          new window.maplibregl.Marker({ element: el, anchor: pt.type === 'dump' ? 'bottom' : 'center' })
+            .setLngLat([pt.coord.lng, pt.coord.lat])
+            .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
+            .addTo(map);
+        });
+      });
+
+      // Resize observer — MapLibre needs explicit resize() on container changes.
+      let ro = null;
+      try {
+        ro = new ResizeObserver(() => { if (mapRef.current) mapRef.current.resize(); });
+        ro.observe(containerRef.current);
+      } catch (e) { /* no-op if ResizeObserver unavailable */ }
+
+      return () => {
+        if (ro) ro.disconnect();
+        try { map.remove(); } catch (e) { /* ignore */ }
+        mapRef.current = null;
+      };
+    }, [mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (!mlAvailable) return <LiveOperationsMap />;
+    return (
+      <div style={{ position: 'relative', width: '100%', marginTop: S[4] }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
+          <Label color={C.accent}>Live operations map</Label>
+          <span style={{ ...T.caption, color: C.inkDim }}>
+            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {haulPoints.filter(p => p.type === 'pickup').length} pickup{haulPoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {haulPoints.filter(p => p.type === 'dump').length} drop{haulPoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {routes.length} route{routes.length === 1 ? '' : 's'}
+          </span>
+        </div>
+        <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
+      </div>
+    );
+  };
+
   const LiveOperationsMap = () => {
     // -- Front Range projection. Viewport tuned to frame Denver metro +
     //    foothills + I-70 east corridor so every active haul sits inside.
@@ -3016,7 +3232,7 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
           )}
         </Card>
-        <LiveOperationsMap />
+        <LiveOperationsTileMap />
       </div>
 
       {/* Live truck activity + site conditions row */}

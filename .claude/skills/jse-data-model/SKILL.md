@@ -116,8 +116,9 @@ See [[jse-activity-feed]] for the full type list + `appendActivity` composer.
 | v10 → v11 | Added `status` / `createdAt` / `sentAt` / `paidAt` / `paymentRef` to invoices. Backfilled `status: 'sent'` and `createdAt: issuedDate+T09:00:00Z` for stale payloads (defaults-first spread so existing fields win). When migrated status is `'sent'` or `'paid'` and `sentAt` is missing, synthesizes it from `issuedDate+T15:00:00Z`. `paidAt` / `paymentRef` are never backfilled blindly. |
 | v11 → v12 | Added `pickupLocation` / `dropoffLocation` / `timing` / `siteAccess` to every haul request. Defaults-first nested spread so existing values win and partial pre-v12 payloads complete their nested shapes (`siteAccess.loading.notes`, etc.). `EMPTY_LOGISTICS` mirrors the migration defaults for new seed rows. |
 | v12 → v13 | Added nullable `haulRequestId` to invoices. Pre-v13 invoices are project-scoped and migrate to `haulRequestId: null`. The Reports tab's per-hauler invoice generator stamps `haulRequestId` on new invoices so they can be traced back to a specific haul. `INVOICE_CY_RATE` (TAN 18, SD/ED/BD 22, HS 26) introduces a per-CY billing model alongside the existing hours-based `db.rates`. |
+| v13 → v14 | Added `geocode` collection — plain object keyed by raw address string, values `{ lat, lng }`. Backs the MapLibre `LiveOperationsTileMap` so the tile map can place pickup/dropoff/project markers without waiting on Nominatim. Pre-seeded via `GEOCODE_SEED` (~12 known seed addresses). Stale payloads merge `GEOCODE_SEED` defaults under any stored user-added resolutions, so user edits win but new seed addresses still fill in. Real geocoding via Nominatim can be added per-EditableText-onSave later; for now the seed covers every visible address. |
 
-`DB_SCHEMA_VERSION = 13`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
+`DB_SCHEMA_VERSION = 14`. See [[jse-ship-a-feature]] § Schema migration for how to bump.
 
 ## What's NOT in the model
 
