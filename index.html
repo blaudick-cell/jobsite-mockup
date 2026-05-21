@@ -322,6 +322,18 @@
       .invoice-print th, .invoice-print td { border-bottom: 1px solid #ccc !important; padding: 8px !important; }
       .no-print { display: none !important; }
     }
+    /* === Hauling Control Center (AdminProjects) — responsive shifts ===
+       Desktop default: 6 KPI cards across, NeedsAttention + Map side-by-side,
+       dense haul card grid. Tablet: KPIs wrap to 3-up, panels stack. Phone:
+       KPIs 2-up, haul cards switch to single-column. */
+    @media (max-width: 1100px) {
+      .hcc-kpi-grid { grid-template-columns: repeat(3, 1fr) !important; }
+      .hcc-attn-row { grid-template-columns: 1fr !important; }
+    }
+    @media (max-width: 700px) {
+      .hcc-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      .haul-op-card-grid { grid-template-columns: 1fr !important; }
+    }
   </style>
 </head>
 <body>
@@ -1971,143 +1983,491 @@ const WIZARD_INPUT_STYLE = { background: C.surfaceHi, color: C.ink, border: `1px
 // ADMIN
 // =====================================================================
 function AdminProjects({ db, setDb, navigate }) {
+  // === Helpers (inlined into the dashboard so the refactor stays scoped) ===
+  // Health classifier per UX spec — drives the StatusBadge tint + sorting.
+  const healthFor = (p) => {
+    if ((p.status || 'active') === 'completed') return 'completed';
+    if (p.status === 'upcoming') return 'upcoming';
+    if (p.pendingLoads >= 3) return 'critical';
+    if (p.pendingLoads > 0 && p.trucksActive < p.trucks.length) return 'atrisk';
+    return 'healthy';
+  };
+  const healthTone = (h) => ({
+    healthy:   { c: C.ok,     soft: C.okSoft,                            label: 'Healthy' },
+    atrisk:    { c: C.warn,   soft: C.warnSoft,                          label: 'At risk' },
+    critical:  { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Delayed'  },
+    upcoming:  { c: C.info,   soft: C.infoSoft,                          label: 'Upcoming' },
+    completed: { c: C.inkDim, soft: 'rgba(255,255,255,0.06)',            label: 'Completed' },
+  }[h] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: h });
+
+  // Lightweight bar primitives. Track + filled rail, accent fill, tone-aware.
+  const ProgressBar = ({ pct, color = C.accent, height = 6 }) => {
+    const w = Math.max(0, Math.min(100, pct || 0));
+    return (
+      <div style={{ width: '100%', height, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: w + '%', height: '100%', background: color, borderRadius: 999, transition: 'width 240ms ease' }} />
+      </div>
+    );
+  };
+  const UtilizationBar = ({ active, total }) => {
+    const segs = Math.max(0, total);
+    if (segs === 0) return <div style={{ ...T.caption, color: C.inkFaint }}>no trucks</div>;
+    return (
+      <div style={{ display: 'flex', gap: 3, height: 6 }}>
+        {Array.from({ length: segs }).map((_, i) => (
+          <div key={i} style={{ flex: 1, height: '100%', background: i < active ? C.accent : C.surfaceHi, borderRadius: 2 }} />
+        ))}
+      </div>
+    );
+  };
+
+  // === Enrich projects with all the operational fields the control center
+  // needs. Most are derived from existing data; a couple are demo defaults
+  // backfilled per UX spec (avgCycleTime, loadsTarget). ===
   const updateProject = (id, patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === id ? { ...p, ...patch } : p) }));
   const projects = db.projects.map(p => {
     const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
     const trucks = db.trucks.filter(t => t.projectId === p.id);
     const trucksActive = trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
-    const totalLoads = db.loads.filter(l => l.projectId === p.id && l.status === 'approved').length;
-    const pendingLoads = db.loads.filter(l => l.projectId === p.id && l.status === 'pending').length;
+    const trucksAssigned = trucks.length;
+    const projLoads = db.loads.filter(l => l.projectId === p.id);
+    const loadsCompleted = projLoads.filter(l => l.status === 'approved').length;
+    const pendingLoads = projLoads.filter(l => l.status === 'pending').length;
+    // Loads in transit ≈ open shifts on this project's trucks (a load is "in
+    // flight" while a driver is clocked-in on it).
+    const loadsInTransit = trucksActive;
     const totalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
     const totalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
       const t = db.trucks.find(t => t.id === h.truckId);
       const rate = t ? db.rates[t.type] : 0;
       return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * rate;
     }, 0);
-    return { ...p, ops, trucks, trucksActive, totalLoads, pendingLoads, totalHours, totalRevenue };
+    // Haul requests on this project — used for target volume + dispatch queue.
+    const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
+    const targetCY = reqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+    // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
+    const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
+    const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
+    // Demo cycle time: avg(approved-load count × 24 min) / trucksActive. Tweakable.
+    const avgCycleTime = trucksActive > 0 && loadsCompleted > 0
+      ? Math.max(18, Math.round((totalHours * 60) / Math.max(1, loadsCompleted)))
+      : 0;
+    // ETA: at current cadence, hours-of-work-left ≈ pending × cycle.
+    const minsLeft = pendingLoads * (avgCycleTime || 30);
+    const estimatedCompletion = pendingLoads === 0
+      ? '—'
+      : (minsLeft < 90 ? minsLeft + 'm' : (minsLeft / 60).toFixed(1) + 'h');
+    // Material + haul-type derived from the first material code; readable label.
+    const matCodes = Array.isArray(p.material) ? p.material : [];
+    const matLabels = matCodes.map(mc => {
+      const m = MATERIALS.find(x => x.code === mc);
+      return m ? m.label : mc;
+    });
+    const materialType = matLabels[0] || 'Mixed';
+    const haulType = matCodes.includes('EX') ? 'Export'
+      : matCodes.includes('CF') ? 'Import'
+      : matCodes.includes('CR') ? 'Aggregate Import'
+      : matCodes.includes('TS') ? 'Topsoil'
+      : 'Transfer';
+    // Pickup / dump pulled off the first haul request that carries them
+    // (schema v12+), otherwise fall back to project address.
+    const firstReq = reqs.find(r => r.pickupLocation || r.dumpLocation) || {};
+    const pickupLocation = firstReq.pickupLocation || p.address || '—';
+    const dumpLocation = firstReq.dumpLocation || p.address || '—';
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulType, pickupLocation, dumpLocation, reqs };
+    enriched.healthStatus = healthFor(enriched);
+    return enriched;
   });
   const active = projects.filter(p => (p.status || 'active') === 'active');
   const upcoming = projects.filter(p => p.status === 'upcoming');
   const completed = projects.filter(p => p.status === 'completed');
-  const totals = {
-    activeProjects: active.length,
-    totalTrucksActive: active.reduce((s, p) => s + p.trucksActive, 0),
-    totalLoadsAll: active.reduce((s, p) => s + p.totalLoads, 0),
-    totalRevenueAll: active.reduce((s, p) => s + p.totalRevenue, 0),
-  };
 
-  const statusOptions = [
-    { value: 'active', label: 'Active' },
-    { value: 'upcoming', label: 'Upcoming' },
-    { value: 'completed', label: 'Completed' },
+  // === Top-line operational KPIs ===
+  const liveTrucksAll = db.trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
+  const loadsInTransitAll = active.reduce((s, p) => s + p.loadsInTransit, 0);
+  const delayedCount = active.filter(p => p.healthStatus === 'critical' || p.healthStatus === 'atrisk').length;
+  const pendingDispatches = (db.haulRequests || []).filter(r => r.status === 'pending').length;
+  const cycleTimes = active.map(p => p.avgCycleTime).filter(v => v > 0);
+  const avgCycle = cycleTimes.length > 0 ? Math.round(cycleTimes.reduce((s, v) => s + v, 0) / cycleTimes.length) : 0;
+  const totalActiveRevenue = active.reduce((s, p) => s + p.totalRevenue, 0);
+  const kpis = [
+    { label: 'Active hauls',       value: active.length,           tone: C.accent, sub: active.length === 1 ? 'on the board' : 'on the board' },
+    { label: 'Live trucks',        value: liveTrucksAll,           tone: C.ok,     sub: 'clocked-in now' },
+    { label: 'Loads in transit',   value: loadsInTransitAll,       tone: C.info,   sub: 'across active hauls' },
+    { label: 'Delayed / at risk',  value: delayedCount,            tone: delayedCount > 0 ? C.warn : C.inkDim, sub: 'needs attention' },
+    { label: 'Pending dispatches', value: pendingDispatches,       tone: pendingDispatches > 0 ? C.warn : C.inkDim, sub: 'unmatched requests' },
+    { label: 'Avg cycle time',     value: avgCycle > 0 ? avgCycle + ' min' : '—', tone: C.accent, sub: 'per load · active hauls' },
   ];
 
-  const renderRow = (p, dim) => (
-    <Tr key={p.id} onClick={() => navigate(`/admin/p/${p.id}`)}
-      style={dim ? { opacity: 0.6 } : {}}>
-      <Td>
-        <div style={{ fontWeight: 600 }}><EditableText value={p.name} onSave={(v) => updateProject(p.id, { name: v })} /></div>
-        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}><EditableText value={p.address} onSave={(v) => updateProject(p.id, { address: v })} /></div>
-      </Td>
-      <Td dim><EditableText value={p.gc} onSave={(v) => updateProject(p.id, { gc: v })} /></Td>
-      <Td><EditableSelect value={p.status || 'active'} options={statusOptions} onSave={(v) => updateProject(p.id, { status: v })} /></Td>
-      <Td align="right">{p.ops.length}</Td>
-      <Td align="right" mono>{p.trucksActive} <span style={{ color: C.inkFaint }}>/ {p.trucks.length}</span></Td>
-      <Td align="right" mono>{p.totalLoads}</Td>
-      <Td align="right">{p.pendingLoads > 0 ? <Pill color={C.warn} soft={C.warnSoft}>{p.pendingLoads}</Pill> : <span style={{ color: C.inkFaint }}>—</span>}</Td>
-      <Td align="right" mono>{fmtHours(p.totalHours)}</Td>
-      <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(p.totalRevenue)}</Td>
-      <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
-    </Tr>
-  );
+  // === Needs-Attention items ===
+  const attentionItems = [];
+  active.forEach(p => {
+    if (p.pendingLoads > 0 && p.trucksActive < p.trucksAssigned) {
+      attentionItems.push({
+        id: 'att-trucks-' + p.id,
+        severity: p.pendingLoads >= 3 ? 'critical' : 'warning',
+        title: p.name,
+        body: `${p.pendingLoads} pending load${p.pendingLoads === 1 ? '' : 's'}, only ${p.trucksActive} of ${p.trucksAssigned} trucks active`,
+        actionLabel: 'Assign trucks',
+        onAction: () => { window.alert('TODO: open assign-trucks modal for ' + p.name); },
+      });
+    }
+  });
+  (db.haulRequests || []).filter(r => r.status === 'pending').forEach(r => {
+    const proj = db.projects.find(pp => pp.id === r.projectId);
+    if (!proj) return;
+    attentionItems.push({
+      id: 'att-req-' + r.id,
+      severity: 'warning',
+      title: proj.name,
+      body: `${r.volumeCY} CY of ${(MATERIALS.find(m => m.code === r.materialCode) || {}).label || r.materialCode} awaiting dispatch`,
+      actionLabel: 'Open dispatch',
+      onAction: () => navigate('/admin/requests/' + r.id),
+    });
+  });
+  upcoming.forEach(p => {
+    attentionItems.push({
+      id: 'att-up-' + p.id,
+      severity: 'info',
+      title: p.name,
+      body: 'Upcoming haul · needs truck assignments before start',
+      actionLabel: 'Review haul',
+      onAction: () => navigate('/admin/p/' + p.id),
+    });
+  });
+  // Offline / unassigned trucks (any roster truck with no driver) — surface
+  // as info-severity so dispatchers can spot bench depth.
+  const unassignedTrucks = db.trucks.filter(t => !t.driverId);
+  if (unassignedTrucks.length > 0) {
+    attentionItems.push({
+      id: 'att-bench',
+      severity: 'info',
+      title: 'Driver pool',
+      body: `${unassignedTrucks.length} truck${unassignedTrucks.length === 1 ? '' : 's'} on roster without an assigned driver`,
+      actionLabel: 'Open dispatch',
+      onAction: () => navigate('/admin/trucks/active'),
+    });
+  }
+  attentionItems.sort((a, b) => {
+    const order = { critical: 0, warning: 1, info: 2 };
+    return order[a.severity] - order[b.severity];
+  });
 
-  const head = (
-    <thead>
-      <tr>
-        <Th>Haul</Th><Th>GC</Th><Th>Status</Th>
-        <Th align="right">Haulers</Th>
-        <Th align="right">Trucks active</Th>
-        <Th align="right">Total loads</Th>
-        <Th align="right">Pending</Th>
-        <Th align="right">Total hours</Th>
-        <Th align="right">Total revenue</Th>
-        <Th></Th>
-      </tr>
-    </thead>
-  );
+  const sevTone = (sev) => ({
+    critical: { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Critical' },
+    warning:  { c: C.warn,   soft: C.warnSoft, label: 'Warning'  },
+    info:     { c: C.info,   soft: C.infoSoft, label: 'Info'     },
+  }[sev] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: sev });
+
+  // === Dispatch queue (pending haul requests, prioritized) ===
+  const queueItems = (db.haulRequests || []).filter(r => r.status === 'pending').map(r => {
+    const proj = db.projects.find(pp => pp.id === r.projectId);
+    const mat = MATERIALS.find(m => m.code === r.materialCode);
+    const reqAssigned = (r.assignments || []).length;
+    const priority = r.volumeCY >= 25 ? 'High' : r.volumeCY >= 12 ? 'Med' : 'Low';
+    return { req: r, proj, mat, reqAssigned, priority };
+  });
+  const priorityTone = (p) => p === 'High' ? C.warn : p === 'Med' ? C.info : C.inkDim;
+
+  // === Operational haul card — replaces the dense table row ===
+  const HaulOperationalCard = ({ p, dim }) => {
+    const tone = healthTone(p.healthStatus);
+    return (
+      <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
+        <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start' }}
+             className="haul-op-card-grid">
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 4, flexWrap: 'wrap' }}>
+              <h3 style={{ ...T.h4, fontWeight: 700, margin: 0, color: C.ink, letterSpacing: -0.3 }}>{p.name}</h3>
+              <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
+            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+              <Pill color={C.accent} soft={C.accentSoft}>{p.haulType}</Pill>
+              <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{p.materialType}</Pill>
+            </div>
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>LOADS</div>
+            <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
+              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{p.loadsCompleted}</span>
+              <span style={{ color: C.inkDim }}> / {p.loadsTarget}</span>
+              {p.pendingLoads > 0 && <span style={{ color: C.warn, marginLeft: S[2], fontWeight: 600 }}>+{p.pendingLoads} pending</span>}
+            </div>
+            <ProgressBar pct={p.loadPct} color={p.healthStatus === 'critical' ? (C.danger || C.warn) : p.healthStatus === 'atrisk' ? C.warn : C.accent} />
+            <div style={{ ...T.caption, color: C.inkFaint, marginTop: S[3], marginBottom: 4 }}>TRUCKS</div>
+            <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
+              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{p.trucksActive}</span>
+              <span style={{ color: C.inkDim }}> / {p.trucksAssigned} active</span>
+            </div>
+            <UtilizationBar active={p.trucksActive} total={p.trucksAssigned} />
+          </div>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[2] }}>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>AVG CYCLE</div>
+              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.avgCycleTime > 0 ? p.avgCycleTime + ' min' : '—'}</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>EST. COMPLETION</div>
+              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.estimatedCompletion}</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAULERS</div>
+              <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{p.ops.length}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: S[3], alignItems: 'flex-end' }}>
+            <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Open dispatch</Btn>
+            <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>{fmtHours(p.totalHours)} hrs · {fmtMoney(p.totalRevenue)}</div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  // === Live operations map — pure SVG mock, matches dark theme ===
+  const LiveOperationsMapMock = () => {
+    // Distribute deterministic pins from the active hauls so the mock feels
+    // like the real data, just without a real map provider.
+    const pickups = active.slice(0, 4).map((p, i) => ({ x: 70 + (i * 90) % 360, y: 60 + ((i * 47) % 80), label: 'Pickup', color: C.info }));
+    const dumps   = active.slice(0, 4).map((p, i) => ({ x: 100 + ((i * 67) + 30) % 360, y: 180 + ((i * 31) % 70), label: 'Dump',   color: C.accent }));
+    const trucksOnMap = active.flatMap(p => p.trucks.filter(t => t.driverId).slice(0, 2).map((t, i) => ({
+      x: 90 + ((p.id.charCodeAt(0) + i * 53) % 320),
+      y: 100 + ((p.id.charCodeAt(0) + i * 37) % 130),
+      atRisk: p.healthStatus === 'critical' || p.healthStatus === 'atrisk',
+      plate: t.plate,
+    })));
+    return (
+      <Card padding={0} style={{ overflow: 'hidden' }}>
+        <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <Label color={C.accent}>Live operations map</Label>
+            <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{trucksOnMap.length} truck{trucksOnMap.length === 1 ? '' : 's'} live · {pickups.length} pickup{pickups.length === 1 ? '' : 's'} · {dumps.length} dump{dumps.length === 1 ? '' : 's'}</div>
+          </div>
+          <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">Mock · Mapbox-ready</Pill>
+        </div>
+        <div style={{ background: 'linear-gradient(180deg, ' + C.surfaceHi + ' 0%, ' + C.bg + ' 100%)' }}>
+          <svg viewBox="0 0 460 300" width="100%" style={{ display: 'block', maxHeight: 320 }} aria-label="Live operations map (mock)">
+            {/* Subtle grid */}
+            <defs>
+              <pattern id="opsGrid" width="40" height="40" patternUnits="userSpaceOnUse">
+                <path d="M 40 0 L 0 0 0 40" fill="none" stroke={C.rule} strokeWidth="0.5" />
+              </pattern>
+            </defs>
+            <rect width="460" height="300" fill="url(#opsGrid)" />
+            {/* Route lines */}
+            {pickups.map((pk, i) => {
+              const dp = dumps[i % Math.max(1, dumps.length)];
+              if (!dp) return null;
+              return <path key={'rt-' + i} d={`M ${pk.x} ${pk.y} Q ${(pk.x + dp.x) / 2} ${Math.min(pk.y, dp.y) - 20} ${dp.x} ${dp.y}`} fill="none" stroke={C.accent} strokeWidth="1.2" strokeDasharray="4 6" opacity="0.55" />;
+            })}
+            {/* Pickup pins */}
+            {pickups.map((pk, i) => (
+              <g key={'pk-' + i}>
+                <circle cx={pk.x} cy={pk.y} r="6" fill={C.info} opacity="0.25" />
+                <circle cx={pk.x} cy={pk.y} r="3" fill={C.info} />
+              </g>
+            ))}
+            {/* Dump pins */}
+            {dumps.map((dp, i) => (
+              <g key={'dp-' + i}>
+                <rect x={dp.x - 5} y={dp.y - 5} width="10" height="10" fill={C.accent} opacity="0.25" rx="2" />
+                <rect x={dp.x - 3} y={dp.y - 3} width="6"  height="6"  fill={C.accent} rx="1.5" />
+              </g>
+            ))}
+            {/* Live truck dots */}
+            {trucksOnMap.map((t, i) => (
+              <g key={'tr-' + i}>
+                <circle cx={t.x} cy={t.y} r="7" fill={t.atRisk ? (C.danger || C.warn) : C.ok} opacity="0.2" />
+                <circle cx={t.x} cy={t.y} r="3.5" fill={t.atRisk ? (C.danger || C.warn) : C.ok} />
+              </g>
+            ))}
+          </svg>
+        </div>
+        <div style={{ padding: `${S[3]}px ${S[4]}px`, borderTop: `1px solid ${C.rule}`, display: 'flex', flexWrap: 'wrap', gap: S[4], ...T.caption, color: C.inkDim }}>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.ok, borderRadius: '50%', marginRight: 6 }} />Active truck</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.info, borderRadius: '50%', marginRight: 6 }} />Pickup</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.accent, borderRadius: 2, marginRight: 6 }} />Dump site</span>
+          <span><span style={{ display: 'inline-block', width: 8, height: 8, background: C.danger || C.warn, borderRadius: '50%', marginRight: 6 }} />At risk</span>
+        </div>
+      </Card>
+    );
+  };
 
   return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin' }, { label: 'Hauls' }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5] }}>
+    <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin' }, { label: 'Control Center' }]} navigate={navigate} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Active hauls · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Overview</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any value to edit. Click row to drill in. Change Status to move a haul between sections.</div>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Now · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Control Center</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Live dispatch, truck flow, haul status, and exceptions.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="secondary" size="sm">Export CSV</Btn>
           <Btn variant="primary" size="sm" onClick={() => navigate('/admin/new')}>+ New haul</Btn>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Active hauls" value={totals.activeProjects} /></Card>
-        <Card padding={S[4]}><Stat label="Trucks running now" value={totals.totalTrucksActive} /></Card>
-        <Card padding={S[4]}><Stat label="Total loads delivered" value={totals.totalLoadsAll} sub="across active" /></Card>
-        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totals.totalRevenueAll)} sub="across active" /></Card>
+
+      {/* Operational KPI strip */}
+      <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
+        {kpis.map(k => (
+          <Card key={k.label} padding={S[4]}>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 6 }}>{k.label.toUpperCase()}</div>
+            <div style={{ ...T.h2, fontWeight: 700, color: k.tone || C.ink, letterSpacing: -0.5, lineHeight: 1 }}>{k.value}</div>
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>{k.sub}</div>
+          </Card>
+        ))}
       </div>
 
-      {/* Active section */}
+      {/* Secondary KPI: revenue still surfaced, but de-emphasized per UX spec */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], padding: `${S[3]}px ${S[4]}px`, background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md, marginBottom: S[6], ...T.caption, color: C.inkDim }}>
+        <span>Revenue (active hauls):</span>
+        <span style={{ fontFamily: F.mono, color: C.ink, fontWeight: 600 }}>{fmtMoney(totalActiveRevenue)}</span>
+        <span style={{ marginLeft: 'auto' }}>
+          <a href="#/admin/reporting" style={{ color: C.accent, textDecoration: 'none' }}>Full financial reports →</a>
+        </span>
+      </div>
+
+      {/* Needs Attention + Live Map row */}
+      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[6] }}>
+        {/* Needs Attention */}
+        <Card padding={0}>
+          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <Label color={C.accent}>Needs attention</Label>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{attentionItems.length} exception{attentionItems.length === 1 ? '' : 's'} to triage</div>
+            </div>
+          </div>
+          {attentionItems.length === 0 ? (
+            <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>All clear — no exceptions on the board right now.</div>
+          ) : (
+            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
+              {attentionItems.map((it, i) => {
+                const tone = sevTone(it.severity);
+                return (
+                  <div key={it.id} style={{ padding: S[3], borderBottom: i < attentionItems.length - 1 ? `1px solid ${C.rule}` : 'none', display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                    <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
+                    <div style={{ flex: 1, minWidth: 200 }}>
+                      <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{it.title}</div>
+                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{it.body}</div>
+                    </div>
+                    <Btn variant="secondary" size="xs" onClick={it.onAction}>{it.actionLabel}</Btn>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+        <LiveOperationsMapMock />
+      </div>
+
+      {/* Active hauls — operational cards */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Active</Label>
+        <Label color={C.accent}>Active hauls</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{active.length}</span>
       </div>
-      <Card padding={0} style={{ marginBottom: S[6] }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          {head}
-          <tbody>
-            {active.map(p => renderRow(p, false))}
-            {active.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No active hauls.</td></tr>}
-            <tr onClick={() => navigate('/admin/new')} style={{ cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={11} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add new haul</td>
-            </tr>
-          </tbody>
-        </table>
-      </Card>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: S[3], marginBottom: S[6] }}>
+        {active.length === 0 && (
+          <Card><div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[3] }}>No active hauls right now.</div></Card>
+        )}
+        {active.map(p => <HaulOperationalCard key={p.id} p={p} />)}
+      </div>
 
-      {/* Upcoming section */}
+      {/* Upcoming hauls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.info || C.inkDim}>Upcoming</Label>
+        <Label color={C.info}>Upcoming</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{upcoming.length}</span>
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: S[3], marginBottom: S[6] }}>
+        {upcoming.length === 0 && (
+          <Card><div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[3] }}>No upcoming hauls.</div></Card>
+        )}
+        {upcoming.map(p => <HaulOperationalCard key={p.id} p={p} />)}
+      </div>
+
+      {/* Dispatch Queue — pending requests */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
+        <Label color={C.accent}>Dispatch queue</Label>
+        <div style={{ flex: 1, height: 1, background: C.rule }} />
+        <span style={{ ...T.monoSm, color: C.inkDim }}>{queueItems.length}</span>
+      </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          {head}
-          <tbody>
-            {upcoming.map(p => renderRow(p, false))}
-            {upcoming.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No upcoming hauls.</td></tr>}
-          </tbody>
-        </table>
+        {queueItems.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>Nothing waiting on dispatch.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Haul</Th>
+                <Th>Material</Th>
+                <Th align="right">Required CY</Th>
+                <Th align="right">Pending loads</Th>
+                <Th>Pickup</Th>
+                <Th>Dump</Th>
+                <Th align="right">Priority</Th>
+                <Th align="right">Action</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {queueItems.map(({ req, proj, mat, reqAssigned, priority }) => (
+                <Tr key={req.id} onClick={() => navigate('/admin/requests/' + req.id)}>
+                  <Td>
+                    <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{proj ? proj.name : '—'}</div>
+                    <div style={{ ...T.caption, color: C.inkDim }}>{proj ? proj.gc : ''}</div>
+                  </Td>
+                  <Td>{mat ? mat.label : req.materialCode}</Td>
+                  <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
+                  <Td align="right" mono>{reqAssigned > 0 ? <span style={{ color: C.inkDim }}>{reqAssigned} assigned</span> : <span style={{ color: C.warn, fontWeight: 600 }}>unassigned</span>}</Td>
+                  <Td dim>{req.pickupLocation || (proj ? proj.address : '—')}</Td>
+                  <Td dim>{req.dumpLocation || '—'}</Td>
+                  <Td align="right"><Pill color={priorityTone(priority)} soft={priority === 'High' ? C.warnSoft : priority === 'Med' ? C.infoSoft : 'rgba(255,255,255,0.05)'}>{priority}</Pill></Td>
+                  <Td align="right"><Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/requests/' + req.id); }}>Assign</Btn></Td>
+                </Tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
 
-      {/* Completed section */}
+      {/* Completed hauls — folded down, click to drill in */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
         <Label color={C.inkDim}>Completed</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{completed.length}</span>
       </div>
       <Card padding={0}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          {head}
-          <tbody>
-            {completed.map(p => renderRow(p, true))}
-            {completed.length === 0 && <tr><td colSpan={11} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No completed hauls.</td></tr>}
-          </tbody>
-        </table>
+        {completed.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No completed hauls.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Haul</Th>
+                <Th>GC</Th>
+                <Th align="right">Loads</Th>
+                <Th align="right">Hours</Th>
+                <Th align="right">Revenue</Th>
+                <Th></Th>
+              </tr>
+            </thead>
+            <tbody>
+              {completed.map(p => (
+                <Tr key={p.id} onClick={() => navigate('/admin/p/' + p.id)} style={{ opacity: 0.7 }}>
+                  <Td><span style={{ fontWeight: 600, color: C.ink }}>{p.name}</span></Td>
+                  <Td dim>{p.gc}</Td>
+                  <Td align="right" mono>{p.loadsCompleted}</Td>
+                  <Td align="right" mono>{fmtHours(p.totalHours)}</Td>
+                  <Td align="right" mono>{fmtMoney(p.totalRevenue)}</Td>
+                  <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
+                </Tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
     </div>
   );
