@@ -1003,10 +1003,17 @@ function ChevronRight({ size = 18 }) {
 // unknown — Robert's Geos Neighborhood is "unknown CY" so we mark
 // `volumeCYKnown: false` so the UI can render "—" instead of "0 CY".
 // `contactName/Phone/Email` mirror the Supabase columns we just added.
+// v17: each project carries `pickupLocation` (where material comes from) and
+// `dumpLocation` (where material goes). For a NEEDS project (5800 Federal):
+// dumpLocation = the project's own address, pickupLocation = a real Denver-area
+// export site 5-30 min away. For HAS projects (Rogers, Geos): pickupLocation =
+// the project's own address, dumpLocation = a real fill-needing site 5-30 min
+// away. The Live Operations Map draws an OSRM-fetched driving route between
+// these two points for each project. Cached in db.routes by `pickup|dump` key.
 const PROJECTS_SEED = [
-  { id: 'RR', code: 'RR-01', name: '5800 Federal',       gc: 'Cowgirl Demolition', address: '5800 Federal Blvd, Denver, CO',          startDate: '2026-05-02', status: 'active',   material: ['CF'], haulType: 'NEEDS', contactName: 'Jessica', contactPhone: '',             contactEmail: '',                            volumeCYNeeded: 100000, volumeCYKnown: true },
-  { id: 'RG', code: 'RG-02', name: '1105 Rogers Street', gc: 'Jobsite Exchange',   address: '1105 Rogers Street, Golden, CO',         startDate: '2026-06-10', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: 200,    volumeCYKnown: true },
-  { id: 'GE', code: 'GE-03', name: 'Geos Neighborhood',  gc: 'Jobsite Exchange',   address: '15185 W 68th Pl, Arvada, CO 80007',      startDate: '2026-07-01', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: null,   volumeCYKnown: false },
+  { id: 'RR', code: 'RR-01', name: '5800 Federal',       gc: 'Cowgirl Demolition', address: '5800 Federal Blvd, Denver, CO',          startDate: '2026-05-02', status: 'active',   material: ['CF'], haulType: 'NEEDS', contactName: 'Jessica', contactPhone: '',             contactEmail: '',                            volumeCYNeeded: 100000, volumeCYKnown: true,  pickupLocation: '4825 Marshall St, Wheat Ridge, CO 80033', dumpLocation: '5800 Federal Blvd, Denver, CO' },
+  { id: 'RG', code: 'RG-02', name: '1105 Rogers Street', gc: 'Jobsite Exchange',   address: '1105 Rogers Street, Golden, CO',         startDate: '2026-06-10', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: 200,    volumeCYKnown: true,  pickupLocation: '1105 Rogers Street, Golden, CO',          dumpLocation: '1500 Yarrow St, Lakewood, CO 80214' },
+  { id: 'GE', code: 'GE-03', name: 'Geos Neighborhood',  gc: 'Jobsite Exchange',   address: '15185 W 68th Pl, Arvada, CO 80007',      startDate: '2026-07-01', status: 'upcoming', material: ['CF'], haulType: 'HAS',   contactName: 'Robert',  contactPhone: '614-582-5642', contactEmail: 'Robert@jobsiteexchange.com',  volumeCYNeeded: null,   volumeCYKnown: false, pickupLocation: '15185 W 68th Pl, Arvada, CO 80007',       dumpLocation: '7350 W 48th Ave, Wheat Ridge, CO 80033' },
 ];
 
 // === v15: real Denver-area haulers replacing the synthetic seed.
@@ -1410,7 +1417,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 16;
+const DB_SCHEMA_VERSION = 17;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -1427,6 +1434,12 @@ const GEOCODE_SEED = {
   '5800 Federal Blvd, Denver, CO':                  { lat: 39.7392, lng: -105.0250 },
   '1105 Rogers Street, Golden, CO':                 { lat: 39.7555, lng: -105.2200 },
   '15185 W 68th Pl, Arvada, CO 80007':              { lat: 39.8210, lng: -105.1540 },
+  // v17: counterpart pickup/dump addresses on each project (5-30 min away).
+  // Approximate coords below; Nominatim refines at runtime and caches into
+  // db.geocode. OSRM uses these to compute the actual driving polyline.
+  '4825 Marshall St, Wheat Ridge, CO 80033':        { lat: 39.7805, lng: -105.0827 },
+  '1500 Yarrow St, Lakewood, CO 80214':             { lat: 39.7460, lng: -105.0816 },
+  '7350 W 48th Ave, Wheat Ridge, CO 80033':         { lat: 39.7853, lng: -105.0789 },
   '4421 Birch Rd, Winter Park, CO':                 { lat: 39.8869, lng: -105.7625 },
   '1240 E 13th Ave, Denver, CO':                    { lat: 39.7406, lng: -104.9783 },
   '88 Greenway Blvd, Boulder, CO':                  { lat: 40.0150, lng: -105.2705 },
@@ -1451,7 +1464,44 @@ const INVOICE_CY_RATE = { TAN: 18, SD: 22, ED: 22, BD: 22, HS: 26 };
 // overwrite to the new default) vs "user edited the rate" (preserve). Only
 // codes whose default has actually changed need an entry here.
 const RATES_PREV_DEFAULTS = { HS: 125 };
-const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity', 'geocode'];
+const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity', 'geocode', 'routes'];
+
+// v17: cache of OSRM driving routes keyed by `<pickupAddress>|<dumpAddress>`.
+// Value shape: { coords: [[lng, lat], ...], distanceMeters, durationSeconds }.
+// Empty on first load; the Live Operations Map fetches OSRM on mount for any
+// project route not in the cache, then writes the result back via setDb.
+const ROUTES_SEED = {};
+
+// === v17: Nominatim + OSRM helpers used by LiveOperationsTileMap.
+// Browser fetches, no API key. Wrapped in try/catch — callers fall back to
+// straight-line rendering if either fails (CDN down, rate-limited, etc.).
+async function geocodeAddressViaNominatim(address) {
+  if (!address) return null;
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(address) + '&format=json&limit=1&countrycodes=us';
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+    const lat = parseFloat(data[0].lat);
+    const lng = parseFloat(data[0].lon);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return { lat, lng };
+  } catch (e) { return null; }
+}
+async function fetchOSRMDrivingRoute(p1, p2) {
+  if (!p1 || !p2) return null;
+  try {
+    const url = 'https://router.project-osrm.org/route/v1/driving/' + p1.lng + ',' + p1.lat + ';' + p2.lng + ',' + p2.lat + '?geometries=geojson&overview=full';
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.routes) || !data.routes[0]) return null;
+    const r = data.routes[0];
+    if (!r.geometry || !Array.isArray(r.geometry.coordinates)) return null;
+    return { coords: r.geometry.coordinates, distanceMeters: r.distance, durationSeconds: r.duration };
+  } catch (e) { return null; }
+}
 
 // =====================================================================
 // Activity feed
@@ -1550,6 +1600,7 @@ function buildSeed() {
     activity: ACTIVITY_SEED,
     activityLastReadAt: 0,
     geocode: GEOCODE_SEED,
+    routes: ROUTES_SEED,
     schemaVersion: DB_SCHEMA_VERSION,
   };
 }
@@ -1792,6 +1843,25 @@ function hydrateDb(raw) {
       if (Array.isArray(out.haulRequests)) out.haulRequests = out.haulRequests.map(remapProjectId);
       if (Array.isArray(out.invoices))     out.invoices     = out.invoices.map(remapProjectId);
     } catch (e) { /* fall through with v15 shape */ }
+    // v16 → v17: routes cache for OSRM driving polylines + project pickup/dump
+    // counterpart addresses. Backfill empty cache if missing; replace projects
+    // with current PROJECTS_SEED so stored payloads pick up the new pickup/dump
+    // fields (the v16 block already overrode projects above, so this just keeps
+    // the shape current). Also merge GEOCODE_SEED so counterpart addresses get
+    // their pre-seeded approximate coords until Nominatim refines them.
+    try {
+      out.routes = (out.routes && typeof out.routes === 'object' && !Array.isArray(out.routes)) ? out.routes : {};
+      out.geocode = { ...GEOCODE_SEED, ...(out.geocode || {}) };
+      // Always ensure projects carry the v17 pickup/dump fields (defaults-first
+      // spread so any user-edited values on stored projects win).
+      if (Array.isArray(out.projects)) {
+        out.projects = out.projects.map(p => {
+          const seedP = PROJECTS_SEED.find(x => x.id === (p && p.id));
+          if (!seedP) return p;
+          return { pickupLocation: seedP.pickupLocation, dumpLocation: seedP.dumpLocation, ...p };
+        });
+      }
+    } catch (e) { /* fall through with v16 shape */ }
     return out;
   } catch (e) {
     return seed;
@@ -2446,9 +2516,12 @@ function AdminProjects({ db, setDb, navigate }) {
     const containerRef = useRef(null);
     const mapRef = useRef(null);
 
-    // Resolve geocoded points from `db.geocode` for projects + haul requests.
-    // Each entry produces a pickup OR drop marker (or both) and a polyline.
+    // Resolve geocoded points from `db.geocode`. The cache is pre-seeded with
+    // approximate coords for every known address; runtime Nominatim refines
+    // them. resolveCoord falls through to null only if neither seed nor
+    // runtime fetch has resolved the address yet.
     const geocode = (db && db.geocode) || {};
+    const routesCache = (db && db.routes) || {};
     const resolveCoord = (addr) => (addr && geocode[addr]) || null;
 
     const projectPoints = (db.projects || []).map(p => {
@@ -2457,17 +2530,109 @@ function AdminProjects({ db, setDb, navigate }) {
       return { id: 'proj-' + p.id, type: 'project', coord: c, label: p.name + ' · ' + (p.gc || ''), status: p.status || 'active' };
     }).filter(Boolean);
 
-    const haulPoints = [];
-    const routes = [];
-    (db.haulRequests || []).forEach(r => {
-      const pickAddr = r.pickupLocation && r.pickupLocation.address;
-      const dropAddr = r.dropoffLocation && r.dropoffLocation.address;
-      const pickCoord = pickAddr ? resolveCoord(pickAddr) : null;
-      const dropCoord = dropAddr ? resolveCoord(dropAddr) : null;
-      if (pickCoord) haulPoints.push({ id: r.id + '-p', type: 'pickup', coord: pickCoord, label: (r.pickupLocation && r.pickupLocation.name) || pickAddr, status: r.status });
-      if (dropCoord) haulPoints.push({ id: r.id + '-d', type: 'dump', coord: dropCoord, label: (r.dropoffLocation && r.dropoffLocation.name) || dropAddr, status: r.status });
-      if (pickCoord && dropCoord) routes.push({ id: r.id, pick: pickCoord, drop: dropCoord, status: r.status });
+    // v17: per-project OSRM driving routes. Each project carries explicit
+    // `pickupLocation` + `dumpLocation` address strings; the map renders the
+    // OSRM-fetched polyline if cached, otherwise a straight line as fallback
+    // until OSRM completes. Status colors per project status.
+    const projectRoutes = (db.projects || []).map(p => {
+      const pickAddr = p.pickupLocation;
+      const dumpAddr = p.dumpLocation;
+      if (!pickAddr || !dumpAddr) return null;
+      const key = pickAddr + '|' + dumpAddr;
+      const cached = routesCache[key];
+      const pick = resolveCoord(pickAddr);
+      const dump = resolveCoord(dumpAddr);
+      if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
+        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump };
+      }
+      if (pick && dump) {
+        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump };
+      }
+      return null;
+    }).filter(Boolean);
+
+    // Endpoints (pickup + dump markers) per project, derived from the same
+    // address pair. Dedupe by coord so the 5800 Federal Blvd self-marker
+    // (which is also a `db.projects[].address`) doesn't double-render.
+    const projectEndpoints = [];
+    const seenEndpoint = new Set();
+    projectRoutes.forEach(rt => {
+      if (rt.pick) {
+        const k = rt.pickAddr;
+        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.status }); }
+      }
+      if (rt.dump) {
+        const k = rt.dumpAddr;
+        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.status }); }
+      }
     });
+
+    // Stable signature for the SOURCE-DATA effect: changes whenever a route's
+    // coord list grows (e.g., OSRM completed and replaced the 2-pt straight
+    // line with a 200-pt driving polyline). Triggers map.getSource().setData()
+    // without recreating the map.
+    const routesSignature = projectRoutes.map(rt => rt.key + '#' + rt.coords.length + (rt.isStraight ? 's' : 'o')).join('|');
+
+    // Pending-route signature for the ASYNC-FETCH effect: changes when the set
+    // of un-cached project routes changes. Used as a deps array so the effect
+    // doesn't loop after a successful fetch.
+    const pendingKey = (db.projects || [])
+      .filter(p => p.pickupLocation && p.dumpLocation && !routesCache[p.pickupLocation + '|' + p.dumpLocation])
+      .map(p => p.pickupLocation + '|' + p.dumpLocation)
+      .join(',');
+
+    // Async fetch: for each project whose route isn't cached yet, geocode any
+    // missing endpoint via Nominatim, then call OSRM. Each successful step
+    // writes back via setDb so the map's source data updates on next render.
+    // Cancelled on unmount via the `cancelled` flag.
+    useEffect(() => {
+      if (!mlAvailable) return undefined;
+      if (!pendingKey) return undefined;
+      let cancelled = false;
+      (async () => {
+        const projects = (db.projects || []).filter(p => p.pickupLocation && p.dumpLocation);
+        for (const p of projects) {
+          if (cancelled) return;
+          const key = p.pickupLocation + '|' + p.dumpLocation;
+          if ((db.routes || {})[key]) continue;
+          // Geocode endpoints if missing
+          let pick = (db.geocode || {})[p.pickupLocation];
+          let dump = (db.geocode || {})[p.dumpLocation];
+          if (!pick) {
+            const g = await geocodeAddressViaNominatim(p.pickupLocation);
+            if (cancelled) return;
+            if (g) { pick = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.pickupLocation]: g } })); }
+          }
+          if (!dump) {
+            const g = await geocodeAddressViaNominatim(p.dumpLocation);
+            if (cancelled) return;
+            if (g) { dump = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.dumpLocation]: g } })); }
+          }
+          if (!pick || !dump) continue;
+          const route = await fetchOSRMDrivingRoute(pick, dump);
+          if (cancelled) return;
+          if (route) {
+            setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [key]: route } }));
+          }
+        }
+      })();
+      return () => { cancelled = true; };
+    }, [mlAvailable, pendingKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Source-data update effect: whenever projectRoutes changes (OSRM completed,
+    // turning straight lines into real road geometry), push the new GeoJSON to
+    // the existing source rather than recreating the map.
+    useEffect(() => {
+      if (!mapRef.current) return undefined;
+      const src = mapRef.current.getSource && mapRef.current.getSource('routes');
+      if (!src) return undefined;
+      const features = projectRoutes.map(rt => ({
+        type: 'Feature',
+        properties: { id: rt.id, status: rt.status, isStraight: rt.isStraight },
+        geometry: { type: 'LineString', coordinates: rt.coords },
+      }));
+      try { src.setData({ type: 'FeatureCollection', features }); } catch (e) { /* ignore */ }
+    }, [routesSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
       if (!mlAvailable || !containerRef.current) return;
@@ -2508,34 +2673,53 @@ function AdminProjects({ db, setDb, navigate }) {
       mapRef.current = map;
 
       map.on('load', () => {
-        // === Routes — straight polylines (real site doesn't fetch OSRM per recon).
-        const routeFeatures = routes.map(rt => ({
+        // === Routes — OSRM driving polylines per project, with status colors.
+        // First-render data uses whatever projectRoutes has now (cached OSRM
+        // geometry if available, straight-line fallback otherwise). The
+        // source-data effect below pushes updates as OSRM completes.
+        const routeFeatures = projectRoutes.map(rt => ({
           type: 'Feature',
-          properties: { id: rt.id, status: rt.status },
-          geometry: { type: 'LineString', coordinates: [[rt.pick.lng, rt.pick.lat], [rt.drop.lng, rt.drop.lat]] },
+          properties: { id: rt.id, status: rt.status, isStraight: rt.isStraight },
+          geometry: { type: 'LineString', coordinates: rt.coords },
         }));
-        if (routeFeatures.length > 0) {
-          map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
-          // Underglow
-          map.addLayer({
-            id: 'routes-glow', type: 'line', source: 'routes',
-            paint: { 'line-color': '#B3E635', 'line-width': 7, 'line-opacity': 0.18, 'line-blur': 4 },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-          // Bright line
-          map.addLayer({
-            id: 'routes-lines', type: 'line', source: 'routes',
-            paint: {
-              'line-color': ['match', ['get', 'status'],
-                'completed', '#5BC97C',
-                'pending',   '#FF6B47',
-                /* default */ '#B3E635',
-              ],
-              'line-width': 2.5, 'line-opacity': 0.85,
-            },
-            layout: { 'line-cap': 'round', 'line-join': 'round' },
-          });
-        }
+        // Always add the source — even if empty — so the source-data effect
+        // can populate it later. Avoids "no such source: routes" on async OSRM
+        // completion when initial state had nothing to draw.
+        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
+        // Underglow — softer for straight-line fallback, brighter for OSRM.
+        map.addLayer({
+          id: 'routes-glow', type: 'line', source: 'routes',
+          paint: {
+            'line-color': ['match', ['get', 'status'],
+              'active',    '#B3E635',
+              'upcoming',  '#5AAEFF',
+              'delayed',   '#FF6B47',
+              'completed', '#9A9A9A',
+              /* default */ '#B3E635',
+            ],
+            'line-width': 8,
+            'line-opacity': ['case', ['get', 'isStraight'], 0.10, 0.22],
+            'line-blur': 5,
+          },
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+        });
+        // Bright line
+        map.addLayer({
+          id: 'routes-lines', type: 'line', source: 'routes',
+          paint: {
+            'line-color': ['match', ['get', 'status'],
+              'active',    '#B3E635',
+              'upcoming',  '#5AAEFF',
+              'delayed',   '#FF6B47',
+              'completed', '#9A9A9A',
+              /* default */ '#B3E635',
+            ],
+            'line-width': 3,
+            'line-opacity': ['case', ['get', 'isStraight'], 0.45, 0.9],
+            'line-dasharray': ['case', ['get', 'isStraight'], ['literal', [2, 2]], ['literal', [1, 0]]],
+          },
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+        });
 
         // === Markers (DOM-based so we can match the JSE accent styling).
         const mkPickupEl = () => {
@@ -2560,7 +2744,7 @@ function AdminProjects({ db, setDb, navigate }) {
             .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + pt.label.replace(/</g, '&lt;') + '</div>'))
             .addTo(map);
         });
-        haulPoints.forEach(pt => {
+        projectEndpoints.forEach(pt => {
           const el = pt.type === 'pickup' ? mkPickupEl() : mkDumpEl();
           new window.maplibregl.Marker({ element: el, anchor: pt.type === 'dump' ? 'bottom' : 'center' })
             .setLngLat([pt.coord.lng, pt.coord.lat])
@@ -2589,7 +2773,13 @@ function AdminProjects({ db, setDb, navigate }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
           <Label color={C.accent}>Live operations map</Label>
           <span style={{ ...T.caption, color: C.inkDim }}>
-            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {haulPoints.filter(p => p.type === 'pickup').length} pickup{haulPoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {haulPoints.filter(p => p.type === 'dump').length} drop{haulPoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {routes.length} route{routes.length === 1 ? '' : 's'}
+            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {projectRoutes.length} route{projectRoutes.length === 1 ? '' : 's'} {(() => {
+              const osrm = projectRoutes.filter(r => !r.isStraight).length;
+              const totalMeters = projectRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
+              const totalMinutes = projectRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
+              if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
+              return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
+            })()}
           </span>
         </div>
         <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
