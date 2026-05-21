@@ -2654,16 +2654,34 @@ function AdminProjects({ db, setDb, navigate }) {
     // Source-data update effect: whenever projectRoutes changes (OSRM completed,
     // turning straight lines into real road geometry), push the new GeoJSON to
     // the existing source rather than recreating the map.
+    //
+    // Same setTimeout(0) defer as the markers effect — map-init runs later in
+    // source order, so mapRef.current is null on the synchronous useEffect run.
     useEffect(() => {
-      if (!mapRef.current) return undefined;
-      const src = mapRef.current.getSource && mapRef.current.getSource('routes');
-      if (!src) return undefined;
-      const features = projectRoutes.map(rt => ({
-        type: 'Feature',
-        properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
-        geometry: { type: 'LineString', coordinates: rt.coords },
-      }));
-      try { src.setData({ type: 'FeatureCollection', features }); } catch (e) { /* ignore */ }
+      let cancelled = false;
+      const t = setTimeout(() => {
+        if (cancelled) return;
+        if (!mapRef.current) return;
+        const apply = () => {
+          if (cancelled) return;
+          const src = mapRef.current.getSource && mapRef.current.getSource('routes');
+          if (!src) return;
+          const features = projectRoutes.map(rt => ({
+            type: 'Feature',
+            properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
+            geometry: { type: 'LineString', coordinates: rt.coords },
+          }));
+          try { src.setData({ type: 'FeatureCollection', features }); } catch (e) { /* ignore */ }
+        };
+        // The 'routes' source is added inside map.on('load') in the map-init
+        // effect. If load hasn't fired yet, wait for it; otherwise apply now.
+        if (mapRef.current.loaded && mapRef.current.loaded()) {
+          apply();
+        } else if (mapRef.current.once) {
+          mapRef.current.once('load', apply);
+        }
+      }, 0);
+      return () => { cancelled = true; clearTimeout(t); };
     }, [routesSignature]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // Markers effect — separated from the one-shot `map.on('load')` so the
@@ -2680,48 +2698,59 @@ function AdminProjects({ db, setDb, navigate }) {
     // pin walks across the map as the user zooms.
     useEffect(() => {
       if (!mlAvailable) return undefined;
-      const map = mapRef.current;
-      if (!map) return undefined;
-      const mkHaloDotEl = (haloColor, dotColor) => {
-        const el = document.createElement('div');
-        el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
-        const halo = document.createElement('span');
-        halo.className = 'jx-pin-halo';
-        halo.style.background = haloColor;
-        halo.style.opacity = '0.45';
-        const dot = document.createElement('span');
-        dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
-        el.appendChild(halo);
-        el.appendChild(dot);
-        return el;
-      };
-      const colorFor = (type) => type === 'pickup' ? '#ef5b5b' : '#B3E635';
-      // Remove any previously-added markers so we don't accumulate duplicates
-      // when projectEndpoints changes.
-      markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
-      markersRef.current = [];
-      // Defer marker add until the map's first 'load' event fires (tiles ready).
-      // map.loaded() lets us check synchronously; otherwise listen once.
-      const addAll = () => {
-        try {
-          projectEndpoints.forEach(pt => {
-            const c = colorFor(pt.type);
-            const el = mkHaloDotEl(c, c);
-            const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
-              .setLngLat([pt.coord.lng, pt.coord.lat])
-              .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
-              .addTo(map);
-            markersRef.current.push(marker);
-          });
-        } catch (e) { /* swallow — partial markers are better than no markers */ }
-      };
-      if (map.loaded && map.loaded()) {
-        addAll();
-      } else {
-        map.once && map.once('load', addAll);
-      }
-      // Cleanup: remove markers when the effect re-runs OR component unmounts.
+      // Defer with setTimeout(0) — the map-init useEffect is registered AFTER
+      // this one in source order, so on the first render mapRef.current is
+      // still null when this effect's body runs. A 0ms timeout pushes the
+      // marker creation to the next macrotask, after all useEffect bodies in
+      // the current commit have run (including map-init's, which sets
+      // mapRef.current). Safe alternative to reordering effect registrations.
+      let cancelled = false;
+      const t = setTimeout(() => {
+        if (cancelled) return;
+        const map = mapRef.current;
+        if (!map) return;
+        const mkHaloDotEl = (haloColor, dotColor) => {
+          const el = document.createElement('div');
+          el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+          const halo = document.createElement('span');
+          halo.className = 'jx-pin-halo';
+          halo.style.background = haloColor;
+          halo.style.opacity = '0.45';
+          const dot = document.createElement('span');
+          dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
+          el.appendChild(halo);
+          el.appendChild(dot);
+          return el;
+        };
+        const colorFor = (type) => type === 'pickup' ? '#ef5b5b' : '#B3E635';
+        // Remove any previously-added markers so we don't accumulate duplicates
+        // when projectEndpoints changes.
+        markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
+        markersRef.current = [];
+        const addAll = () => {
+          if (cancelled) return;
+          try {
+            projectEndpoints.forEach(pt => {
+              const c = colorFor(pt.type);
+              const el = mkHaloDotEl(c, c);
+              const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
+                .setLngLat([pt.coord.lng, pt.coord.lat])
+                .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
+                .addTo(map);
+              markersRef.current.push(marker);
+            });
+          } catch (e) { /* swallow — partial markers are better than no markers */ }
+        };
+        if (map.loaded && map.loaded()) {
+          addAll();
+        } else {
+          map.once && map.once('load', addAll);
+        }
+      }, 0);
+      // Cleanup: cancel pending timeout + remove markers added so far.
       return () => {
+        cancelled = true;
+        clearTimeout(t);
         markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
         markersRef.current = [];
       };
