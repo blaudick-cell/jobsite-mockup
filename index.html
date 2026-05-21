@@ -5182,7 +5182,6 @@ function AdminHaulRequests({ db, setDb, navigate }) {
         {/* LEFT — id / haul / route / requested */}
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 4 }}>
-            <span style={{ ...T.monoSm, color: C.accent, fontWeight: 700 }}>#{e.r.id.toUpperCase()}</span>
             <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
             <Pill color={lct.c} soft={lct.soft}>{e.lifecycle}</Pill>
           </div>
@@ -5341,7 +5340,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
             <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
               <Label color={C.accent}>Recommended matches</Label>
               <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
-                {recTarget ? 'For #' + recTarget.r.id.toUpperCase() + ' · ' + (recTarget.project ? recTarget.project.name : '') : 'No pending request'}
+                {recTarget ? `For ${haulRequestLabel(db, recTarget.r)}` : 'No pending request'}
               </div>
             </div>
             {recommendations.length === 0 ? (
