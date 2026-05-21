@@ -1237,6 +1237,16 @@ const HOURS_SEED = [
   { id: 'hr-23', driverId: 'dr-009', truckId: 'tk-156', projectId: 'RR', clockIn: '06:00', clockOut: '10:30', breakMin: 30, status: 'pending', date: TODAY_ISO },
   { id: 'hr-24', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', clockIn: '05:50', clockOut: '10:45', breakMin: 30, status: 'closed',  date: TODAY_ISO },
 
+  // Currently-on-the-clock shifts as of NOW — drives Live Trucks KPI,
+  // Live Truck Activity panel, in-flight load counts, avg cycle math.
+  { id: 'hr-25', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:20', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-26', driverId: 'dr-002', truckId: 'tk-212', projectId: 'WP', clockIn: '06:35', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-27', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:30', clockOut: null, breakMin: 15, status: 'open', date: TODAY_ISO },
+  { id: 'hr-28', driverId: 'dr-005', truckId: 'tk-301', projectId: 'GW', clockIn: '06:50', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-29', driverId: 'dr-006', truckId: 'tk-318', projectId: 'GW', clockIn: '07:00', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-30', driverId: 'dr-008', truckId: 'tk-155', projectId: 'RR', clockIn: '06:45', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+  { id: 'hr-30b',driverId: 'dr-013', truckId: 'tk-611', projectId: 'CH', clockIn: '06:55', clockOut: null, breakMin: 0,  status: 'open', date: TODAY_ISO },
+
   // Multi-day hours — days 2-6 relative to TODAY_ISO. Powers the Hours sparkline.
   { id: 'hr-31', driverId: 'dr-001', truckId: 'tk-447', projectId: 'WP', clockIn: '06:30', clockOut: '14:45', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
   { id: 'hr-32', driverId: 'dr-003', truckId: 'tk-088', projectId: 'WP', clockIn: '06:20', clockOut: '15:00', breakMin: 30, status: 'closed', date: isoDaysAgo(2) },
@@ -2204,10 +2214,23 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
-            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[2] }}>
               <Pill color={C.accent} soft={C.accentSoft}>{p.haulType}</Pill>
               <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{p.materialType}</Pill>
             </div>
+            {(() => {
+              const remainingLoads = Math.max(0, (p.loadsTarget || 0) - (p.loadsCompleted || 0));
+              const remainingCY = remainingLoads * 12;
+              return (
+                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, lineHeight: 1.4 }}>
+                  {remainingCY > 0 ? remainingCY.toLocaleString() + ' CY remaining' : 'target hit'}
+                  <span style={{ color: C.inkFaint }}>{' · '}</span>
+                  <span style={{ color: C.ink }}>{p.pickupLocation}</span>
+                  <span style={{ color: C.accent, margin: '0 4px' }}>{'\u2192'}</span>
+                  <span style={{ color: C.ink }}>{p.dumpLocation}</span>
+                </div>
+              );
+            })()}
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>LOADS</div>
@@ -2238,8 +2261,22 @@ function AdminProjects({ db, setDb, navigate }) {
               <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{p.ops.length}</div>
             </div>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: S[3], alignItems: 'flex-end' }}>
-            <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Open dispatch</Btn>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: S[2], alignItems: 'flex-end' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[1], alignItems: 'stretch', minWidth: 130 }}>
+              {p.healthStatus === 'critical' && (
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Resolve delay</Btn>
+              )}
+              {p.healthStatus === 'atrisk' && (
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Assign trucks</Btn>
+              )}
+              {p.healthStatus === 'healthy' && p.loadsCompleted >= p.loadsTarget && (
+                <Btn variant="primary" size="sm" onClick={() => updateProject(p.id, { status: 'completed' })}>Close haul</Btn>
+              )}
+              {!(p.healthStatus === 'critical' || p.healthStatus === 'atrisk' || (p.healthStatus === 'healthy' && p.loadsCompleted >= p.loadsTarget)) && (
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Open dispatch</Btn>
+              )}
+              <Btn variant="secondary" size="xs" onClick={() => navigate('/admin/p/' + p.id)}>View route</Btn>
+            </div>
             <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>{fmtHours(p.totalHours)} hrs · {fmtMoney(p.totalRevenue)}</div>
           </div>
         </div>
@@ -2611,7 +2648,12 @@ function AdminProjects({ db, setDb, navigate }) {
       <Crumbs items={[{ label: 'Admin' }, { label: 'Control Center' }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Now · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 6 }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: C.ok, boxShadow: `0 0 0 0 ${C.ok}`, animation: 'jse-pulse 1.6s ease-out infinite' }} />
+            <Label color={C.accent} style={{ margin: 0 }}>Live · Now · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</Label>
+            <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· dispatch online · updated 4s ago</span>
+          </div>
+          <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Control Center</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Live dispatch, truck flow, haul status, and exceptions.</div>
         </div>
@@ -2645,26 +2687,48 @@ function AdminProjects({ db, setDb, navigate }) {
       <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[6] }}>
         {/* Needs Attention */}
         <Card padding={0}>
-          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <Label color={C.accent}>Needs attention</Label>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{attentionItems.length} exception{attentionItems.length === 1 ? '' : 's'} to triage</div>
-            </div>
-          </div>
+          {(() => {
+            const criticalCount = attentionItems.filter(it => it.severity === 'critical').length;
+            const warningCount = attentionItems.filter(it => it.severity === 'warning').length;
+            const infoCount = attentionItems.filter(it => it.severity === 'info').length;
+            return (
+              <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: S[2] }}>
+                <div>
+                  <Label color={C.accent}>Needs attention</Label>
+                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{attentionItems.length} exception{attentionItems.length === 1 ? '' : 's'} to triage</div>
+                </div>
+                <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+                  <Pill color={criticalCount > 0 ? (C.danger || C.warn) : C.inkDim} soft={criticalCount > 0 ? (C.dangerSoft || C.warnSoft) : 'rgba(255,255,255,0.04)'}>{criticalCount} critical</Pill>
+                  <Pill color={warningCount > 0 ? C.warn : C.inkDim} soft={warningCount > 0 ? C.warnSoft : 'rgba(255,255,255,0.04)'}>{warningCount} warning</Pill>
+                  <Pill color={infoCount > 0 ? C.info : C.inkDim} soft={infoCount > 0 ? C.infoSoft : 'rgba(255,255,255,0.04)'}>{infoCount} info</Pill>
+                </div>
+              </div>
+            );
+          })()}
           {attentionItems.length === 0 ? (
             <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>All clear — no exceptions on the board right now.</div>
           ) : (
-            <div style={{ maxHeight: 380, overflowY: 'auto' }}>
-              {attentionItems.map((it, i) => {
-                const tone = sevTone(it.severity);
+            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+              {['critical', 'warning', 'info'].map(sev => {
+                const group = attentionItems.filter(it => it.severity === sev);
+                if (group.length === 0) return null;
+                const tone = sevTone(sev);
                 return (
-                  <div key={it.id} style={{ padding: S[3], borderBottom: i < attentionItems.length - 1 ? `1px solid ${C.rule}` : 'none', display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-                    <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{it.title}</div>
-                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{it.body}</div>
+                  <div key={'sev-' + sev}>
+                    <div style={{ ...T.caption, padding: `${S[2]}px ${S[4]}px`, background: 'rgba(255,255,255,0.025)', color: tone.c, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span>{tone.label}</span>
+                      <span style={{ ...T.caption, color: C.inkDim, fontWeight: 600 }}>{group.length}</span>
                     </div>
-                    <Btn variant="secondary" size="xs" onClick={it.onAction}>{it.actionLabel}</Btn>
+                    {group.map((it, i) => (
+                      <div key={it.id} style={{ padding: S[3], borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                        <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
+                        <div style={{ flex: 1, minWidth: 200 }}>
+                          <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{it.title}</div>
+                          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{it.body}</div>
+                        </div>
+                        <Btn variant="secondary" size="xs" onClick={it.onAction}>{it.actionLabel}</Btn>
+                      </div>
+                    ))}
                   </div>
                 );
               })}
@@ -2673,6 +2737,133 @@ function AdminProjects({ db, setDb, navigate }) {
         </Card>
         <LiveOperationsMap />
       </div>
+
+      {/* Live truck activity + site conditions row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[5] }} className="hcc-attn-row">
+        {/* Live Truck Activity */}
+        <Card padding={0}>
+          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+            <div>
+              <Label color={C.accent}>Live truck activity</Label>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{liveTrucksAll} truck{liveTrucksAll === 1 ? '' : 's'} on the clock · realtime cycle state</div>
+            </div>
+            <Pill color={C.ok} soft={C.okSoft}>Live</Pill>
+          </div>
+          {(() => {
+            // Derive per-truck live state from open shifts. Cycle state cycles
+            // through Loading/Hauling/Dumping/Returning based on a deterministic
+            // hash of truckId+now so the demo feels live without random churn.
+            const openShifts = (db.hours || []).filter(h => h.status === 'open');
+            const cycleStates = ['Loading', 'Hauling', 'Dumping', 'Returning'];
+            const stateColor = (s) => s === 'Hauling' ? C.accent : s === 'Loading' ? C.info : s === 'Dumping' ? C.warn : s === 'Returning' ? C.inkDim : C.inkDim;
+            const minutesSinceClockIn = (clockIn) => {
+              const [hh, mm] = (clockIn || '00:00').split(':').map(Number);
+              const now = new Date();
+              return Math.max(0, (now.getHours() * 60 + now.getMinutes()) - (hh * 60 + mm));
+            };
+            const rows = openShifts.map(h => {
+              const t = db.trucks.find(tt => tt.id === h.truckId);
+              const d = db.drivers.find(dd => dd.id === h.driverId);
+              const proj = db.projects.find(pp => pp.id === h.projectId);
+              const mins = minutesSinceClockIn(h.clockIn);
+              // Bucket: every ~12 min the truck moves to next state.
+              const stateIdx = Math.floor(mins / 12) % cycleStates.length;
+              const state = cycleStates[stateIdx];
+              // ETA = remaining minutes in current cycle (12 - mins%12).
+              const etaMin = 12 - (mins % 12);
+              // Last ping: 5-55s ago, deterministic per truck.
+              const ping = 5 + ((t ? t.plate.charCodeAt(0) : 0) % 50);
+              return { h, t, d, proj, state, etaMin, ping };
+            });
+            if (rows.length === 0) return <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No trucks currently on the clock.</div>;
+            return (
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><Th>Truck</Th><Th>Driver</Th><Th>Haul</Th><Th>Status</Th><Th align="right">ETA</Th><Th align="right">Last ping</Th></tr></thead>
+                <tbody>
+                  {rows.map(r => (
+                    <Tr key={r.h.id} onClick={() => r.t && r.proj && r.t.haulerId ? navigate(`/admin/p/${r.proj.id}/o/${r.t.haulerId}/t/${r.t.id}`) : null}>
+                      <Td mono><span style={{ color: C.accent }}>#{r.t ? r.t.plate : '—'}</span></Td>
+                      <Td>{r.d ? r.d.name : <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                      <Td>{r.proj ? r.proj.name : <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                      <Td><Pill color={stateColor(r.state)} soft={r.state === 'Hauling' ? C.accentSoft : r.state === 'Loading' ? C.infoSoft : r.state === 'Dumping' ? C.warnSoft : 'rgba(255,255,255,0.05)'}>{r.state}</Pill></Td>
+                      <Td align="right" mono>{r.etaMin} min</Td>
+                      <Td align="right" mono dim>{r.ping}s ago</Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </table>
+            );
+          })()}
+        </Card>
+
+        {/* Site Conditions */}
+        <Card padding={0}>
+          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <Label color={C.accent}>Site conditions</Label>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Front Range · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</div>
+            </div>
+            <Pill color={C.ok} soft={C.okSoft}>Optimal</Pill>
+          </div>
+          <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: S[4] }}>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
+              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>62°F</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>Hi 71° · Lo 48°</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
+              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>11 mph</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>WSW · gusts 18</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
+              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ok }}>12%</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next 6 hrs</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
+              <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: C.ok }}>Dry</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>no mud / freeze risk</div>
+            </div>
+          </div>
+        </Card>
+      </div>
+
+      {/* Dispatch Timeline — horizontal operational events */}
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
+          <div>
+            <Label color={C.accent}>Dispatch timeline · today</Label>
+            <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Operational events since shift start</div>
+          </div>
+          <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>06:00 → {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</span>
+        </div>
+        <div style={{ padding: S[4] }}>
+          {(() => {
+            const events = [
+              { time: '06:00', label: 'Hauling started · WP, GW',           tone: C.ok },
+              { time: '07:14', label: 'First load logged · #447',           tone: C.accent },
+              { time: '08:15', label: 'Queue buildup · GW pickup',          tone: C.warn },
+              { time: '09:30', label: 'Mountain Aggregate dispatched · CH', tone: C.info },
+              { time: '10:05', label: 'Truck shortage · RR (2 idle bench)', tone: C.warn },
+              { time: '11:20', label: 'Weather check · all clear',          tone: C.ok },
+            ];
+            return (
+              <div style={{ position: 'relative', display: 'flex', justifyContent: 'space-between', gap: S[2], paddingTop: S[4], paddingBottom: S[2] }}>
+                <div style={{ position: 'absolute', left: 12, right: 12, top: 30, height: 1, background: C.rule }} />
+                {events.map((e, i) => (
+                  <div key={i} style={{ position: 'relative', flex: 1, minWidth: 0, textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: S[1] }}>
+                    <span style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{e.time}</span>
+                    <span style={{ width: 10, height: 10, borderRadius: '50%', background: e.tone, boxShadow: `0 0 0 3px ${C.bg}` }} />
+                    <span style={{ ...T.caption, color: C.ink, lineHeight: 1.3, padding: '0 4px' }}>{e.label}</span>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      </Card>
 
       {/* Active hauls — operational cards */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
