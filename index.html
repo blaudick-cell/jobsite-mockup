@@ -2673,125 +2673,101 @@ function AdminProjects({ db, setDb, navigate }) {
       mapRef.current = map;
 
       map.on('load', () => {
-        // === Routes — OSRM driving polylines per project, with status colors.
-        // First-render data uses whatever projectRoutes has now (cached OSRM
-        // geometry if available, straight-line fallback otherwise). The
-        // source-data effect below pushes updates as OSRM completes.
+        // Each layer wrapped in try/catch — a single layer failing must NOT
+        // block subsequent layers OR the marker creation that follows.
+        // Previous bug: routes-lines threw on data-expression dasharray and
+        // markers never got added because the exception escaped this callback.
         const routeFeatures = projectRoutes.map(rt => ({
           type: 'Feature',
-          properties: { id: rt.id, status: rt.status, isStraight: rt.isStraight },
+          properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
           geometry: { type: 'LineString', coordinates: rt.coords },
         }));
-        // Always add the source — even if empty — so the source-data effect
-        // can populate it later. Avoids "no such source: routes" on async OSRM
-        // completion when initial state had nothing to draw.
-        map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
-        // Dark casing — sits under the colored route line to give the
-        // highway-shield look from jobsiteexchange.com's haul-calc map.
-        // Single dark stroke, fixed thin weight, low opacity. Matches the
-        // real site's `{ color: '#222', weight: 1.5, opacity: 0.5 }` recipe
-        // (see map-recon-haul-calc.md) — scaled up slightly for raster tiles.
-        map.addLayer({
+        try {
+          map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
+        } catch (e) { /* source exists or addSource failed */ }
+        const statusColor = ['match', ['get', 'status'],
+          'active',    '#B3E635',
+          'upcoming',  '#5AAEFF',
+          'delayed',   '#FF6B47',
+          'completed', '#9A9A9A',
+          /* default */ '#B3E635',
+        ];
+        // Dark casing — sits under the colored route line for highway-shield depth.
+        try { map.addLayer({
           id: 'routes-casing', type: 'line', source: 'routes',
-          paint: {
-            'line-color': '#0A0A0A',
-            'line-width': 5,
-            'line-opacity': ['case', ['get', 'isStraight'], 0.20, 0.55],
-          },
+          paint: { 'line-color': '#0A0A0A', 'line-width': 5, 'line-opacity': 0.55 },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-        });
-        // Underglow — softer for straight-line fallback, brighter for OSRM.
-        map.addLayer({
+        }); } catch (e) { /* ignore */ }
+        // Underglow
+        try { map.addLayer({
           id: 'routes-glow', type: 'line', source: 'routes',
-          paint: {
-            'line-color': ['match', ['get', 'status'],
-              'active',    '#B3E635',
-              'upcoming',  '#5AAEFF',
-              'delayed',   '#FF6B47',
-              'completed', '#9A9A9A',
-              /* default */ '#B3E635',
-            ],
-            'line-width': 8,
-            'line-opacity': ['case', ['get', 'isStraight'], 0.10, 0.22],
-            'line-blur': 5,
-          },
+          paint: { 'line-color': statusColor, 'line-width': 8, 'line-opacity': 0.22, 'line-blur': 5 },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-        });
-        // Bright line — solid for OSRM-routed geometry. Dashed straight-line
-        // fallback gets its own layer below so we don't trip MapLibre's
-        // "data expressions not supported on line-dasharray" rule.
-        map.addLayer({
+        }); } catch (e) { /* ignore */ }
+        // Solid bright line — OSRM-routed geometry only (filter by !isStraight).
+        try { map.addLayer({
           id: 'routes-lines', type: 'line', source: 'routes',
-          filter: ['!', ['get', 'isStraight']],
-          paint: {
-            'line-color': ['match', ['get', 'status'],
-              'active',    '#B3E635',
-              'upcoming',  '#5AAEFF',
-              'delayed',   '#FF6B47',
-              'completed', '#9A9A9A',
-              /* default */ '#B3E635',
-            ],
-            'line-width': 3,
-            'line-opacity': 0.9,
-          },
+          filter: ['==', ['get', 'isStraight'], false],
+          paint: { 'line-color': statusColor, 'line-width': 3, 'line-opacity': 0.9 },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-        });
-        // Dashed line — only renders for straight-line fallback (before OSRM
-        // completes). Fixed dasharray since MapLibre doesn't allow data exprs
-        // here. Lower opacity so the OSRM completion is visually obvious.
-        map.addLayer({
+        }); } catch (e) { /* ignore */ }
+        // Dashed line — straight-line fallback only (filter by isStraight==true).
+        try { map.addLayer({
           id: 'routes-lines-fallback', type: 'line', source: 'routes',
-          filter: ['get', 'isStraight'],
-          paint: {
-            'line-color': ['match', ['get', 'status'],
-              'active',    '#B3E635',
-              'upcoming',  '#5AAEFF',
-              'delayed',   '#FF6B47',
-              'completed', '#9A9A9A',
-              /* default */ '#B3E635',
-            ],
-            'line-width': 3,
-            'line-opacity': 0.45,
-            'line-dasharray': [2, 2],
-          },
+          filter: ['==', ['get', 'isStraight'], true],
+          paint: { 'line-color': statusColor, 'line-width': 3, 'line-opacity': 0.45, 'line-dasharray': [2, 2] },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
-        });
+        }); } catch (e) { /* ignore */ }
 
-        // === Markers — halo+dot style matched to jobsiteexchange.com's
-        //   `.jx-haul-pin` pattern (see map-recon-haul-calc.md).
-        //   Pickup (origin) = RED halo + RED dot.
-        //   Dump (destination) = GREEN halo + GREEN dot (matches brand accent).
-        //   Project (site itself) = blue diamond chip, slightly different so
-        //   it doesn't compete with the active route endpoints.
+        // === Markers — halo+dot pin matched to jobsiteexchange.com's
+        //   `.jx-haul-pin` recipe verbatim (see map-recon-haul-calc.md).
+        //   Container is flex-centered so the DOT's center sits at the
+        //   container's center sits at the marker's geographic point.
+        //   anchor:'center' is mandatory — MapLibre's default differs by
+        //   element type and any drift means the pin walks across the map
+        //   as the user zooms.
         const mkHaloDotEl = (haloColor, dotColor) => {
           const el = document.createElement('div');
-          el.style.cssText = 'position:relative;width:28px;height:28px;cursor:pointer;';
-          el.innerHTML =
-            '<span style="position:absolute;inset:0;border-radius:50%;opacity:0.55;background:radial-gradient(circle, ' + haloColor + '8c, ' + haloColor + '2e 55%, ' + haloColor + '00 75%);pointer-events:none;"></span>' +
-            '<span style="position:absolute;top:50%;left:50%;width:16px;height:16px;margin:-8px 0 0 -8px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c;"></span>';
+          // Flex-centered 32px box; dot + halo both centered inside via flex.
+          // No transforms, no negative margins — visual center == geometric
+          // center, which is what MapLibre needs for stable lat/lng anchoring.
+          el.style.cssText = 'position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+          const halo = document.createElement('span');
+          // Halo: a softly glowing translucent circle behind the dot.
+          // Uses 60% solid center with quick falloff so it's clearly visible
+          // against the dark CartoCDN map without overpowering the dot.
+          halo.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:radial-gradient(circle,' + haloColor + 'cc 0%,' + haloColor + '99 30%,' + haloColor + '4d 55%,' + haloColor + '00 75%);opacity:0.85;pointer-events:none;';
+          const dot = document.createElement('span');
+          // Dot: solid colored center with 3px dark border for contrast
+          // against the halo. 14px keeps the visual weight balanced with
+          // the 32px halo (recon spec is 28px container, 16px dot — we
+          // scale up slightly to make the halo more readable on dark tiles).
+          dot.style.cssText = 'position:relative;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.06);';
+          el.appendChild(halo);
+          el.appendChild(dot);
           return el;
         };
-        const mkPickupEl  = () => mkHaloDotEl('#ef5b5b', '#ef5b5b');
-        const mkDumpEl    = () => mkHaloDotEl('#B3E635', '#B3E635');
-        const mkProjectEl = () => {
-          const el = document.createElement('div');
-          el.style.cssText = 'width:18px;height:18px;border-radius:4px;background:rgba(90,174,255,0.18);border:2px solid #5AAEFF;box-shadow:0 0 10px rgba(90,174,255,0.6);cursor:pointer;transform:rotate(45deg);';
-          return el;
-        };
+        const mkPickupEl = () => mkHaloDotEl('#ef5b5b', '#ef5b5b');
+        const mkDumpEl   = () => mkHaloDotEl('#B3E635', '#B3E635');
 
-        projectPoints.forEach(pt => {
-          new window.maplibregl.Marker({ element: mkProjectEl() })
-            .setLngLat([pt.coord.lng, pt.coord.lat])
-            .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + pt.label.replace(/</g, '&lt;') + '</div>'))
-            .addTo(map);
-        });
-        projectEndpoints.forEach(pt => {
-          const el = pt.type === 'pickup' ? mkPickupEl() : mkDumpEl();
-          new window.maplibregl.Marker({ element: el, anchor: 'center' })
-            .setLngLat([pt.coord.lng, pt.coord.lat])
-            .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
-            .addTo(map);
-        });
+        // NOTE: previously we rendered a separate blue diamond for each
+        //   project (`projectPoints`). The real jobsiteexchange.com haul-calc
+        //   doesn't show project sites separately — it shows origin (pickup)
+        //   + destination (dump) endpoints with a route between, and that's
+        //   it. Each project's `address` field equals either its
+        //   `pickupLocation` (HAS projects) or its `dumpLocation` (NEEDS
+        //   projects), so the blue diamond was always sitting on the exact
+        //   same coords as one of the endpoint halo+dots — visual noise
+        //   without adding info. Dropped per Robert's complaint.
+        try {
+          projectEndpoints.forEach(pt => {
+            const el = pt.type === 'pickup' ? mkPickupEl() : mkDumpEl();
+            new window.maplibregl.Marker({ element: el, anchor: 'center' })
+              .setLngLat([pt.coord.lng, pt.coord.lat])
+              .setPopup(new window.maplibregl.Popup({ offset: 18, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
+              .addTo(map);
+          });
+        } catch (e) { /* a single marker failure shouldn't blank the whole layer */ }
       });
 
       // Resize observer — MapLibre needs explicit resize() on container changes.
