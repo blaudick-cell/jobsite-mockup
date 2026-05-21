@@ -7,6 +7,12 @@ description: The `db` shape for Jobsite Exchange. Ten collections, relationships
 
 `db` lives in App-level `useState` and persists via `jse_db_v1` localStorage. Single root scalar: `activityLastReadAt: number` — timestamp of most-recent activity event viewed (drives sidebar unread badge).
 
+## Supabase data layer (Phase 1 shipped)
+
+The `db` shape documented below now **mirrors a Supabase Postgres schema** in addition to driving local state. Phase 1 (schema parity) shipped — every collection has a matching table in the mockup's Supabase project (`naqqlztgbayxcgfphrxg`). Phase 2 (read path) reseeds local state from Supabase on hydrate with localStorage fallback. After Phase 3 (write path + Realtime), Supabase becomes the source of truth and JS `db` becomes a hot cache. See [[jse-supabase]] for the full plan + migration log + the lockstep rule (any JS `DB_SCHEMA_VERSION` bump requires a matching `alter table` applied BEFORE the JS commit pushes).
+
+Naming: Postgres uses `snake_case`, JS uses `camelCase`. A thin adapter at the Supabase boundary handles the rename — don't sprinkle case conversions through the code.
+
 ## Ten collections
 
 | key | seed | shape |

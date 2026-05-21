@@ -34,6 +34,7 @@ After `git push`:
 - **Don't break existing flows.** Mobile responsive intact ([[jse-design-system]]). Cross-tab sync intact ([[jse-realtime]]). Reset still works.
 - Git credentials cached in `.git-credentials` — pushes go through silently.
 - Never force-push, never `--no-verify`, never push to a non-`main` target branch (push your feature branch with `branch:main` refspec).
+- **JS ↔ SQL lockstep ([[jse-supabase]]).** Any `DB_SCHEMA_VERSION` bump that adds/renames/drops a column or table requires a matching `alter table` (or `create table`) applied to Supabase via the MCP `apply_migration` BEFORE pushing the JS commit. Producer flags the SQL in the proposal's Risk notes with `SCHEMA-DRIFT RISK:` plus the exact statement; orchestrator runs it, confirms with `list_migrations`, then pushes. Skipping this step will silently degrade Phase 2 hydrate to localStorage-only mode and break Phase 3 writes outright.
 
 ## 7-block script layout
 
