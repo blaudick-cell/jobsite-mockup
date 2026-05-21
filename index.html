@@ -5646,13 +5646,25 @@ function AdminActivity({ db, setDb, navigate }) {
     }
   };
 
-  // Group reverse-chrono by day. Buckets: 'Today' / 'Yesterday' / 'May 14' etc.
+  // Group reverse-chrono by day. Buckets: 'Today · May 20' / 'Yesterday · May 19'
+  // / 'Mon · May 18' etc. Uses REAL current date (not the frozen TODAY_ISO demo
+  // anchor) because activity events are stamped with Date.now(); comparing against
+  // the frozen demo date would mis-label real-today events with the literal date
+  // and stick "Today" on real-yesterday events — the source of the previous
+  // confusing double-header.
+  const realNow = new Date();
+  const realTodayIso = new Date(Date.UTC(realNow.getFullYear(), realNow.getMonth(), realNow.getDate()))
+    .toISOString().slice(0, 10);
+  const realYesterdayDt = new Date(Date.UTC(realNow.getFullYear(), realNow.getMonth(), realNow.getDate() - 1));
+  const realYesterdayIso = realYesterdayDt.toISOString().slice(0, 10);
   const labelFor = (ts) => {
     const d = new Date(ts);
-    const iso = d.toISOString().slice(0, 10);
-    if (isToday(iso)) return 'Today';
-    if (isYesterday(iso)) return 'Yesterday';
-    return isoToShortDate(iso);
+    const iso = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+      .toISOString().slice(0, 10);
+    const dateLabel = isoToShortDate(iso);
+    if (iso === realTodayIso)     return `Today · ${dateLabel}`;
+    if (iso === realYesterdayIso) return `Yesterday · ${dateLabel}`;
+    return `${isoToWeekdayShort(iso)} · ${dateLabel}`;
   };
   const groups = [];
   const byLabel = new Map();
