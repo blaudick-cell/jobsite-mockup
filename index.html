@@ -1428,6 +1428,20 @@ function materialLabel(code) {
   return m ? m.label : code;
 }
 
+// Human-friendly label for a haul request used wherever the raw `hreq-NNN` id
+// previously surfaced in the UI (breadcrumbs, page titles, list rows, headers,
+// activity summaries). Falls back to a volume+material string if the project
+// can't be resolved. The underlying id (e.g. `hreq-002`) is still kept on the
+// record and used for refIds, URLs, and refId-prefix routing — only the
+// user-visible chrome switches to this name.
+function haulRequestLabel(state, req) {
+  if (!req) return 'Haul Request';
+  const proj = state && state.projects ? state.projects.find(p => p.id === req.projectId) : null;
+  const matName = materialLabel(req.materialCode);
+  if (proj) return `${proj.name} · ${req.volumeCY} CY ${matName}`;
+  return `${req.volumeCY} CY ${matName}`;
+}
+
 // Seeded activity events spread across the last few days. Real timestamps
 // (Date.now() minus offsets) so day grouping reflects wall-clock time.
 const ACTIVITY_SEED = (() => {
@@ -4326,7 +4340,6 @@ function AdminHaulRequests({ db, setDb, navigate }) {
     const truck  = req.matchedTruckId  ? db.trucks.find(t => t.id === req.matchedTruckId) : null;
     return (
       <Tr key={req.id} onClick={() => navigate(`/admin/requests/${req.id}`)}>
-        <Td mono><span style={{ color: C.accent }}>{req.id}</span></Td>
         <Td>{project ? project.name : '—'}</Td>
         <Td>{material ? material.label : req.materialCode}</Td>
         <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
@@ -4353,7 +4366,6 @@ function AdminHaulRequests({ db, setDb, navigate }) {
   const head = (
     <thead>
       <tr>
-        <Th>Request ID</Th>
         <Th>Haul</Th>
         <Th>Material</Th>
         <Th align="right">Volume</Th>
@@ -4434,7 +4446,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? mutator(r) : r) },
       { type: 'haul_request.updated', actorRole: 'admin', actorId: null,
-        summary: `Admin updated ${label} on ${req.id}`, refId: req.id }
+        summary: `Admin updated ${label} on ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
   };
   const pickup  = req.pickupLocation  || { name: '', address: '' };
@@ -4479,7 +4491,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         type: 'haulRequest.truckAdded',
         actorRole: 'admin',
         actorId: null,
-        summary: `Admin added truck #${assignedTruck ? assignedTruck.plate : '?'} (${assignedHauler ? assignedHauler.name : 'unknown hauler'}) to ${req.id}`,
+        summary: `Admin added truck #${assignedTruck ? assignedTruck.plate : '?'} (${assignedHauler ? assignedHauler.name : 'unknown hauler'}) to ${haulRequestLabel(db, req)}`,
         refId: req.id,
       }
     ));
@@ -4565,7 +4577,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       <Crumbs items={[
         { label: 'Admin', to: '/admin' },
         { label: 'Haul Requests', to: '/admin/requests' },
-        { label: req.id },
+        { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
       {/* Logistics details (v12) — pickup, dropoff, timing, and loading/dumping site access. */}
@@ -4655,7 +4667,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <Label color={C.accent} style={{ marginBottom: 6 }}>Request {req.id}</Label>
+            <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Request</Label>
             <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
               {req.volumeCY} CY of {material ? material.label : req.materialCode}
             </h1>
@@ -8446,7 +8458,12 @@ function App() {
     else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE — Activity';
     else if (h.startsWith('/admin/requests')) {
-      title = parts[2] ? `JSE — Haul Request ${parts[2]}` : 'JSE — Haul Requests';
+      if (parts[2] && db && db.haulRequests) {
+        const r = db.haulRequests.find(x => x.id === parts[2]);
+        title = r ? `JSE — ${haulRequestLabel(db, r)}` : 'JSE — Haul Requests';
+      } else {
+        title = 'JSE — Haul Requests';
+      }
     }
     else if (h.startsWith('/admin/haulers')) {
       if (parts[2] && db && db.haulers) {
