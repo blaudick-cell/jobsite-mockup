@@ -5162,14 +5162,32 @@ function AdminInvoiceDetail({ invoiceId, db, setDb, navigate }) {
 // Cross-tab sync ([[jse-realtime]]) means a real driver's actions reflect
 // here instantly and vice versa.
 // =====================================================================
-function MiniPhone({ children, label, badge, badgeColor = C.accent }) {
+function MiniPhone({ children, label, badge, badgeColor = C.accent, onClick }) {
   // 320x600 scaled phone widget for embedding in the admin grid.
+  // When `onClick` is provided, the label/badge header row becomes a
+  // clickable affordance that opens the truck's detail view.
+  const headerInner = (
+    <>
+      {label && <Label>{label}</Label>}
+      {badge && <Pill color={badgeColor} soft={badgeColor === C.accent ? C.accentSoft : (badgeColor === C.warn ? C.warnSoft : 'rgba(255,255,255,0.06)')}>{badge}</Pill>}
+      {onClick && <span style={{ ...T.caption, color: C.accent, marginLeft: 2 }} aria-hidden="true">{'\u2197'}</span>}
+    </>
+  );
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: S[2] }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-        {label && <Label>{label}</Label>}
-        {badge && <Pill color={badgeColor} soft={badgeColor === C.accent ? C.accentSoft : (badgeColor === C.warn ? C.warnSoft : 'rgba(255,255,255,0.06)')}>{badge}</Pill>}
-      </div>
+      {onClick ? (
+        <button
+          onClick={onClick}
+          title="Open truck detail"
+          style={{ display: 'flex', alignItems: 'center', gap: S[2], background: 'transparent', border: 'none', color: 'inherit', padding: '4px 8px', borderRadius: R.sm, cursor: 'pointer', font: 'inherit' }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.10)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        >
+          {headerInner}
+        </button>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>{headerInner}</div>
+      )}
       <div style={{ width: 280, background: '#000', borderRadius: 32, padding: 8, boxShadow: '0 12px 32px rgba(0,0,0,0.45), 0 0 0 1.5px #1a1a1a' }}>
         <div style={{ width: '100%', background: C.bg, borderRadius: 26, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 540 }}>
           <div style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', width: 88, height: 20, background: '#000', borderRadius: R.md, zIndex: 100 }} />
@@ -5257,6 +5275,13 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                 label={`${driver.name} · #${truck.plate}`}
                 badge={badge}
                 badgeColor={badgeColor}
+                onClick={() => {
+                  if (truck.projectId && truck.haulerId) {
+                    navigate(`/admin/p/${truck.projectId}/o/${truck.haulerId}/t/${truck.id}`);
+                  } else if (truck.haulerId) {
+                    navigate(`/admin/haulers/${truck.haulerId}`);
+                  }
+                }}
               >
                 {driverTrucks.length === 1
                   ? <DriverHome driver={driver} truck={truck} db={db} setDb={setDb} navigate={noopNavigate} embedded onOpenLogLoad={(tk) => setLogFor({ driver, truck: tk })} />
@@ -5998,6 +6023,13 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   const truckType = TRUCK_TYPES.find(tt => tt.code === truck.type);
   const truckLoads = db.loads.filter(l => l.truckId === truckId).sort((a, b) => a.time.localeCompare(b.time));
   const truckHoursRows = db.hours.filter(h => h.truckId === truckId);
+  // Inline edits to today's loads — every field clickable, persists via setDb.
+  const updateLoad = (id, patch) => setDb(prev => ({ ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, ...patch } : l) }));
+  const loadMaterialOptions = MATERIALS.map(m => ({ value: m.code, label: m.label }));
+  const loadStatusOptions = [
+    { value: 'pending',  label: 'Pending' },
+    { value: 'approved', label: 'Approved' },
+  ];
   const todayCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const rate = db.rates[truck.type];
@@ -6067,18 +6099,15 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                 <div style={{ ...T.bodySm, color: C.inkDim }}>No loads yet today.</div>
               </td></tr>
             )}
-            {truckLoads.map(l => {
-              const m = MATERIALS.find(mm => mm.code === l.material);
-              return (
-                <Tr key={l.id}>
-                  <Td mono>{l.time}</Td>
-                  <Td mono dim>{l.ticketNo || '—'}</Td>
-                  <Td>{m ? m.label : l.material}</Td>
-                  <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{l.cy} CY</span></Td>
-                  <Td><StatusPill status={l.status} /></Td>
-                </Tr>
-              );
-            })}
+            {truckLoads.map(l => (
+              <Tr key={l.id}>
+                <Td mono><EditableText value={l.time} onSave={(v) => updateLoad(l.id, { time: v })} mono placeholder="HH:MM" /></Td>
+                <Td mono dim><EditableText value={l.ticketNo || ''} onSave={(v) => updateLoad(l.id, { ticketNo: v })} mono placeholder="Ticket #" /></Td>
+                <Td><EditableSelect value={l.material} options={loadMaterialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
+                <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
+                <Td><EditableSelect value={l.status} options={loadStatusOptions} onSave={(v) => updateLoad(l.id, { status: v })} /></Td>
+              </Tr>
+            ))}
           </tbody>
         </table>
       </Card>
