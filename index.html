@@ -2717,9 +2717,12 @@ function AdminProjects({ db, setDb, navigate }) {
           },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
         });
-        // Bright line
+        // Bright line — solid for OSRM-routed geometry. Dashed straight-line
+        // fallback gets its own layer below so we don't trip MapLibre's
+        // "data expressions not supported on line-dasharray" rule.
         map.addLayer({
           id: 'routes-lines', type: 'line', source: 'routes',
+          filter: ['!', ['get', 'isStraight']],
           paint: {
             'line-color': ['match', ['get', 'status'],
               'active',    '#B3E635',
@@ -2729,8 +2732,27 @@ function AdminProjects({ db, setDb, navigate }) {
               /* default */ '#B3E635',
             ],
             'line-width': 3,
-            'line-opacity': ['case', ['get', 'isStraight'], 0.45, 0.9],
-            'line-dasharray': ['case', ['get', 'isStraight'], ['literal', [2, 2]], ['literal', [1, 0]]],
+            'line-opacity': 0.9,
+          },
+          layout: { 'line-cap': 'round', 'line-join': 'round' },
+        });
+        // Dashed line — only renders for straight-line fallback (before OSRM
+        // completes). Fixed dasharray since MapLibre doesn't allow data exprs
+        // here. Lower opacity so the OSRM completion is visually obvious.
+        map.addLayer({
+          id: 'routes-lines-fallback', type: 'line', source: 'routes',
+          filter: ['get', 'isStraight'],
+          paint: {
+            'line-color': ['match', ['get', 'status'],
+              'active',    '#B3E635',
+              'upcoming',  '#5AAEFF',
+              'delayed',   '#FF6B47',
+              'completed', '#9A9A9A',
+              /* default */ '#B3E635',
+            ],
+            'line-width': 3,
+            'line-opacity': 0.45,
+            'line-dasharray': [2, 2],
           },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
         });
