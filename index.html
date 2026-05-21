@@ -1358,7 +1358,12 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'CH', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 12;
+const DB_SCHEMA_VERSION = 13;
+// Per-CY billing rates by truck type. Used by the per-hauler / per-haul
+// invoice generator in the Reports tab — hauls track volume, not shift
+// hours, so we bill the delivered CY directly. Hours-based billing on
+// db.rates is preserved for legacy/project-scoped invoices.
+const INVOICE_CY_RATE = { TAN: 18, SD: 22, ED: 22, BD: 22, HS: 26 };
 
 // Older values that lived in TRUCK_TYPES before specific rate bumps. The
 // migration uses this map to distinguish "user kept the old default" (safe to
@@ -1497,6 +1502,11 @@ function hydrateDb(raw) {
     //            from `issuedDate`, and a synthesized `sentAt` when status is
     //            already 'sent' or 'paid'. We do NOT reseed INVOICES_SEED on
     //            top of user data — only backfill the new fields.
+    //  v12 → v13: backfill `haulRequestId: null` on every legacy invoice. The
+    //            new per-hauler-per-haul invoicing in AdminReporting (Reports
+    //            tab) attaches generated invoices to a specific haul request
+    //            via `haulRequestId`. Pre-v12 invoices stay project-scoped
+    //            (null) and surface in legacy views only.
     const { operators: legacyOperators, ...rest } = parsed;
     const haulersBeforeRestore = (Array.isArray(rest.haulers)
       ? rest.haulers
@@ -1540,7 +1550,8 @@ function hydrateDb(raw) {
     const migrateInvoice = (inv) => {
       if (!inv || typeof inv !== 'object') return inv;
       const baseCreatedAt = inv.issuedDate ? inv.issuedDate + 'T09:00:00Z' : new Date(0).toISOString();
-      const withDefaults = { status: 'sent', createdAt: baseCreatedAt, ...inv };
+      // v12 → v13: default haulRequestId to null (project-scoped legacy invoice).
+      const withDefaults = { status: 'sent', haulRequestId: null, createdAt: baseCreatedAt, ...inv };
       // If migrated to sent/paid but no sentAt, synthesize one from issuedDate.
       if ((withDefaults.status === 'sent' || withDefaults.status === 'paid') && !withDefaults.sentAt && inv.issuedDate) {
         withDefaults.sentAt = inv.issuedDate + 'T15:00:00Z';
@@ -4553,7 +4564,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
 // at /admin/reporting. Distinct from /admin/reports (live KPIs / loads-per-day);
 // this view is for accounting + statements rather than operational stats.
 // =====================================================================
-function AdminReporting({ db, navigate }) {
+function AdminReporting({ db, setDb, navigate }) {
   // Cheap derived totals from existing data — gives the placeholders something
   // realistic-looking until the real reports get wired up.
   const invoices = db.invoices || [];
@@ -4568,6 +4579,120 @@ function AdminReporting({ db, navigate }) {
     { label: 'Tonnage hauled', value: totalCY.toLocaleString() + ' CY', sub: 'all-time approved loads', hint: 'Period-over-period change by material + project.' },
     { label: 'Margin estimate', value: '— coming soon', sub: 'rate × hours minus payouts', hint: 'Per-haul gross margin + cost-plus markup math.' },
   ];
+
+  // ===== Per-hauler / per-haul invoicing =====
+  // Each hauler gets a section. Inside each, one row per haul-request the
+  // hauler is assigned to, with status + actions for the haul-scoped invoice
+  // (auto-generated from delivered loads via INVOICE_CY_RATE). Status flow
+  // reuses the v11 invoice state machine (draft → sent → paid).
+  const haulRequests = db.haulRequests || [];
+  const haulsForHauler = (haulerId) => haulRequests
+    .filter(r => (r.assignments || []).some(a => a.haulerId === haulerId))
+    .map(r => {
+      const myAssignments = (r.assignments || []).filter(a => a.haulerId === haulerId);
+      const deliveredCY = myAssignments.reduce((s, a) =>
+        s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
+      const invoice = invoices.find(i => i.haulerId === haulerId && i.haulRequestId === r.id);
+      return { req: r, myAssignments, deliveredCY, invoice };
+    });
+
+  const generateInvoiceForHaul = (haulerId, reqId) => {
+    const hauler = db.haulers.find(h => h.id === haulerId);
+    const req = haulRequests.find(r => r.id === reqId);
+    if (!hauler || !req) return;
+    const project = db.projects.find(p => p.id === req.projectId);
+    const myAssignments = (req.assignments || []).filter(a => a.haulerId === haulerId);
+    const today = new Date().toISOString().slice(0, 10);
+    // CY-based line item per truck assigned to this haul. We tuck deliveredCY
+    // into the existing line item shape; hours/rate are kept (set to 0/CY-rate)
+    // so legacy print views don't trip on missing fields.
+    const lineItems = myAssignments.map(a => {
+      const truck = db.trucks.find(t => t.id === a.truckId);
+      const cy = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
+      const cyRate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
+      const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      return {
+        id: 'li-' + Math.random().toString(36).substring(2, 7),
+        truckPlate: truck ? truck.plate : '?',
+        truckType: truck ? truck.type : '',
+        driverName: driver ? driver.name : '—',
+        deliveredCY: cy,
+        cyRate,
+        // Preserve hours/rate shape for compatibility with the AdminPayments
+        // print view — we just zero hours and put CY × cyRate into amount.
+        hours: 0, rate: cyRate,
+        amount: parseFloat((cy * cyRate).toFixed(2)),
+      };
+    });
+    const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
+    const nowIso = new Date().toISOString();
+    const newInvoice = {
+      id: 'inv-' + Date.now(),
+      haulerId, projectId: req.projectId, haulRequestId: req.id,
+      number: 'INV-' + String(Math.floor(Math.random() * 9000) + 1000),
+      periodStart: today, periodEnd: today, issuedDate: today,
+      createdAt: nowIso,
+      billTo: project ? project.gc : '—',
+      lineItems,
+      loadCount: myAssignments.reduce((s, a) => s + a.days.reduce((s2, d) => s2 + d.loads.length, 0), 0),
+      totalCY: totalCYForInv,
+      notes: '',
+      status: 'draft',
+    };
+    setDb(prev => appendActivity(
+      { ...prev, invoices: [...(prev.invoices || []), newInvoice] },
+      {
+        type: 'invoice.drafted',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin drafted ${newInvoice.number} for ${hauler.name} on ${project ? project.name : 'a haul'}`,
+        refId: req.id,
+      }
+    ));
+  };
+
+  const sendDraftInvoice = (invoiceId) => {
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+    const sentAt = new Date().toISOString();
+    const h = db.haulers.find(x => x.id === inv.haulerId);
+    setDb(prev => appendActivity(
+      { ...prev, invoices: prev.invoices.map(i => i.id === invoiceId ? { ...i, status: 'sent', sentAt } : i) },
+      {
+        type: 'invoice.sent',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin sent invoice ${inv.number} to ${inv.billTo} (${h ? h.name : 'hauler'})`,
+        refId: null,
+      }
+    ));
+  };
+
+  const markInvoicePaid = (invoiceId) => {
+    const inv = invoices.find(i => i.id === invoiceId);
+    if (!inv) return;
+    const ref = window.prompt('Payment reference (ACH / check / wire #) for ' + inv.number + '?');
+    if (ref == null) return;
+    const trimmed = ref.trim();
+    if (!trimmed) { alert('Payment reference is required.'); return; }
+    const paidAt = new Date().toISOString();
+    const h = db.haulers.find(x => x.id === inv.haulerId);
+    setDb(prev => appendActivity(
+      { ...prev, invoices: prev.invoices.map(i => i.id === invoiceId ? { ...i, status: 'paid', paidAt, paymentRef: trimmed } : i) },
+      {
+        type: 'invoice.paid',
+        actorRole: 'admin',
+        actorId: null,
+        summary: `Admin marked invoice ${inv.number} paid (ref: ${trimmed}) for ${h ? h.name : 'hauler'}`,
+        refId: null,
+      }
+    ));
+  };
+
+  const discardDraftInvoice = (invoiceId) => {
+    if (!confirm('Discard this draft invoice?')) return;
+    setDb(prev => ({ ...prev, invoices: prev.invoices.filter(i => i.id !== invoiceId) }));
+  };
 
   const reportRows = [
     { title: 'Weekly payout statement', range: 'Mon → Sun, per hauler', status: 'placeholder' },
@@ -4605,7 +4730,110 @@ function AdminReporting({ db, navigate }) {
         })}
       </div>
 
+      {/* ===== Per-hauler invoicing =====
+          One section per hauler. Inside each section, a row per haul the
+          hauler is assigned to. Invoices auto-generate from delivered loads
+          (CY × INVOICE_CY_RATE). Admin then steps each invoice through
+          draft → sent → paid. State persists via db.invoices (schema v12+).
+      */}
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+        <div>
+          <Label>Per-hauler invoicing</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+            One section per hauler. Sub-row per haul they're on. Auto-generates an invoice from delivered loads at the truck-type CY rate.
+          </div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: S[4], marginBottom: S[6] }}>
+        {db.haulers.length === 0 && (
+          <Card><div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[3] }}>No haulers yet.</div></Card>
+        )}
+        {db.haulers.map(hauler => {
+          const hauls = haulsForHauler(hauler.id);
+          const haulerInvoices = invoices.filter(i => i.haulerId === hauler.id);
+          const haulScopedInvoices = haulerInvoices.filter(i => i.haulRequestId);
+          const haulerTotal = haulScopedInvoices.reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+          const haulerOpen = haulScopedInvoices.filter(i => i.status === 'sent').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+          return (
+            <Card key={hauler.id} padding={S[5]}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4], flexWrap: 'wrap' }}>
+                <Avatar name={hauler.name} color={C.accent} size={40} />
+                <div style={{ flex: 1, minWidth: 200 }}>
+                  <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{hauler.name}</div>
+                  <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
+                    {hauls.length} haul{hauls.length === 1 ? '' : 's'} · {haulScopedInvoices.length} haul-scoped invoice{haulScopedInvoices.length === 1 ? '' : 's'}
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: S[5], textAlign: 'right' }}>
+                  <div>
+                    <Label style={{ marginBottom: 2 }}>Invoiced total</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{fmtMoney(haulerTotal)}</div>
+                  </div>
+                  <div>
+                    <Label style={{ marginBottom: 2 }}>Open A/R</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: haulerOpen > 0 ? C.warn : C.inkFaint, letterSpacing: -0.3 }}>{fmtMoney(haulerOpen)}</div>
+                  </div>
+                </div>
+              </div>
+
+              {hauls.length === 0 ? (
+                <div style={{ ...T.bodySm, color: C.inkFaint, padding: S[3], textAlign: 'center', background: C.surfaceHi, borderRadius: R.md }}>
+                  No active hauls assigned to this hauler.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                  {hauls.map(({ req, deliveredCY, invoice }) => {
+                    const project = db.projects.find(p => p.id === req.projectId);
+                    const material = MATERIALS.find(m => m.code === req.materialCode);
+                    const invoiceTotal = invoice ? (invoice.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0) : 0;
+                    return (
+                      <div key={req.id} style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                        <div style={{ flex: 1, minWidth: 240 }}>
+                          <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>
+                            {project ? project.name : '—'}
+                            <span style={{ ...T.caption, color: C.inkDim, marginLeft: S[2], fontWeight: 500 }}>
+                              {material ? material.label : req.materialCode} · {deliveredCY} of {req.volumeCY} CY delivered
+                            </span>
+                          </div>
+                          {invoice && (
+                            <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
+                              {invoice.number} · {fmtMoney(invoiceTotal)} · issued {invoice.issuedDate}
+                            </div>
+                          )}
+                        </div>
+                        {invoice ? (
+                          <>
+                            <StatusPill status={invoice.status} />
+                            {invoice.status === 'draft' && (
+                              <>
+                                <Btn variant="primary" size="xs" onClick={() => sendDraftInvoice(invoice.id)}>Mark sent</Btn>
+                                <Btn variant="ghost" size="xs" onClick={() => discardDraftInvoice(invoice.id)}>Discard</Btn>
+                              </>
+                            )}
+                            {invoice.status === 'sent' && (
+                              <Btn variant="primary" size="xs" onClick={() => markInvoicePaid(invoice.id)}>Mark paid</Btn>
+                            )}
+                          </>
+                        ) : (
+                          <Btn
+                            variant="primary"
+                            size="xs"
+                            disabled={deliveredCY === 0}
+                            onClick={() => generateInvoiceForHaul(hauler.id, req.id)}
+                          >Generate invoice</Btn>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
+
       <div style={{ marginBottom: S[3] }}><Label>Available reports</Label></div>
+
       <Card padding={0}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><Th>Report</Th><Th>Period / scope</Th><Th align="right">Status</Th><Th></Th></tr></thead>
@@ -5740,7 +5968,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 1 && <AdminProjects db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'new' && <AdminNewProject db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'reports' && <AdminReports db={db} navigate={navigate} />}
-          {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
