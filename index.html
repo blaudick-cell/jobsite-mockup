@@ -363,6 +363,32 @@
     /* MapLibre default attribution can crowd the dispatch chrome — soften it. */
     .lom-tile-map .maplibregl-ctrl-attrib { font-size: 10px; opacity: 0.7; }
     .lom-tile-map .maplibregl-ctrl-attrib a { color: #B3E635; }
+    /* Halo+dot pin animation — `jx-haul-pin` parity with jobsiteexchange.com.
+       Pulses the halo span (which is centered behind the dot) so it's visibly
+       alive against the dark CartoCDN tiles. Inline-style halos couldn't get
+       a @keyframes animation, so the animation lives here and the inline JS
+       just sets `className: 'jx-pin-halo'`. */
+    @keyframes jx-pin-halo-pulse {
+      0%   { transform: translate(-50%, -50%) scale(0.7); opacity: 0.7; }
+      70%  { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
+      100% { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+    }
+    .jx-pin-halo {
+      position: absolute; top: 50%; left: 50%;
+      width: 36px; height: 36px; border-radius: 50%;
+      pointer-events: none;
+      animation: jx-pin-halo-pulse 2.4s ease-out infinite;
+      will-change: transform, opacity;
+    }
+    /* Disable pulse if user prefers reduced motion — still show the halo,
+       just statically at the 'middle' frame so the pin looks anchored. */
+    @media (prefers-reduced-motion: reduce) {
+      .jx-pin-halo {
+        animation: none;
+        transform: translate(-50%, -50%) scale(1);
+        opacity: 0.55;
+      }
+    }
   </style>
 </head>
 <body>
@@ -2728,21 +2754,25 @@ function AdminProjects({ db, setDb, navigate }) {
         //   as the user zooms.
         const mkHaloDotEl = (haloColor, dotColor) => {
           const el = document.createElement('div');
-          // Flex-centered 32px box; dot + halo both centered inside via flex.
-          // No transforms, no negative margins — visual center == geometric
-          // center, which is what MapLibre needs for stable lat/lng anchoring.
-          el.style.cssText = 'position:relative;width:32px;height:32px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+          // Flex-centered 40px box; dot + halo both centered via flex layout.
+          // No transforms on the outer container — visual center == geometric
+          // center, which MapLibre needs for stable lat/lng anchoring with
+          // anchor:'center'. Larger container (40px vs prior 28px) makes the
+          // pulsing halo more visible against the dark CartoCDN map.
+          el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+          // Animated halo. Class-based so the @keyframes (jx-pin-halo-pulse)
+          // in <style> can target it; inline-styled halos can't get keyframes.
+          // Solid-color background with 0.45 opacity reads brighter against
+          // the near-black CartoCDN dark_all tiles than a radial-gradient
+          // (which fades out before reaching the visible edge of the halo).
           const halo = document.createElement('span');
-          // Halo: a softly glowing translucent circle behind the dot.
-          // Uses 60% solid center with quick falloff so it's clearly visible
-          // against the dark CartoCDN map without overpowering the dot.
-          halo.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:32px;height:32px;border-radius:50%;background:radial-gradient(circle,' + haloColor + 'cc 0%,' + haloColor + '99 30%,' + haloColor + '4d 55%,' + haloColor + '00 75%);opacity:0.85;pointer-events:none;';
+          halo.className = 'jx-pin-halo';
+          halo.style.background = haloColor;
+          halo.style.opacity = '0.45';
+          // Solid bright center dot — sits above the halo via z-index/relative.
+          // 14px keeps the visual weight balanced with the 36px halo.
           const dot = document.createElement('span');
-          // Dot: solid colored center with 3px dark border for contrast
-          // against the halo. 14px keeps the visual weight balanced with
-          // the 32px halo (recon spec is 28px container, 16px dot — we
-          // scale up slightly to make the halo more readable on dark tiles).
-          dot.style.cssText = 'position:relative;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.06);';
+          dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
           el.appendChild(halo);
           el.appendChild(dot);
           return el;
