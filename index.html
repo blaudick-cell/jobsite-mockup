@@ -2070,10 +2070,13 @@ function AdminProjects({ db, setDb, navigate }) {
       : matCodes.includes('TS') ? 'Topsoil'
       : 'Transfer';
     // Pickup / dump pulled off the first haul request that carries them
-    // (schema v12+), otherwise fall back to project address.
-    const firstReq = reqs.find(r => r.pickupLocation || r.dumpLocation) || {};
-    const pickupLocation = firstReq.pickupLocation || p.address || '—';
-    const dumpLocation = firstReq.dumpLocation || p.address || '—';
+    // (schema v12+, fields `pickupLocation` / `dropoffLocation` — each is an
+    // { name, address } object). Render as a single line; fall back to the
+    // project address if no haul request carries logistics yet.
+    const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
+    const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
+    const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
+    const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
     const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulType, pickupLocation, dumpLocation, reqs };
     enriched.healthStatus = healthFor(enriched);
     return enriched;
@@ -2422,8 +2425,8 @@ function AdminProjects({ db, setDb, navigate }) {
                   <Td>{mat ? mat.label : req.materialCode}</Td>
                   <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}>{req.volumeCY} CY</span></Td>
                   <Td align="right" mono>{reqAssigned > 0 ? <span style={{ color: C.inkDim }}>{reqAssigned} assigned</span> : <span style={{ color: C.warn, fontWeight: 600 }}>unassigned</span>}</Td>
-                  <Td dim>{req.pickupLocation || (proj ? proj.address : '—')}</Td>
-                  <Td dim>{req.dumpLocation || '—'}</Td>
+                  <Td dim>{(req.pickupLocation && (req.pickupLocation.name || req.pickupLocation.address)) || (proj ? proj.address : '—')}</Td>
+                  <Td dim>{(req.dropoffLocation && (req.dropoffLocation.name || req.dropoffLocation.address)) || '—'}</Td>
                   <Td align="right"><Pill color={priorityTone(priority)} soft={priority === 'High' ? C.warnSoft : priority === 'Med' ? C.infoSoft : 'rgba(255,255,255,0.05)'}>{priority}</Pill></Td>
                   <Td align="right"><Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/requests/' + req.id); }}>Assign</Btn></Td>
                 </Tr>
