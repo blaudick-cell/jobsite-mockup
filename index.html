@@ -789,6 +789,159 @@ function EditableText({ value, onSave, multiline, mono, placeholder, style = {} 
   );
 }
 
+// Address-flavoured EditableText. Same click-to-edit UX, plus:
+//   • Photon-backed autocomplete dropdown (debounced 300ms, min 3 chars).
+//   • Keyboard nav: ↑/↓ to highlight, Enter to pick, Esc to cancel.
+//   • Selecting a suggestion populates the field with the canonical address
+//     and writes lat/lng into db.geocode immediately (no follow-up fetch).
+//   • If the user commits raw text (no pick), runs the cascade geocoder in
+//     the background and caches the result so the mini-map paints the right
+//     pin even when the typed string didn't match any suggestion.
+//   • Shows "✓ verified" once a coords cache hit exists for the current value.
+// Used by AdminHaulRequestDetail for pickup/dropoff address inputs. Plain
+// EditableText still owns the location *name* fields (e.g. "Highline Pit").
+function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {} }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(value || '');
+  const [suggestions, setSuggestions] = useState([]);
+  const [highlightIdx, setHighlightIdx] = useState(-1);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef(null);
+  const inputRef = useRef(null);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => setText(value || ''), [value]);
+  useEffect(() => () => { if (debounceRef.current) clearTimeout(debounceRef.current); }, []);
+
+  const cached = (db && db.geocode && db.geocode[value]) || null;
+  const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
+
+  const writeGeocode = (addrText, coords) => {
+    setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [addrText]: coords } }));
+  };
+
+  const resolveAndCommit = async (finalText) => {
+    setEditing(false);
+    setSuggestions([]);
+    setHighlightIdx(-1);
+    const next = finalText || '';
+    if (next !== (value || '')) onSave(next);
+    if (!next) return;
+    const existing = (db && db.geocode && db.geocode[next]) || null;
+    if (existing && isFinite(existing.lat) && isFinite(existing.lng)) return;
+    const res = await geocodeAddress(next);
+    if (res && isFinite(res.lat) && isFinite(res.lng)) writeGeocode(next, res);
+  };
+
+  const pickSuggestion = (s) => {
+    setEditing(false);
+    setSuggestions([]);
+    setHighlightIdx(-1);
+    const canonical = s.displayName;
+    if (canonical !== (value || '')) onSave(canonical);
+    writeGeocode(canonical, { lat: s.lat, lng: s.lng, displayName: canonical, source: s.source });
+  };
+
+  const onInputChange = (e) => {
+    const v = e.target.value;
+    setText(v);
+    setHighlightIdx(-1);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (v.trim().length < 3) { setSuggestions([]); setLoading(false); return; }
+    setLoading(true);
+    debounceRef.current = setTimeout(async () => {
+      const s = await suggestAddresses(v);
+      setSuggestions(s);
+      setLoading(false);
+    }, 300);
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.min(suggestions.length - 1, i + 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.max(-1, i - 1));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlightIdx >= 0 && suggestions[highlightIdx]) pickSuggestion(suggestions[highlightIdx]);
+      else resolveAndCommit(text);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setText(value || '');
+      setEditing(false);
+      setSuggestions([]);
+      setHighlightIdx(-1);
+    }
+  };
+
+  const onBlur = () => {
+    // Defer so a suggestion mousedown can fire before we collapse.
+    setTimeout(() => {
+      if (wrapperRef.current && wrapperRef.current.contains(document.activeElement)) return;
+      resolveAndCommit(text);
+    }, 160);
+  };
+
+  if (!editing) {
+    return (
+      <span
+        onClick={(e) => { e.stopPropagation(); e.preventDefault(); setEditing(true); setTimeout(() => inputRef.current && inputRef.current.focus(), 0); }}
+        onMouseDown={e => e.stopPropagation()}
+        style={{ cursor: 'text', padding: '3px 6px', margin: '-3px -6px', borderRadius: R.xs, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
+        onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
+        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+        title="Click to edit"
+      >
+        {value || <span style={{ color: C.inkFaint }}>{placeholder || '—'}</span>}
+        {value && verified && (
+          <span style={{ color: C.ok, marginLeft: 8, fontSize: 11, fontWeight: 500, letterSpacing: 0.3 }}>
+            ✓ verified
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  return (
+    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-block', width: '100%' }}>
+      <input
+        ref={inputRef}
+        value={text}
+        onChange={onInputChange}
+        onKeyDown={onKeyDown}
+        onBlur={onBlur}
+        onClick={e => e.stopPropagation()}
+        onMouseDown={e => e.stopPropagation()}
+        placeholder={placeholder || ''}
+        autoFocus
+        style={{ background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', width: '100%', boxSizing: 'border-box', ...style }}
+      />
+      {loading && (
+        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', ...T.caption, color: C.inkFaint, pointerEvents: 'none', fontSize: 11 }}>…</span>
+      )}
+      {suggestions.length > 0 && (
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 1000, background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, boxShadow: '0 8px 20px rgba(0,0,0,0.45)', maxHeight: 240, overflowY: 'auto' }}
+        >
+          {suggestions.map((s, i) => (
+            <div
+              key={i}
+              onMouseDown={(e) => { e.preventDefault(); pickSuggestion(s); }}
+              onMouseEnter={() => setHighlightIdx(i)}
+              style={{ padding: '8px 10px', cursor: 'pointer', background: highlightIdx === i ? 'rgba(179,230,53,0.14)' : 'transparent', borderTop: i > 0 ? `1px solid ${C.rule}` : 'none', ...T.bodySm, color: C.ink }}
+            >
+              {s.displayName}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EditableSelect({ value, options, onSave, style = {} }) {
   const [editing, setEditing] = useState(false);
   const opt = options.find(o => o.value === value) || { label: value || '—' };
@@ -1465,7 +1618,7 @@ const GEOCODE_SEED = {
   // Older WP/CH/GW/AS project addresses are retained — harmless and the
   // haul-request seed's pickup/dropoff strings still reference some of them.
   '5800 Federal Blvd, Denver, CO':                  { lat: 39.7392, lng: -105.0250 },
-  '1105 Rogers Street, Golden, CO':                 { lat: 39.7555, lng: -105.2200 },
+  '1105 Rogers Street, Golden, CO':                 { lat: 39.7343, lng: -105.1867 },
   '15185 W 68th Pl, Arvada, CO 80007':              { lat: 39.8210, lng: -105.1540 },
   // v17: counterpart pickup/dump addresses on each project (5-30 min away).
   // Approximate coords below; Nominatim refines at runtime and caches into
@@ -1505,13 +1658,60 @@ const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', '
 // project route not in the cache, then writes the result back via setDb.
 const ROUTES_SEED = {};
 
-// === v17: Nominatim + OSRM helpers used by LiveOperationsTileMap.
+// === v18: Cascade geocoder + autocomplete suggestions, plus OSRM router.
 // Browser fetches, no API key. Wrapped in try/catch — callers fall back to
-// straight-line rendering if either fails (CDN down, rate-limited, etc.).
-async function geocodeAddressViaNominatim(address) {
-  if (!address) return null;
+// straight-line rendering if everything fails (CDN down, rate-limited, etc.).
+//
+// Cascade order (geocodeAddress):
+//   1. US Census Bureau (authoritative for US street addresses; TIGER-line
+//      matches return canonical text + accurate coords). Empirically the only
+//      service that resolves things like "1105 Rogers Street, Golden Colorado"
+//      to its real zip 80401 — Photon and Nominatim both miss it.
+//   2. Photon (komoot) — great fuzzy / partial matching; non-US fallback.
+//   3. Nominatim — last resort.
+// Returns { lat, lng, displayName, source } or null.
+//
+// Autocomplete suggestions (suggestAddresses) come from Photon — it ranks
+// partial input well, which Census can't do.
+async function geocodeViaCensus(address) {
   try {
-    const url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(address) + '&format=json&limit=1&countrycodes=us';
+    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(address) + '&benchmark=Public_AR_Current&format=json';
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
+    if (!m || !m.coordinates) return null;
+    const lat = parseFloat(m.coordinates.y);
+    const lng = parseFloat(m.coordinates.x);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return { lat, lng, displayName: m.matchedAddress || address, source: 'census' };
+  } catch (e) { return null; }
+}
+function formatPhotonProps(p) {
+  if (!p) return '';
+  const street = [p.housenumber, p.street].filter(Boolean).join(' ');
+  const city   = p.city || p.town || p.village || p.county || '';
+  const region = [p.state, p.postcode].filter(Boolean).join(' ');
+  const parts  = [street, city, region, p.country].filter(s => s && s.length);
+  return parts.length ? parts.join(', ') : (p.name || '');
+}
+async function geocodeViaPhoton(address) {
+  try {
+    const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(address) + '&limit=1&lang=en';
+    const resp = await fetch(url);
+    if (!resp.ok) return null;
+    const data = await resp.json();
+    const f = data && Array.isArray(data.features) && data.features[0];
+    if (!f || !f.geometry || !Array.isArray(f.geometry.coordinates)) return null;
+    const lng = parseFloat(f.geometry.coordinates[0]);
+    const lat = parseFloat(f.geometry.coordinates[1]);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return { lat, lng, displayName: formatPhotonProps(f.properties), source: 'photon' };
+  } catch (e) { return null; }
+}
+async function geocodeViaNominatim(address) {
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?q=' + encodeURIComponent(address) + '&format=json&addressdetails=1&limit=1&countrycodes=us';
     const resp = await fetch(url);
     if (!resp.ok) return null;
     const data = await resp.json();
@@ -1519,9 +1719,43 @@ async function geocodeAddressViaNominatim(address) {
     const lat = parseFloat(data[0].lat);
     const lng = parseFloat(data[0].lon);
     if (!isFinite(lat) || !isFinite(lng)) return null;
-    return { lat, lng };
+    return { lat, lng, displayName: data[0].display_name || address, source: 'nominatim' };
   } catch (e) { return null; }
 }
+async function geocodeAddress(address) {
+  if (!address || !String(address).trim()) return null;
+  return (await geocodeViaCensus(address))
+      || (await geocodeViaPhoton(address))
+      || (await geocodeViaNominatim(address));
+}
+// Photon-backed autocomplete suggestions. Returns up to 5 unique candidates.
+// Empty array when query is too short or the service is unreachable.
+async function suggestAddresses(query) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return [];
+  try {
+    const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(q) + '&limit=5&lang=en';
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    if (!data || !Array.isArray(data.features)) return [];
+    const seen = new Set();
+    const out  = [];
+    for (const f of data.features) {
+      if (!f || !f.geometry || !Array.isArray(f.geometry.coordinates)) continue;
+      const lng = parseFloat(f.geometry.coordinates[0]);
+      const lat = parseFloat(f.geometry.coordinates[1]);
+      if (!isFinite(lat) || !isFinite(lng)) continue;
+      const displayName = formatPhotonProps(f.properties) || (f.properties && f.properties.name) || '';
+      if (!displayName || seen.has(displayName)) continue;
+      seen.add(displayName);
+      out.push({ displayName, lat, lng, source: 'photon' });
+    }
+    return out;
+  } catch (e) { return []; }
+}
+// Backwards-compat alias — kept so any forgotten call sites still resolve.
+const geocodeAddressViaNominatim = geocodeAddress;
 async function fetchOSRMDrivingRoute(p1, p2) {
   if (!p1 || !p2) return null;
   try {
@@ -3435,12 +3669,12 @@ function AdminProjects({ db, setDb, navigate }) {
           let pick = (db.geocode || {})[p.pickupLocation];
           let dump = (db.geocode || {})[p.dumpLocation];
           if (!pick) {
-            const g = await geocodeAddressViaNominatim(p.pickupLocation);
+            const g = await geocodeAddress(p.pickupLocation);
             if (cancelled) return;
             if (g) { pick = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.pickupLocation]: g } })); }
           }
           if (!dump) {
-            const g = await geocodeAddressViaNominatim(p.dumpLocation);
+            const g = await geocodeAddress(p.dumpLocation);
             if (cancelled) return;
             if (g) { dump = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.dumpLocation]: g } })); }
           }
@@ -6571,12 +6805,12 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       let p = (db.geocode || {})[pickAddr];
       let d = (db.geocode || {})[dropAddr];
       if (!p) {
-        const g = await geocodeAddressViaNominatim(pickAddr);
+        const g = await geocodeAddress(pickAddr);
         if (cancelled) return;
         if (g) { p = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pickAddr]: g } })); }
       }
       if (!d) {
-        const g = await geocodeAddressViaNominatim(dropAddr);
+        const g = await geocodeAddress(dropAddr);
         if (cancelled) return;
         if (g) { d = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [dropAddr]: g } })); }
       }
@@ -6955,8 +7189,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim }}>
-              <EditableText value={pickup.address}
-                placeholder="Street address…"
+              <AddressAutocomplete value={pickup.address}
+                placeholder="Start typing a street address…"
+                db={db} setDb={setDb}
                 onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
             </div>
           </div>
@@ -6968,8 +7203,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim }}>
-              <EditableText value={dropoff.address}
-                placeholder="Street address…"
+              <AddressAutocomplete value={dropoff.address}
+                placeholder="Start typing a street address…"
+                db={db} setDb={setDb}
                 onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
             </div>
           </div>
@@ -11251,6 +11487,42 @@ function App() {
       // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
+  // v18: Backfill the geocode cache for any haul-request address that's
+  // missing or invalid. Runs after hydrate and whenever the haul-request list
+  // changes (so addresses edited via AddressAutocomplete that don't write
+  // their own coords also get resolved). The Set guard ensures we don't loop
+  // on addresses that won't resolve — one attempt per address per session.
+  const geocodeBackfillRef = useRef(new Set());
+  useEffect(() => {
+    const requests = (db && db.haulRequests) || [];
+    const cache = (db && db.geocode) || {};
+    const todo = [];
+    for (const r of requests) {
+      for (const loc of [r && r.pickupLocation, r && r.dropoffLocation]) {
+        const addr = loc && loc.address;
+        if (!addr || !String(addr).trim()) continue;
+        if (geocodeBackfillRef.current.has(addr)) continue;
+        const existing = cache[addr];
+        if (existing && isFinite(existing.lat) && isFinite(existing.lng) && existing.lat !== 0 && existing.lng !== 0) continue;
+        todo.push(addr);
+        geocodeBackfillRef.current.add(addr);
+      }
+    }
+    if (todo.length === 0) return undefined;
+    let cancelled = false;
+    (async () => {
+      for (const addr of todo) {
+        if (cancelled) return;
+        const res = await geocodeAddress(addr);
+        if (cancelled) return;
+        if (res && isFinite(res.lat) && isFinite(res.lng)) {
+          setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [addr]: res } }));
+        }
+        await new Promise(r => setTimeout(r, 200));
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [db.haulRequests, setDb]);
   // Cloud bootstrap: on mount, fetch every Supabase table and replace `db`
   // with the merged cloud state. Per-table seed fills any empty tables. On
   // any failure, leave the localStorage-hydrated db in place + flip the chip.
