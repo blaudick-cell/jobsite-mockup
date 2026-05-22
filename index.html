@@ -800,8 +800,8 @@ function EditableText({ value, onSave, multiline, mono, placeholder, style = {} 
 //   • Shows "✓ verified" once a coords cache hit exists for the current value.
 // Used by AdminHaulRequestDetail for pickup/dropoff address inputs. Plain
 // EditableText still owns the location *name* fields (e.g. "Highline Pit").
-function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {} }) {
-  const [editing, setEditing] = useState(false);
+function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}, alwaysEditing = false, inputStyle = null }) {
+  const [editing, setEditing] = useState(alwaysEditing);
   const [text, setText] = useState(value || '');
   const [suggestions, setSuggestions] = useState([]);
   const [highlightIdx, setHighlightIdx] = useState(-1);
@@ -821,7 +821,7 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
   };
 
   const resolveAndCommit = async (finalText) => {
-    setEditing(false);
+    if (!alwaysEditing) setEditing(false);
     setSuggestions([]);
     setHighlightIdx(-1);
     const next = finalText || '';
@@ -834,10 +834,13 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
   };
 
   const pickSuggestion = (s) => {
-    setEditing(false);
+    if (!alwaysEditing) setEditing(false);
     setSuggestions([]);
     setHighlightIdx(-1);
     const canonical = s.displayName;
+    // After picking, push the canonical text into the local input state too
+    // so always-editing forms reflect the choice without remounting.
+    setText(canonical);
     // Order matters: write geocode FIRST so the cache is populated before the
     // address-text commit triggers HaulRouteMiniMap's [pickAddr, dropAddr]
     // useEffect. React 18 batches both setDb calls into one render anyway,
@@ -878,7 +881,7 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     } else if (e.key === 'Escape') {
       e.preventDefault();
       setText(value || '');
-      setEditing(false);
+      if (!alwaysEditing) setEditing(false);
       setSuggestions([]);
       setHighlightIdx(-1);
     }
@@ -892,7 +895,7 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     }, 160);
   };
 
-  if (!editing) {
+  if (!alwaysEditing && !editing) {
     return (
       <span
         onClick={(e) => { e.stopPropagation(); e.preventDefault(); setEditing(true); setTimeout(() => inputRef.current && inputRef.current.focus(), 0); }}
@@ -923,8 +926,8 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
         onClick={e => e.stopPropagation()}
         onMouseDown={e => e.stopPropagation()}
         placeholder={placeholder || ''}
-        autoFocus
-        style={{ background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', width: '100%', boxSizing: 'border-box', ...style }}
+        autoFocus={!alwaysEditing}
+        style={inputStyle || { background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', width: '100%', boxSizing: 'border-box', ...style }}
       />
       {loading && (
         <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', ...T.caption, color: C.inkFaint, pointerEvents: 'none', fontSize: 11 }}>…</span>
@@ -6653,6 +6656,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Pending requests appear at the top with priority + waiting time.</div>
         </div>
+        <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul request</Btn>
       </div>
 
       {/* Operations KPI strip */}
@@ -6769,6 +6773,252 @@ function AdminHaulRequests({ db, setDb, navigate }) {
         </div>
       </div>
     </div>
+  );
+}
+
+// v18: New haul request creation form. Single-step WizardShell with all the
+// fields needed to spin up a haul request and land the user on its detail
+// page. Both addresses use AddressAutocomplete (always-editing mode so the
+// inputs match the rest of the form chrome). Validation requires project,
+// material, volume > 0, both addresses, and a start date — and at submit
+// time both addresses must geocode (resolved via cache if AddressAutocomplete
+// already wrote a hit, otherwise via a one-shot cascade call). The submit
+// is atomic: haulRequests append + activity event + locked-in geocode entries
+// all flow through the same setDb so Phase 3 upserts and Realtime broadcast
+// land in lockstep.
+function AdminHaulRequestCreate({ db, setDb, navigate }) {
+  const projects = db.projects || [];
+  const [projectId, setProjectId] = useState(projects[0] ? projects[0].id : '');
+  const [materialCode, setMaterialCode] = useState('CF');
+  const [volumeCY, setVolumeCY] = useState('');
+  const [requestedAt, setRequestedAt] = useState(() => {
+    const now = new Date();
+    return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+  });
+  const [pickup, setPickup] = useState({ name: '', address: '' });
+  const [dropoff, setDropoff] = useState({ name: '', address: '' });
+  const [pickupTouched, setPickupTouched] = useState(false);
+  const [dropoffTouched, setDropoffTouched] = useState(false);
+  const [timing, setTiming] = useState({ startDate: TODAY_ISO, endDate: '' });
+  const [loadingSite, setLoadingSite] = useState({ notes: '', equipment: '' });
+  const [dumpingSite, setDumpingSite] = useState({ notes: '', equipment: '' });
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
+
+  // Pre-fill pickup/dropoff from the chosen project's locations as a hint.
+  // Skip if the user has already touched the field (avoid clobbering input
+  // when they change project mid-fill).
+  useEffect(() => {
+    const p = projects.find(pr => pr.id === projectId);
+    if (!p) return;
+    if (!pickupTouched)  setPickup(s => ({ name: s.name, address: p.pickupLocation || s.address || '' }));
+    if (!dropoffTouched) setDropoff(s => ({ name: s.name, address: p.dumpLocation || s.address || '' }));
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const volumeNum = parseFloat(volumeCY);
+  const valid =
+    !!projectId &&
+    !!materialCode &&
+    Number.isFinite(volumeNum) && volumeNum > 0 &&
+    !!(pickup.address || '').trim() &&
+    !!(dropoff.address || '').trim() &&
+    !!timing.startDate;
+
+  const submit = async () => {
+    if (!valid || submitting) return;
+    setSubmitting(true);
+    setSubmitError('');
+    // Resolve both addresses (cache first, then cascade). Refuse to create
+    // the request if either won't resolve — the mini-map would render
+    // blank and OSRM couldn't route.
+    const cache = db.geocode || {};
+    const ensureGeocode = async (addr) => {
+      const c = cache[addr];
+      if (c && isFinite(c.lat) && isFinite(c.lng)) return c;
+      return await geocodeAddress(addr);
+    };
+    const [pGeo, dGeo] = await Promise.all([ensureGeocode(pickup.address), ensureGeocode(dropoff.address)]);
+    if (!pGeo || !dGeo) {
+      setSubmitting(false);
+      setSubmitError(
+        !pGeo && !dGeo ? "Couldn't resolve either address. Pick suggestions from the dropdowns or check spelling."
+        : !pGeo ? "Couldn't resolve the pickup address. Pick a suggestion from the dropdown."
+        : "Couldn't resolve the dropoff address. Pick a suggestion from the dropdown."
+      );
+      return;
+    }
+
+    const newId = 'hreq-' + Math.random().toString(36).substring(2, 7);
+    const matLabel = (MATERIALS.find(m => m.code === materialCode) || {}).label || materialCode;
+    const newReq = {
+      id: newId,
+      projectId,
+      materialCode,
+      volumeCY: volumeNum,
+      requestedAt,
+      status: 'pending',
+      matchedHaulerId: null,
+      matchedTruckId: null,
+      acceptedByDriver: null,
+      passedBy: [],
+      notes: notes || '',
+      assignments: [],
+      pickupLocation:  { name: pickup.name || '',  address: pickup.address || '' },
+      dropoffLocation: { name: dropoff.name || '', address: dropoff.address || '' },
+      timing:          { startDate: timing.startDate, endDate: timing.endDate || '' },
+      siteAccess: {
+        loading: { notes: loadingSite.notes || '', equipment: loadingSite.equipment || '' },
+        dumping: { notes: dumpingSite.notes || '', equipment: dumpingSite.equipment || '' },
+      },
+    };
+
+    try {
+      setDb(prev => appendActivity(
+        {
+          ...prev,
+          haulRequests: [...(prev.haulRequests || []), newReq],
+          geocode: { ...(prev.geocode || {}), [pickup.address]: pGeo, [dropoff.address]: dGeo },
+        },
+        {
+          type: 'haul_request.created',
+          actorRole: 'admin',
+          actorId: null,
+          summary: 'Admin created new haul request ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
+          refId: newId,
+        }
+      ));
+      navigate('/admin/requests/' + newId);
+    } catch (e) {
+      setSubmitting(false);
+      setSubmitError('Failed to create haul request: ' + (e && e.message ? e.message : 'unknown error'));
+    }
+  };
+
+  const fInputStyle = WIZARD_INPUT_STYLE;
+  const aaInputStyle = { ...WIZARD_INPUT_STYLE, background: C.surfaceHi, border: '1px solid ' + C.ruleHi };
+
+  return (
+    <WizardShell
+      navigate={navigate}
+      steps={['Details']}
+      currentStep={1}
+      onCancel={() => navigate('/admin/requests')}
+      onSubmit={submit}
+      submitDisabled={!valid || submitting}
+      submitLabel={submitting ? 'Creating…' : 'Create haul request'}
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests', to: '/admin/requests' }, { label: 'New request' }]}
+      eyebrow="New request"
+      title="Create a new haul request"
+    >
+      <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Project</div>
+            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={fInputStyle}>
+              {projects.length === 0 && <option value="">— no projects —</option>}
+              {projects.map(p => (
+                <option key={p.id} value={p.id}>{p.name} ({p.code}) — {p.gc || '—'}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Material</div>
+            <select value={materialCode} onChange={e => setMaterialCode(e.target.value)} style={fInputStyle}>
+              {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Volume (CY)</div>
+            <input type="number" min="1" step="1" value={volumeCY} onChange={e => setVolumeCY(e.target.value)} placeholder="e.g., 24" style={fInputStyle} />
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Requested at</div>
+            <input type="time" value={requestedAt} onChange={e => setRequestedAt(e.target.value)} style={fInputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Pickup location</Label>
+            <input value={pickup.name}
+              onChange={e => setPickup(p => ({ ...p, name: e.target.value }))}
+              placeholder="Site or yard name"
+              style={{ ...fInputStyle, marginBottom: S[2] }} />
+            <AddressAutocomplete
+              value={pickup.address}
+              db={db} setDb={setDb}
+              placeholder="Start typing a street address…"
+              alwaysEditing={true}
+              inputStyle={aaInputStyle}
+              onSave={(v) => { setPickupTouched(true); setPickup(p => ({ ...p, address: v })); }}
+            />
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Dropoff location</Label>
+            <input value={dropoff.name}
+              onChange={e => setDropoff(d => ({ ...d, name: e.target.value }))}
+              placeholder="Site or yard name"
+              style={{ ...fInputStyle, marginBottom: S[2] }} />
+            <AddressAutocomplete
+              value={dropoff.address}
+              db={db} setDb={setDb}
+              placeholder="Start typing a street address…"
+              alwaysEditing={true}
+              inputStyle={aaInputStyle}
+              onSave={(v) => { setDropoffTouched(true); setDropoff(d => ({ ...d, address: v })); }}
+            />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Start date</div>
+            <input type="date" value={timing.startDate} onChange={e => setTiming(t => ({ ...t, startDate: e.target.value }))} style={fInputStyle} />
+          </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>End date (optional)</div>
+            <input type="date" value={timing.endDate} onChange={e => setTiming(t => ({ ...t, endDate: e.target.value }))} min={timing.startDate || undefined} style={fInputStyle} />
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Site access — loading</Label>
+            <textarea value={loadingSite.notes}
+              onChange={e => setLoadingSite(s => ({ ...s, notes: e.target.value }))}
+              placeholder="Loading site notes…" rows={2}
+              style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
+            <input value={loadingSite.equipment}
+              onChange={e => setLoadingSite(s => ({ ...s, equipment: e.target.value }))}
+              placeholder="Equipment / loader…" style={fInputStyle} />
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Site access — dumping</Label>
+            <textarea value={dumpingSite.notes}
+              onChange={e => setDumpingSite(s => ({ ...s, notes: e.target.value }))}
+              placeholder="Dump site notes…" rows={2}
+              style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
+            <input value={dumpingSite.equipment}
+              onChange={e => setDumpingSite(s => ({ ...s, equipment: e.target.value }))}
+              placeholder="Equipment / spotter…" style={fInputStyle} />
+          </div>
+        </div>
+
+        <div>
+          <div style={{ ...T.caption, marginBottom: 4 }}>Notes (optional)</div>
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Anything dispatch should know…" rows={2}
+            style={{ ...fInputStyle, resize: 'vertical' }} />
+        </div>
+
+        {submitError && (
+          <div style={{ ...T.bodySm, color: C.warn, padding: S[3], background: C.warnSoft, border: '1px solid ' + C.warn, borderRadius: R.sm }}>
+            {submitError}
+          </div>
+        )}
+      </div>
+    </WizardShell>
   );
 }
 
@@ -9774,7 +10024,8 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 3 && parts[1] === 'requests' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
+          {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
