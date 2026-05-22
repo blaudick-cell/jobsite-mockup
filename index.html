@@ -817,6 +817,10 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
   const [suggestions, setSuggestions] = useState([]);
   const [highlightIdx, setHighlightIdx] = useState(-1);
   const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false); // true once a fetch for the
+  // current text has come back — gates the "no matches" empty-state row so it
+  // doesn't flash while the debounced fetch is still in flight.
+  const [warning, setWarning] = useState('');
   const debounceRef = useRef(null);
   const inputRef = useRef(null);
   const wrapperRef = useRef(null);
@@ -835,19 +839,27 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     if (!alwaysEditing) setEditing(false);
     setSuggestions([]);
     setHighlightIdx(-1);
+    setSearched(false);
     const next = finalText || '';
     if (next !== (value || '')) onSave(next);
-    if (!next) return;
+    if (!next) { setWarning(''); return; }
     const existing = (db && db.geocode && db.geocode[next]) || null;
-    if (existing && isFinite(existing.lat) && isFinite(existing.lng)) return;
+    if (existing && isFinite(existing.lat) && isFinite(existing.lng)) { setWarning(''); return; }
     const res = await geocodeAddress(next);
-    if (res && isFinite(res.lat) && isFinite(res.lng)) writeGeocode(next, res);
+    if (res && isFinite(res.lat) && isFinite(res.lng)) {
+      writeGeocode(next, res);
+      setWarning('');
+    } else {
+      setWarning("Couldn't geocode this address — pin location won't be available.");
+    }
   };
 
   const pickSuggestion = (s) => {
     if (!alwaysEditing) setEditing(false);
     setSuggestions([]);
     setHighlightIdx(-1);
+    setSearched(false);
+    setWarning('');
     const canonical = s.displayName;
     // After picking, push the canonical text into the local input state too
     // so always-editing forms reflect the choice without remounting.
@@ -868,6 +880,8 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     const v = e.target.value;
     setText(v);
     setHighlightIdx(-1);
+    setWarning('');
+    setSearched(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     if (v.trim().length < 3) { setSuggestions([]); setLoading(false); return; }
     setLoading(true);
@@ -875,6 +889,7 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
       const s = await suggestAddresses(v);
       setSuggestions(s);
       setLoading(false);
+      setSearched(true);
     }, 300);
   };
 
@@ -953,11 +968,27 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
               key={i}
               onMouseDown={(e) => { e.preventDefault(); pickSuggestion(s); }}
               onMouseEnter={() => setHighlightIdx(i)}
-              style={{ padding: '8px 10px', cursor: 'pointer', background: highlightIdx === i ? 'rgba(179,230,53,0.14)' : 'transparent', borderTop: i > 0 ? `1px solid ${C.rule}` : 'none', ...T.bodySm, color: C.ink }}
+              style={{ padding: '8px 10px', cursor: 'pointer', background: highlightIdx === i ? 'rgba(179,230,53,0.14)' : 'transparent', borderTop: i > 0 ? `1px solid ${C.rule}` : 'none', ...T.bodySm, color: C.ink, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
             >
-              {s.displayName}
+              <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.displayName}</span>
+              <span style={{ ...T.caption, color: s.source === 'census' ? C.ok : C.inkFaint, fontSize: 10, letterSpacing: 0.4, textTransform: 'uppercase', flexShrink: 0 }}>
+                {s.source === 'census' ? 'USPS' : s.source}
+              </span>
             </div>
           ))}
+        </div>
+      )}
+      {!loading && searched && suggestions.length === 0 && text.trim().length >= 3 && (
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 1000, background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, boxShadow: '0 8px 20px rgba(0,0,0,0.45)', padding: '8px 10px', ...T.caption, color: C.inkFaint }}
+        >
+          No matches — press Enter to save as typed (pin may not be available).
+        </div>
+      )}
+      {warning && (
+        <div style={{ ...T.caption, color: C.warn, marginTop: 4, fontSize: 11 }}>
+          {warning}
         </div>
       )}
     </div>
@@ -1767,9 +1798,35 @@ async function geocodeAddress(address) {
       || (await geocodeViaPhoton(address))
       || (await geocodeViaNominatim(address));
 }
-// Photon-backed autocomplete suggestions. Returns up to 5 unique candidates.
-// Empty array when query is too short or the service is unreachable.
-async function suggestAddresses(query) {
+// Autocomplete suggestions. Photon alone misses many US residential addresses
+// (1105 Rogers St Golden CO, 14200 Smith Rd Aurora CO, 5800 Federal Blvd Denver
+// — all absent from its OSM index, while Census knows them). So we query
+// Census and Photon in parallel and merge Census-first. Photon stays in the
+// list because it's the only source that handles POI/business names ("Home
+// Depot Lakewood CO") and partial input as the user types. Returns up to 6.
+async function suggestViaCensus(query) {
+  const q = String(query || '').trim();
+  // Census wants something street-shaped — skip when input is too short or has
+  // no digits (no house number = no match anyway, just wasted fetch).
+  if (q.length < 6 || !/\d/.test(q)) return [];
+  try {
+    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(q) + '&benchmark=Public_AR_Current&format=json';
+    const resp = await fetch(url);
+    if (!resp.ok) return [];
+    const data = await resp.json();
+    const matches = (data && data.result && data.result.addressMatches) || [];
+    const out = [];
+    for (const m of matches) {
+      if (!m || !m.coordinates) continue;
+      const lat = parseFloat(m.coordinates.y);
+      const lng = parseFloat(m.coordinates.x);
+      if (!isFinite(lat) || !isFinite(lng)) continue;
+      out.push({ displayName: m.matchedAddress || q, lat, lng, source: 'census' });
+    }
+    return out;
+  } catch (e) { return []; }
+}
+async function suggestViaPhoton(query) {
   const q = String(query || '').trim();
   if (q.length < 3) return [];
   try {
@@ -1778,20 +1835,34 @@ async function suggestAddresses(query) {
     if (!resp.ok) return [];
     const data = await resp.json();
     if (!data || !Array.isArray(data.features)) return [];
-    const seen = new Set();
-    const out  = [];
+    const out = [];
     for (const f of data.features) {
       if (!f || !f.geometry || !Array.isArray(f.geometry.coordinates)) continue;
       const lng = parseFloat(f.geometry.coordinates[0]);
       const lat = parseFloat(f.geometry.coordinates[1]);
       if (!isFinite(lat) || !isFinite(lng)) continue;
       const displayName = formatPhotonProps(f.properties) || (f.properties && f.properties.name) || '';
-      if (!displayName || seen.has(displayName)) continue;
-      seen.add(displayName);
+      if (!displayName) continue;
       out.push({ displayName, lat, lng, source: 'photon' });
     }
     return out;
   } catch (e) { return []; }
+}
+async function suggestAddresses(query) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return [];
+  const [census, photon] = await Promise.all([suggestViaCensus(q), suggestViaPhoton(q)]);
+  const seen = new Set();
+  const out  = [];
+  for (const s of [...census, ...photon]) {
+    if (!s || !s.displayName) continue;
+    const key = s.displayName.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+    if (out.length >= 6) break;
+  }
+  return out;
 }
 // Backwards-compat alias — kept so any forgotten call sites still resolve.
 const geocodeAddressViaNominatim = geocodeAddress;
