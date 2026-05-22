@@ -266,3 +266,22 @@ If Robert wants these mirrored too (e.g. "every new browser should see Robert's 
    - Then build Phase 3 (write path + realtime) and ship a second commit
 
 No JS commits land until the migrations are applied, per the schema-lockstep clause.
+
+---
+
+## v18 follow-up — JSE-issued haul-request invoices (2026-05-22)
+
+The Print invoices feature (commit `feat(haul-detail): print invoices …`) introduces JSE-issued invoices generated from haul-request detail pages. These are distinct from the existing per-hauler invoices (hauler → GC) — they're from Jobsite Exchange → GC, encoded by a `kind` field set to `'interim'` or `'final'`.
+
+For demo robustness `kind` is currently a JS-only field (number prefix `INV-INT-` / `INV-FIN-` carries the information into Supabase as a derivable fallback). To make `kind` first-class and survive cross-tab Realtime broadcasts cleanly, apply:
+
+```sql
+-- v18: distinguish JSE-issued haul-request invoices from per-hauler invoices.
+-- 'interim' bills delivered CY to date; 'final' bills the closed haul. NULL on
+-- legacy per-hauler invoices (haulerId set, kind unset).
+ALTER TABLE invoices ADD COLUMN IF NOT EXISTS kind text;
+```
+
+After applying, add `'kind'` to `SB_FIELDS_JS.invoices` in `index.html` so writes include the column and reads decode it.
+
+Not load-bearing — demo works without this. Dispatch can apply when convenient.

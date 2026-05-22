@@ -1656,6 +1656,23 @@ const GEOCODE_SEED = {
 // db.rates is preserved for legacy/project-scoped invoices.
 const INVOICE_CY_RATE = { TAN: 18, SD: 22, ED: 22, BD: 22, HS: 26 };
 
+// v18: issuer block stamped on JSE-issued haul-request invoices (interim +
+// final). Hard-coded so the printable invoice always carries Robert's
+// payable-to + contact info regardless of who clicked Generate. Update here
+// to change the letterhead everywhere.
+const JSE_INVOICE_ISSUER = {
+  name: 'Jobsite Exchange',
+  contactName: 'Robert',
+  phone: '614-582-5642',
+  email: 'robert@jobsiteexchange.com',
+  website: 'jobsiteexchange.com',
+};
+// Stripe payment placeholder. Real Checkout/PaymentLink URL goes here once
+// Robert provisions Stripe — until then the link points at stripe.com so the
+// UI surface is testable without a 404.
+const JSE_STRIPE_FEE_LABEL = '2.9% + $0.30 processing fee applies to card payments via Stripe.';
+const jseStripePayUrl = (invoiceId) => 'https://stripe.com/pay/jse/' + encodeURIComponent(invoiceId || 'placeholder');
+
 // Older values that lived in TRUCK_TYPES before specific rate bumps. The
 // migration uses this map to distinguish "user kept the old default" (safe to
 // overwrite to the new default) vs "user edited the rate" (preserve). Only
@@ -7423,6 +7440,76 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   // Legacy assign (suggested-haulers list) — now routes through assignTruck for parity
   const assign = (haulerId, truckId) => assignTruck(haulerId, truckId);
 
+  // v18: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
+  // invoices keyed off this haul request. Line items derive from delivered CY
+  // per truck-assignment × INVOICE_CY_RATE[truckType]. `kind` distinguishes
+  // interim from final; encoded redundantly in number prefix so cross-tab
+  // Realtime broadcasts survive even before the optional `kind` column
+  // migration is applied (see outputs/supabase-migrations-needed.md v18 section).
+  const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
+  const generateHaulInvoice = (kind) => {
+    const today = new Date().toISOString().slice(0, 10);
+    const lineItems = (req.assignments || []).map(a => {
+      const truck = db.trucks.find(t => t.id === a.truckId);
+      const cy = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
+      const cyRate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
+      const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      return {
+        id: 'li-' + Math.random().toString(36).substring(2, 7),
+        truckPlate: truck ? truck.plate : '?',
+        truckType: truck ? truck.type : '',
+        driverName: driver ? driver.name : '—',
+        deliveredCY: cy,
+        cyRate,
+        hours: 0, rate: cyRate,
+        amount: parseFloat((cy * cyRate).toFixed(2)),
+      };
+    });
+    const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
+    const prefix = kind === 'final' ? 'INV-FIN-' : 'INV-INT-';
+    const invoiceId = 'inv-' + Date.now();
+    const newInvoice = {
+      id: invoiceId,
+      haulerId: null,
+      projectId: req.projectId,
+      haulRequestId: req.id,
+      number: prefix + String(Math.floor(Math.random() * 9000) + 1000),
+      periodStart: today, periodEnd: today, issuedDate: today,
+      createdAt: new Date().toISOString(),
+      billTo: project ? project.gc : '—',
+      lineItems,
+      loadCount: (req.assignments || []).reduce((s, a) => s + a.days.reduce((s2, d) => s2 + d.loads.length, 0), 0),
+      totalCY: totalCYForInv,
+      notes: '',
+      status: 'draft',
+      kind,
+    };
+    setDb(prev => appendActivity(
+      { ...prev, invoices: [...(prev.invoices || []), newInvoice] },
+      {
+        type: 'invoice.drafted',
+        actorRole: 'admin',
+        actorId: null,
+        summary: 'Admin drafted ' + newInvoice.number + ' (' + kind + ') for ' + (project ? project.gc : 'a haul'),
+        refId: req.id,
+      }
+    ));
+    navigate('/admin/invoices/' + invoiceId + '/print');
+  };
+  const advanceInvoiceStatus = (invId, nextStatus) => {
+    const stampField = nextStatus === 'sent' ? 'sentAt' : nextStatus === 'paid' ? 'paidAt' : null;
+    setDb(prev => appendActivity(
+      { ...prev, invoices: (prev.invoices || []).map(i => i.id === invId ? { ...i, status: nextStatus, ...(stampField ? { [stampField]: new Date().toISOString() } : {}) } : i) },
+      {
+        type: 'invoice.' + nextStatus,
+        actorRole: 'admin', actorId: null,
+        summary: 'Invoice ' + ((prev.invoices || []).find(i => i.id === invId) || {}).number + ' marked ' + nextStatus,
+        refId: req.id,
+      }
+    ));
+  };
+  const fmtMoneyInv = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
@@ -7837,6 +7924,60 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                       </div>
                     </div>
                   )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
+
+      {/* v18: Invoices — JSE-issued interim/final invoices billed to the GC,
+          payable to Jobsite Exchange. Buttons drop into the print view. */}
+      <Card style={{ marginBottom: S[5] }}>
+        <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[4] }}>
+          <div>
+            <Label color={C.accent}>Invoices</Label>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+              Issued by <span style={{ color: C.ink, fontWeight: 600 }}>{JSE_INVOICE_ISSUER.name}</span> · billed to <span style={{ color: C.ink }}>{project ? project.gc : '—'}</span>
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+            <Btn variant="secondary" onClick={() => generateHaulInvoice('interim')}>Generate interim invoice</Btn>
+            <Btn variant="primary"   onClick={() => generateHaulInvoice('final')}>Generate final invoice</Btn>
+          </div>
+        </div>
+        {invoicesForHaul.length === 0 ? (
+          <div style={{ ...T.bodySm, color: C.inkDim, padding: S[4], textAlign: 'center', background: C.surfaceHi, borderRadius: R.md }}>
+            No invoices yet for this haul request. Generate an interim invoice to bill the contractor for delivered CY to date, or a final invoice to close out the haul.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+            {invoicesForHaul.map(inv => {
+              const total = (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
+              const kindLabel = inv.kind === 'final' ? 'Final' : inv.kind === 'interim' ? 'Interim' : (String(inv.number || '').startsWith('INV-FIN-') ? 'Final' : 'Interim');
+              return (
+                <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', gap: S[3], alignItems: 'center', padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
+                      <span style={{ ...T.body, fontWeight: 700, color: C.ink, fontFamily: F.mono }}>{inv.number}</span>
+                      <Pill color={inv.kind === 'final' ? C.accent : C.info} soft={inv.kind === 'final' ? C.accentSoft : C.infoSoft}>{kindLabel}</Pill>
+                      <StatusPill status={inv.status} />
+                    </div>
+                    <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
+                      Issued {inv.issuedDate} · {(inv.lineItems || []).length} line{(inv.lineItems || []).length === 1 ? '' : 's'} · {inv.totalCY || 0} CY
+                    </div>
+                  </div>
+                  <div style={{ ...T.h4, fontWeight: 700, color: C.ink, fontFamily: F.mono }}>{fmtMoneyInv(total)}</div>
+                  {inv.status === 'draft' && (
+                    <Btn variant="secondary" size="sm" onClick={() => advanceInvoiceStatus(inv.id, 'sent')}>Mark sent</Btn>
+                  )}
+                  {inv.status === 'sent' && (
+                    <Btn variant="secondary" size="sm" onClick={() => advanceInvoiceStatus(inv.id, 'paid')}>Mark paid</Btn>
+                  )}
+                  {inv.status === 'paid' && (
+                    <span style={{ ...T.caption, color: C.ok }}>Paid {inv.paidAt ? new Date(inv.paidAt).toLocaleDateString() : ''}</span>
+                  )}
+                  <Btn variant="primary" size="sm" onClick={() => navigate('/admin/invoices/' + inv.id + '/print')}>Print</Btn>
                 </div>
               );
             })}
@@ -9417,6 +9558,200 @@ function AdminInvoiceDetail({ invoiceId, db, setDb, navigate }) {
 }
 
 // =====================================================================
+// v18: AdminInvoicePrint — printable JSE-issued invoice at
+// /admin/invoices/:id/print. JSE_INVOICE_ISSUER letterhead, project-pulled
+// Bill To, line items table, totals, dual payment options (check + Stripe
+// placeholder with fee disclaimer). The window.print() button + scoped
+// @media print stylesheet strip nav chrome so the printed sheet is
+// invoice-only.
+// =====================================================================
+function AdminInvoicePrint({ invoiceId, db, navigate }) {
+  const inv = (db.invoices || []).find(i => i.id === invoiceId);
+  if (!inv) {
+    return (
+      <div style={{ padding: S[6], maxWidth: 720, margin: '0 auto' }}>
+        <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Invoices' }, { label: 'Not found' }]} navigate={navigate} />
+        <EmptyState
+          icon={<PaymentsIcon size={32} />}
+          title="Invoice not found"
+          body={'No invoice matched id "' + (invoiceId || '') + '".'}
+          action={<Btn onClick={() => navigate('/admin/payments')}>{'←'} Back to Payments</Btn>}
+        />
+      </div>
+    );
+  }
+  const project = (db.projects || []).find(p => p.id === inv.projectId);
+  const req     = (db.haulRequests || []).find(r => r.id === inv.haulRequestId);
+  const kindLabel = inv.kind === 'final' ? 'Final invoice'
+                  : inv.kind === 'interim' ? 'Interim invoice'
+                  : (String(inv.number || '').startsWith('INV-FIN-') ? 'Final invoice' : 'Interim invoice');
+  const lineItems = inv.lineItems || [];
+  const subtotal = lineItems.reduce((s, li) => s + (li.amount || 0), 0);
+  const fmtMoney = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const stripeUrl = jseStripePayUrl(inv.id);
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 880, margin: '0 auto' }} className="invoice-print-root">
+      {/* Print-only stylesheet — hides admin chrome (sidebar + topbar + back
+          buttons) when window.print() fires, so the printed sheet is just
+          the invoice body. */}
+      <style>{`
+        @media print {
+          body, html { background: #ffffff !important; color: #000000 !important; }
+          .invoice-print-root { padding: 0 !important; max-width: none !important; }
+          .invoice-print-root * { color: #000000 !important; background: transparent !important; box-shadow: none !important; border-color: #cccccc !important; }
+          .invoice-print-hide { display: none !important; }
+          .invoice-print-sheet { border: none !important; padding: 0 !important; }
+          .invoice-print-sheet a { color: #000000 !important; text-decoration: none !important; }
+          .invoice-print-line { border-bottom: 1px solid #cccccc !important; }
+          .admin-sidebar, .admin-topbar, .admin-drawer, .admin-drawer-backdrop, nav, header { display: none !important; }
+        }
+      `}</style>
+
+      <div className="invoice-print-hide" style={{ marginBottom: S[4] }}>
+        <Crumbs items={[
+          { label: 'Admin', to: '/admin' },
+          { label: 'Haul Requests', to: '/admin/requests' },
+          ...(req ? [{ label: haulRequestLabel(db, req), to: '/admin/requests/' + req.id }] : []),
+          { label: inv.number || 'Invoice' },
+        ]} navigate={navigate} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: S[3], flexWrap: 'wrap', marginTop: S[3] }}>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>Preview of the invoice as it will print. Use the Print button to print or save as PDF.</div>
+          <div style={{ display: 'flex', gap: S[2] }}>
+            {req && (
+              <Btn variant="ghost" onClick={() => navigate('/admin/requests/' + req.id)}>{'←'} Back to haul request</Btn>
+            )}
+            <Btn variant="primary" onClick={() => window.print()}>Print this invoice</Btn>
+          </div>
+        </div>
+      </div>
+
+      <Card style={{ padding: S[6] }} className="invoice-print-sheet">
+        {/* Letterhead */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: S[5], marginBottom: S[5], paddingBottom: S[4], borderBottom: '1px solid ' + C.rule }} className="invoice-print-line">
+          <div>
+            <div style={{ ...T.h2, fontWeight: 800, letterSpacing: -0.6, color: C.ink, marginBottom: 4 }}>{JSE_INVOICE_ISSUER.name}</div>
+            <div style={{ ...T.bodySm, color: C.inkDim, lineHeight: 1.6 }}>
+              {JSE_INVOICE_ISSUER.contactName}<br />
+              ☎ {JSE_INVOICE_ISSUER.phone}<br />
+              ✉ {JSE_INVOICE_ISSUER.email}<br />
+              {JSE_INVOICE_ISSUER.website}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4 }}>{kindLabel}</div>
+            <div style={{ ...T.h3, fontWeight: 700, fontFamily: F.mono, color: C.ink }}>{inv.number}</div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
+              Issued <span style={{ fontFamily: F.mono, color: C.ink }}>{inv.issuedDate}</span>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <StatusPill status={inv.status} />
+            </div>
+          </div>
+        </div>
+
+        {/* Bill To */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5], marginBottom: S[5] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Bill to</Label>
+            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{project ? (project.gc || '—') : (inv.billTo || '—')}</div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
+              {project && project.contactName ? <>{project.contactName}<br /></> : null}
+              {project && project.contactPhone ? <>☎ {project.contactPhone}<br /></> : null}
+              {project && project.contactEmail ? <>✉ {project.contactEmail}<br /></> : null}
+              {project && project.address ? project.address : null}
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Haul request</Label>
+            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{project ? project.name : '—'}</div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
+              {req ? <>Haul #{req.id.slice(5)} · {req.volumeCY} CY requested<br /></> : null}
+              {req && req.pickupLocation && req.pickupLocation.address ? <>Pickup: {req.pickupLocation.address}<br /></> : null}
+              {req && req.dropoffLocation && req.dropoffLocation.address ? <>Dropoff: {req.dropoffLocation.address}</> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* Line items */}
+        <Label style={{ marginBottom: S[2] }}>Line items</Label>
+        <div style={{ marginBottom: S[5], border: '1px solid ' + C.rule, borderRadius: R.md, overflow: 'hidden' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: C.surfaceHi }}>
+                <Th>Description</Th>
+                <Th align="right">CY delivered</Th>
+                <Th align="right">Rate / CY</Th>
+                <Th align="right">Line total</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {lineItems.length === 0 ? (
+                <tr>
+                  <td colSpan="4" style={{ ...T.bodySm, textAlign: 'center', padding: S[4], color: C.inkDim }}>
+                    No deliveries logged yet for this haul.
+                  </td>
+                </tr>
+              ) : lineItems.map(li => (
+                <tr key={li.id} className="invoice-print-line" style={{ borderBottom: '1px solid ' + C.rule }}>
+                  <Td>
+                    <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Truck #{li.truckPlate} ({li.truckType})</div>
+                    <div style={{ ...T.caption, color: C.inkDim }}>{li.driverName || '—'}</div>
+                  </Td>
+                  <Td align="right" mono>{li.deliveredCY || 0}</Td>
+                  <Td align="right" mono>{fmtMoney(li.cyRate || li.rate || 0)}</Td>
+                  <Td align="right" mono>{fmtMoney(li.amount || 0)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Totals */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: S[5] }}>
+          <div style={{ minWidth: 280 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: S[2], ...T.bodySm, color: C.inkDim }}>
+              <span>Subtotal</span><span style={{ fontFamily: F.mono, color: C.ink }}>{fmtMoney(subtotal)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', padding: S[3], borderTop: '1px solid ' + C.rule, ...T.h4, fontWeight: 700, color: C.ink }} className="invoice-print-line">
+              <span>Total due</span><span style={{ fontFamily: F.mono }}>{fmtMoney(subtotal)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Payment options */}
+        <div style={{ padding: S[4], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[4] }}>
+          <Label style={{ marginBottom: S[2] }}>Payment options</Label>
+          <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[3], lineHeight: 1.6 }}>
+            <strong>Pay by check</strong><br />
+            Make checks payable to <strong>{JSE_INVOICE_ISSUER.name}</strong>.<br />
+            Mail to {JSE_INVOICE_ISSUER.name}, c/o {JSE_INVOICE_ISSUER.contactName}.
+          </div>
+          <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+            <strong>Pay online via Stripe</strong>
+          </div>
+          <a href={stripeUrl} target="_blank" rel="noopener noreferrer"
+            style={{
+              display: 'inline-block', padding: '10px 16px', background: '#635bff', color: '#ffffff',
+              borderRadius: R.sm, textDecoration: 'none', fontWeight: 700, ...T.bodySm,
+            }}>
+            Pay {fmtMoney(subtotal)} with Stripe →
+          </a>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: S[2] }}>
+            Note: {JSE_STRIPE_FEE_LABEL}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'center', marginTop: S[5], paddingTop: S[3], borderTop: '1px solid ' + C.rule }} className="invoice-print-line">
+          Thank you for your business. Questions? Contact {JSE_INVOICE_ISSUER.contactName} at {JSE_INVOICE_ISSUER.phone} or {JSE_INVOICE_ISSUER.email}.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+// =====================================================================
 // AdminActiveTrucks — live grid of driver widgets at /admin/trucks/active.
 // Reuses DriverHome (and DriverMultiTruckHome) inside a smaller phone-frame
 // wrapper so the admin sees exactly what the driver sees, and the same
@@ -10022,6 +10357,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'reporting' && <AdminReporting db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} />}
