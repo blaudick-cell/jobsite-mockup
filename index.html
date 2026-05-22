@@ -10,6 +10,11 @@
   <meta property="og:description" content="Hierarchy: Admin → Hauls → Haulers → Trucks → Drivers." />
   <meta property="og:type" content="website" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z' fill='%23B3E635'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='sans-serif' font-size='34' font-weight='800' fill='%230A0A0A'%3EJ%3C/text%3E%3C/svg%3E" />
+  <!-- Supabase JS v2 UMD — exposes window.supabase.createClient. Used by the
+       cloud-sync layer in BLOCK 1b for read (Phase 2) + write/Realtime (Phase 3).
+       If this CDN fails to load the app stays fully functional in offline mode
+       backed by localStorage; the CloudStatus chip surfaces the offline state. -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" crossorigin="anonymous"></script>
   <style>
     html, body { margin: 0; padding: 0; background: #0a0a0a; color: #fff; font-family: "Inter", -apple-system, system-ui, sans-serif; }
     #root { min-height: 100vh; }
@@ -1884,6 +1889,308 @@ function hydrateDb(raw) {
   } catch (e) {
     return seed;
   }
+}
+
+// =====================================================================
+// === BLOCK 1b: Supabase cloud-sync layer (Phase 2 read + Phase 3 write)
+// =====================================================================
+// Goal: edits made anywhere in the app persist to Supabase so they show up
+// on other browsers / other devices within a couple seconds. localStorage
+// stays as an offline-first cache so the app still works without network.
+//
+//   Phase 2 (this commit): read path only.
+//     - On mount, fetch every table in parallel. If all empty, upsert JS
+//       seeds and re-fetch. If any have data, hydrate `db` from cloud and
+//       run the hydrateDb migration cascade on the assembled object.
+//     - On any network/auth failure → fall back to the localStorage value
+//       hydrated by the existing useState initializer, and flip the
+//       CloudStatus chip to "Offline".
+//     - `setDb` writes nothing to Supabase yet. localStorage still acts as
+//       the durable store (the persist useEffect is untouched).
+//
+//   Phase 3 (next commit): write path + Realtime echo-skip + Reset wipe.
+//
+// snake↔camel mapping is mostly automatic; explicit overrides handle the 4
+// fields where the simple transform doesn't match the actual SB column
+// names (see outputs/supabase-migrations-needed.md for the full audit).
+
+const SB_URL = 'https://naqqlztgbayxcgfphrxg.supabase.co';
+const SB_KEY = 'sb_publishable_oA0wnxRiDG2QzXIeNT3zLQ_3YikcDRl';
+
+// Per-tab client identity — UUID stored in localStorage so a refresh keeps
+// the same id. Used by the Phase 3 Realtime echo-skip logic.
+const SB_CLIENT_ID = (() => {
+  try {
+    let id = window.localStorage.getItem('jse_sb_client_id');
+    if (!id) {
+      id = 'c-' + Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
+      window.localStorage.setItem('jse_sb_client_id', id);
+    }
+    return id;
+  } catch (e) { return 'c-eph-' + Math.random().toString(36).slice(2, 10); }
+})();
+
+// Table catalog. JS-side key (the one in `db`) → { sb table, pk, overrides }.
+// `overrides` maps camelCase JS → snake_case SB for the cases where the
+// simple snake/camel transform doesn't match (see outputs/supabase-migrations-needed.md).
+const SB_TABLES = {
+  projects:     { sb: 'projects',      pk: 'id', overrides: { material: 'materials' } },
+  haulers:      { sb: 'haulers',       pk: 'id', overrides: {} },
+  drivers:      { sb: 'drivers',       pk: 'id', overrides: {} },
+  trucks:       { sb: 'trucks',        pk: 'id', overrides: {} },
+  loads:        { sb: 'loads',         pk: 'id', overrides: { ticketNo: 'ticket' } },
+  hours:        { sb: 'hours',         pk: 'id', overrides: {} },
+  invoices:     { sb: 'invoices',      pk: 'id', overrides: { loadCount: 'loads' } },
+  haulRequests: { sb: 'haul_requests', pk: 'id', overrides: {} },
+  activity:     { sb: 'activity',      pk: 'id', overrides: { timestamp: 'timestamp_ms' } },
+  // rates: special shape adapter — flat object ↔ row-per-truck-type.
+  // materials: const in JS, seeded once on first run.
+  // meta: scalar key/value rows for schemaVersion + activityLastReadAt.
+};
+const SB_TABLE_LIST = Object.keys(SB_TABLES);
+
+// Whitelist of JS-side fields we care about per table. Reads drop SB cols
+// we don't model (e.g. created_at, loads_target). Writes drop JS fields we
+// don't sync (defense against accidentally upserting derived values).
+const SB_FIELDS_JS = {
+  projects:     ['id','code','name','gc','address','startDate','status','material','haulType','contactName','contactPhone','contactEmail','volumeCYNeeded','volumeCYKnown','pickupLocation','dumpLocation'],
+  haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
+  drivers:      ['id','name','phone'],
+  trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId'],
+  loads:        ['id','driverId','truckId','projectId','material','cy','ticketNo','time','date','status'],
+  hours:        ['id','driverId','truckId','projectId','clockIn','clockOut','breakMin','status','date'],
+  invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','notes'],
+  haulRequests: ['id','projectId','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
+  activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
+};
+
+// `CY` is the only multi-uppercase token in the JS shape (totalCY, volumeCY,
+// volumeCYNeeded, volumeCYKnown). Keep it as one snake-case token (`cy`) in
+// both directions instead of `c_y` / `cY`.
+const SB_UPPER_TOKENS = ['cy'];
+
+function camelToSnake(s) {
+  return s
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')          // foo→f_o for normal camelCase
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1_$2')       // CYNeeded → CY_Needed
+    .toLowerCase();
+}
+function snakeToCamel(s) {
+  return s.replace(/_([a-z0-9]+)/g, (_, w) => {
+    if (SB_UPPER_TOKENS.indexOf(w) !== -1) return w.toUpperCase();
+    return w[0].toUpperCase() + w.slice(1);
+  });
+}
+
+function sbRowToJs(jsKey, row) {
+  if (!row || typeof row !== 'object') return row;
+  const cfg = SB_TABLES[jsKey];
+  const whitelist = SB_FIELDS_JS[jsKey];
+  const rev = {};
+  Object.entries(cfg.overrides).forEach(([js, sb]) => { rev[sb] = js; });
+  const out = {};
+  for (const [sbCol, val] of Object.entries(row)) {
+    const jsField = rev[sbCol] || snakeToCamel(sbCol);
+    if (whitelist.indexOf(jsField) === -1) continue;
+    out[jsField] = val;
+  }
+  return out;
+}
+function jsRowToSb(jsKey, row) {
+  if (!row || typeof row !== 'object') return row;
+  const cfg = SB_TABLES[jsKey];
+  const whitelist = SB_FIELDS_JS[jsKey];
+  const out = {};
+  for (const [jsField, val] of Object.entries(row)) {
+    if (whitelist.indexOf(jsField) === -1) continue;
+    const sbCol = cfg.overrides[jsField] || camelToSnake(jsField);
+    out[sbCol] = val;
+  }
+  return out;
+}
+
+// ---- Client singleton ---------------------------------------------------
+const _sb = {
+  client: null,
+  ready: false,
+  init() {
+    try {
+      if (!(window.supabase && typeof window.supabase.createClient === 'function')) return false;
+      this.client = window.supabase.createClient(SB_URL, SB_KEY, {
+        auth: { persistSession: false },
+        realtime: { params: { eventsPerSecond: 10 } },
+      });
+      this.ready = true;
+      return true;
+    } catch (e) {
+      console.warn('[jse] Supabase init failed:', e);
+      return false;
+    }
+  },
+  async fetchAll(jsKey) {
+    const cfg = SB_TABLES[jsKey];
+    const { data, error } = await this.client.from(cfg.sb).select('*').limit(5000);
+    if (error) throw error;
+    return (data || []).map(r => sbRowToJs(jsKey, r));
+  },
+  async fetchRates() {
+    const { data, error } = await this.client.from('rates').select('truck_type, rate_per_hour').limit(1000);
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach(r => { out[r.truck_type] = r.rate_per_hour; });
+    return out;
+  },
+  async fetchMeta() {
+    const { data, error } = await this.client.from('meta').select('*').limit(1000);
+    if (error) throw error;
+    const out = {};
+    (data || []).forEach(r => { out[r.key] = r.value; });
+    return out;
+  },
+  async fetchMaterials() {
+    const { data, error } = await this.client.from('materials').select('code, label').limit(1000);
+    if (error) throw error;
+    return data || [];
+  },
+  async upsertRows(jsKey, rows) {
+    if (!rows || rows.length === 0) return { count: 0 };
+    const cfg = SB_TABLES[jsKey];
+    const sbRows = rows.map(r => jsRowToSb(jsKey, r));
+    const { error } = await this.client.from(cfg.sb).upsert(sbRows, { onConflict: cfg.pk });
+    if (error) throw error;
+    return { count: sbRows.length };
+  },
+  async upsertRates(rates) {
+    if (!rates || typeof rates !== 'object') return { count: 0 };
+    const sbRows = Object.entries(rates).map(([truck_type, rate_per_hour]) => ({ truck_type, rate_per_hour }));
+    const { error } = await this.client.from('rates').upsert(sbRows, { onConflict: 'truck_type' });
+    if (error) throw error;
+    return { count: sbRows.length };
+  },
+  async upsertMeta(key, value) {
+    const { error } = await this.client.from('meta')
+      .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+    if (error) throw error;
+  },
+  async upsertMaterials(list) {
+    if (!list || list.length === 0) return { count: 0 };
+    const { error } = await this.client.from('materials').upsert(list, { onConflict: 'code' });
+    if (error) throw error;
+    return { count: list.length };
+  },
+  async deleteRows(jsKey, ids) {
+    if (!ids || ids.length === 0) return { count: 0 };
+    const cfg = SB_TABLES[jsKey];
+    const { error } = await this.client.from(cfg.sb).delete().in(cfg.pk, ids);
+    if (error) throw error;
+    return { count: ids.length };
+  },
+  async truncateAll() {
+    // PostgREST requires a filter on DELETE; `gte('', '')` matches everything.
+    const tables = [
+      ...SB_TABLE_LIST.map(k => ({ sb: SB_TABLES[k].sb, pk: SB_TABLES[k].pk })),
+      { sb: 'rates',     pk: 'truck_type' },
+      { sb: 'materials', pk: 'code' },
+    ];
+    for (const t of tables) {
+      const { error } = await this.client.from(t.sb).delete().gte(t.pk, '');
+      if (error) throw error;
+    }
+  },
+};
+
+// ---- Cloud bootstrap (Phase 2 read path) --------------------------------
+async function bootstrapCloud(localDb) {
+  if (!_sb.ready && !_sb.init()) {
+    return { status: 'offline', db: localDb, reason: 'sdk-missing' };
+  }
+  try {
+    const results = await Promise.all([
+      ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
+      _sb.fetchRates(),
+      _sb.fetchMeta(),
+      _sb.fetchMaterials(),
+    ]);
+    const tableArrays   = results.slice(0, SB_TABLE_LIST.length);
+    const cloudRates    = results[SB_TABLE_LIST.length];
+    const cloudMeta     = results[SB_TABLE_LIST.length + 1];
+    const cloudMats     = results[SB_TABLE_LIST.length + 2];
+    const totalRows = tableArrays.reduce((s, a) => s + a.length, 0)
+                    + Object.keys(cloudRates).length
+                    + cloudMats.length;
+
+    if (totalRows === 0) {
+      // Fresh project — seed every table once from the JS constants.
+      await seedAllTables();
+      const reseeded = await Promise.all([
+        ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
+        _sb.fetchRates(),
+        _sb.fetchMeta(),
+        _sb.fetchMaterials(),
+      ]);
+      const ta2 = reseeded.slice(0, SB_TABLE_LIST.length);
+      const cr2 = reseeded[SB_TABLE_LIST.length];
+      const cm2 = reseeded[SB_TABLE_LIST.length + 1];
+      const seeded = assembleDbFromCloud(ta2, cr2, cm2, localDb);
+      return { status: 'online', db: seeded, reason: 'seeded' };
+    }
+    const assembled = assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb);
+    return { status: 'online', db: assembled, reason: 'fetched' };
+  } catch (e) {
+    console.warn('[jse] cloud bootstrap failed; offline mode:', e);
+    return { status: 'offline', db: localDb, reason: 'fetch-failed' };
+  }
+}
+
+function assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb) {
+  const byKey = {};
+  SB_TABLE_LIST.forEach((k, i) => { byKey[k] = tableArrays[i]; });
+  // Merge cloud rates over RATES_INIT so any TRUCK_TYPES added since the
+  // last cloud seed still light up with their default.
+  const rates = { ...RATES_INIT, ...cloudRates };
+  const schemaVersion = typeof cloudMeta.schema_version === 'number'
+    ? cloudMeta.schema_version : DB_SCHEMA_VERSION;
+  const activityLastReadAt = typeof cloudMeta.activity_last_read_at === 'number'
+    ? cloudMeta.activity_last_read_at : 0;
+  // db.geocode and db.routes are JS-only caches. Keep whatever the local
+  // payload had so we don't re-pay Nominatim / OSRM on every cold boot.
+  const raw = {
+    projects: byKey.projects, haulers: byKey.haulers, drivers: byKey.drivers,
+    trucks: byKey.trucks, loads: byKey.loads, hours: byKey.hours,
+    invoices: byKey.invoices, haulRequests: byKey.haulRequests,
+    activity: byKey.activity,
+    rates,
+    activityLastReadAt,
+    geocode: (localDb && localDb.geocode) || GEOCODE_SEED,
+    routes:  (localDb && localDb.routes)  || ROUTES_SEED,
+    schemaVersion,
+  };
+  // Route through hydrateDb so older cloud rows (e.g. meta.schema_version <
+  // DB_SCHEMA_VERSION) still get the v1→vN migration cascade.
+  try {
+    return hydrateDb(JSON.stringify(raw));
+  } catch (e) {
+    return raw;
+  }
+}
+
+async function seedAllTables() {
+  const seed = buildSeed();
+  await Promise.all([
+    _sb.upsertRows('projects',     seed.projects),
+    _sb.upsertRows('haulers',      seed.haulers),
+    _sb.upsertRows('drivers',      seed.drivers),
+    _sb.upsertRows('trucks',       seed.trucks),
+    _sb.upsertRows('loads',        seed.loads),
+    _sb.upsertRows('hours',        seed.hours),
+    _sb.upsertRows('invoices',     seed.invoices),
+    _sb.upsertRows('haulRequests', seed.haulRequests),
+    _sb.upsertRows('activity',     seed.activity),
+    _sb.upsertRates(seed.rates),
+    _sb.upsertMaterials(MATERIALS),
+    _sb.upsertMeta('schema_version', DB_SCHEMA_VERSION),
+    _sb.upsertMeta('activity_last_read_at', seed.activityLastReadAt || 0),
+  ]);
 }
   </script>
 
@@ -10427,6 +10734,37 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
 // from another tab's localStorage write. Components subscribe to flash a cue.
 const RemoteUpdateContext = React.createContext(0);
 
+// Small fixed-position chip in the bottom-right corner that surfaces the
+// cloud-sync state. Hidden when 'online' so it doesn't add noise; visible
+// while bootstrapping ("Syncing...") and when the cloud is unreachable
+// ("Offline — local cache only"). Phase 3 also reuses this for the
+// "couldn't save to cloud" toast when a write fails.
+function CloudStatusChip({ status, message }) {
+  if (status === 'online') return null;
+  const palette = status === 'offline'
+    ? { bg: 'rgba(244, 162, 97, 0.12)', border: 'rgba(244, 162, 97, 0.55)', fg: '#F4A261' }
+    : { bg: 'rgba(179, 230, 53, 0.12)', border: 'rgba(179, 230, 53, 0.55)', fg: '#B3E635' };
+  const label = message || (status === 'offline' ? 'Offline — local cache only' : 'Syncing with cloud…');
+  return (
+    <div role="status" aria-live="polite" style={{
+      position: 'fixed', bottom: 16, right: 16, zIndex: 9000,
+      display: 'inline-flex', alignItems: 'center', gap: 8,
+      padding: '8px 14px', borderRadius: 999,
+      background: palette.bg, border: `1px solid ${palette.border}`, color: palette.fg,
+      fontFamily: 'ui-monospace, "JetBrains Mono", monospace', fontSize: 12,
+      letterSpacing: 0.2, backdropFilter: 'blur(8px)',
+      boxShadow: '0 4px 18px rgba(0,0,0,0.35)',
+      pointerEvents: 'none',
+    }}>
+      <span aria-hidden="true" style={{
+        width: 8, height: 8, borderRadius: '50%', background: palette.fg,
+        animation: status === 'loading' ? 'jse-pulse 1.6s ease-out infinite' : 'none',
+      }} />
+      <span>{label}</span>
+    </div>
+  );
+}
+
 function App() {
   const [hash, navigate] = useHash();
   const [db, setDb] = useState(() => {
@@ -10436,6 +10774,10 @@ function App() {
       return buildSeed();
     }
   });
+  // Cloud-sync state: 'loading' while bootstrapCloud is in flight, 'online'
+  // once Supabase data is in db, 'offline' if any fetch failed (the UI keeps
+  // working from localStorage; the chip in the corner makes the state visible).
+  const [cloudStatus, setCloudStatus] = useState('loading');
   const [remoteUpdateNonce, setRemoteUpdateNonce] = useState(0);
   // Track the last serialized payload we wrote (or received) so we can skip
   // redundant writes — including the write that would otherwise echo back the
@@ -10451,6 +10793,23 @@ function App() {
       // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
+  // Phase 2 cloud bootstrap: on mount, attempt to fetch every Supabase table
+  // and replace `db` with the merged cloud state. If the cloud is empty,
+  // seed it from the JS constants first. On any failure, leave the
+  // localStorage-hydrated db in place and flip the chip to "Offline".
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await bootstrapCloud(db);
+      if (cancelled) return;
+      if (result.status === 'online') {
+        setDb(result.db);
+      }
+      setCloudStatus(result.status);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Cross-tab sync: when another tab writes to jse_db_v1, hydrate the new value
   // here. `storage` events do not fire in the originating tab, so no loop.
   // newValue === null means a sibling tab cleared the key (Reset demo data) —
@@ -10545,6 +10904,7 @@ function App() {
         {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'hauler' && <HaulerShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+        <CloudStatusChip status={cloudStatus} />
       </div>
     </RemoteUpdateContext.Provider>
   );
