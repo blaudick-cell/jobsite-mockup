@@ -876,6 +876,19 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     if (canonical !== (value || '')) onSave(canonical);
   };
 
+  // Eligibility gate. Avoids hammering the geocoder with garbage and prevents
+  // the "15185" symptom where Photon happily returned random Arvada streets
+  // because it parsed the digits as a ZIP prefix. The query must be at least
+  // 6 chars AND contain a space (so partial street names like "1105 r" don't
+  // fire) AND not be purely digits/whitespace.
+  const isQueryEligible = (v) => {
+    const s = String(v || '').trim();
+    if (s.length < 6) return false;
+    if (!/\s/.test(s)) return false;
+    if (/^[\d\s]+$/.test(s)) return false;
+    return true;
+  };
+
   const onInputChange = (e) => {
     const v = e.target.value;
     setText(v);
@@ -883,14 +896,22 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     setWarning('');
     setSearched(false);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    if (v.trim().length < 3) { setSuggestions([]); setLoading(false); return; }
+    if (!isQueryEligible(v)) {
+      setSuggestions([]);
+      setLoading(false);
+      return;
+    }
+    // Show the spinner the moment the query becomes eligible — not 200ms
+    // later when the debounced fetch actually starts. Feels snappier and
+    // tells the user "we heard you" while the network round trip is in
+    // flight.
     setLoading(true);
     debounceRef.current = setTimeout(async () => {
       const s = await suggestAddresses(v);
       setSuggestions(s);
       setLoading(false);
       setSearched(true);
-    }, 300);
+    }, 200);
   };
 
   const onKeyDown = (e) => {
@@ -956,7 +977,10 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
         style={inputStyle || { background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', width: '100%', boxSizing: 'border-box', ...style }}
       />
       {loading && (
-        <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', ...T.caption, color: C.inkFaint, pointerEvents: 'none', fontSize: 11 }}>…</span>
+        <span
+          aria-label="Searching"
+          style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', width: 12, height: 12, borderRadius: '50%', border: `2px solid ${C.ruleHi}`, borderTopColor: C.accent, animation: 'spin 700ms linear infinite', pointerEvents: 'none' }}
+        />
       )}
       {suggestions.length > 0 && (
         <div
@@ -978,12 +1002,29 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
           ))}
         </div>
       )}
-      {!loading && searched && suggestions.length === 0 && text.trim().length >= 3 && (
+      {loading && suggestions.length === 0 && (
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 1000, background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, boxShadow: '0 8px 20px rgba(0,0,0,0.45)', padding: '8px 10px', ...T.caption, color: C.inkFaint, display: 'flex', alignItems: 'center', gap: 8 }}
+        >
+          <span style={{ width: 10, height: 10, borderRadius: '50%', border: `2px solid ${C.ruleHi}`, borderTopColor: C.accent, animation: 'spin 700ms linear infinite' }} />
+          <span>Searching addresses…</span>
+        </div>
+      )}
+      {!loading && !isQueryEligible(text) && text.trim().length > 0 && (
         <div
           onMouseDown={e => e.stopPropagation()}
           style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 1000, background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, boxShadow: '0 8px 20px rgba(0,0,0,0.45)', padding: '8px 10px', ...T.caption, color: C.inkFaint }}
         >
-          No matches — press Enter to save as typed (pin may not be available).
+          Keep typing the address (include street name and city).
+        </div>
+      )}
+      {!loading && searched && suggestions.length === 0 && isQueryEligible(text) && (
+        <div
+          onMouseDown={e => e.stopPropagation()}
+          style={{ position: 'absolute', top: 'calc(100% + 2px)', left: 0, right: 0, zIndex: 1000, background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, boxShadow: '0 8px 20px rgba(0,0,0,0.45)', padding: '8px 10px', ...T.caption, color: C.inkFaint }}
+        >
+          No matches — try adding city and state.
         </div>
       )}
       {warning && (
@@ -1738,8 +1779,10 @@ const ROUTES_SEED = {};
 //      service that resolves things like "1105 Rogers Street, Golden Colorado"
 //      to its real zip 80401 — Photon and Nominatim both miss it.
 //      ⚠ Census does NOT send CORS headers — direct browser fetches are
-//      silently blocked. We route through api.allorigins.win (free public
-//      CORS proxy, ~2-3s latency).
+//      silently blocked. We route through our own Netlify Function at
+//      /api/geocode (same-origin, edge-cached 24h). Photon goes through the
+//      same proxy so the network path is uniform and we don't depend on any
+//      third-party CORS forwarder.
 //   2. Photon (komoot) — great fuzzy / partial matching; non-US fallback.
 //   3. Nominatim — last resort.
 // Returns { lat, lng, displayName, source } or null.
@@ -1749,14 +1792,17 @@ const ROUTES_SEED = {};
 // we also filter Photon's results to those whose street name overlaps with
 // the typed one — keeps "1105 12th Street" from winning when the user
 // typed "1105 Rogers" but Photon's index doesn't know Rogers St.
-const CENSUS_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
-function buildCensusUrl(address) {
-  return 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address='
-    + encodeURIComponent(address) + '&benchmark=Public_AR_Current&format=json';
-}
+const GEOCODE_PROXY = '/api/geocode';
 async function fetchCensusJson(address) {
   try {
-    const resp = await fetch(CENSUS_CORS_PROXY + encodeURIComponent(buildCensusUrl(address)));
+    const resp = await fetch(GEOCODE_PROXY + '?source=census&q=' + encodeURIComponent(address));
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) { return null; }
+}
+async function fetchPhotonJson(query) {
+  try {
+    const resp = await fetch(GEOCODE_PROXY + '?source=photon&q=' + encodeURIComponent(query));
     if (!resp.ok) return null;
     return await resp.json();
   } catch (e) { return null; }
@@ -1878,10 +1924,7 @@ function formatPhotonProps(p) {
 }
 async function geocodeViaPhoton(address) {
   try {
-    const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(address) + '&limit=1&lang=en';
-    const resp = await fetch(url);
-    if (!resp.ok) return null;
-    const data = await resp.json();
+    const data = await fetchPhotonJson(address);
     const f = data && Array.isArray(data.features) && data.features[0];
     if (!f || !f.geometry || !Array.isArray(f.geometry.coordinates)) return null;
     const lng = parseFloat(f.geometry.coordinates[0]);
@@ -1947,10 +1990,7 @@ async function suggestViaPhoton(query) {
   const q = String(query || '').trim();
   if (q.length < 3) return [];
   try {
-    const url = 'https://photon.komoot.io/api/?q=' + encodeURIComponent(q) + '&limit=5&lang=en';
-    const resp = await fetch(url);
-    if (!resp.ok) return [];
-    const data = await resp.json();
+    const data = await fetchPhotonJson(q);
     if (!data || !Array.isArray(data.features)) return [];
     const out = [];
     for (const f of data.features) {
@@ -1958,9 +1998,13 @@ async function suggestViaPhoton(query) {
       const lng = parseFloat(f.geometry.coordinates[0]);
       const lat = parseFloat(f.geometry.coordinates[1]);
       if (!isFinite(lat) || !isFinite(lng)) continue;
-      const displayName = formatPhotonProps(f.properties) || (f.properties && f.properties.name) || '';
+      const props = f.properties || {};
+      const displayName = formatPhotonProps(props) || props.name || '';
       if (!displayName) continue;
-      out.push({ displayName, lat, lng, source: 'photon' });
+      // Carry the raw Photon "name" so suggestAddresses can apply the
+      // house-number guard from the spec ("reject any Photon result whose
+      // properties.name doesn't start with the leading number in the query").
+      out.push({ displayName, lat, lng, source: 'photon', _photonName: String(props.name || '') });
     }
     return out;
   } catch (e) { return []; }
@@ -1976,9 +2020,21 @@ async function suggestAddresses(query) {
   const usShape   = isUsShapedQuery(q);
   const hasNumber = /\d/.test(q);
   const streetTokens = (usShape && hasNumber) ? extractQueryStreetTokens(q) : [];
-  const photonKept = streetTokens.length
-    ? photon.filter(p => photonStreetMatchesQuery(p.displayName, streetTokens))
-    : photon;
+  // Leading-number guard. Caught the bogus "Arvada, Colorado 80003" results
+  // Photon was returning for queries like "15185" — none of those Photon
+  // names started with the typed number. Applied alongside the street-token
+  // filter; either rejection drops the result.
+  const leadNumMatch = q.match(/^\s*(\d+)\b/);
+  const leadNumber   = leadNumMatch ? leadNumMatch[1] : null;
+  const photonKept = photon.filter(p => {
+    if (streetTokens.length && !photonStreetMatchesQuery(p.displayName, streetTokens)) return false;
+    if (leadNumber) {
+      const name = String(p._photonName || '').trim();
+      const dn   = String(p.displayName || '').trim();
+      if (!name.startsWith(leadNumber) && !dn.startsWith(leadNumber)) return false;
+    }
+    return true;
+  });
   const seen = new Set();
   const out  = [];
   for (const s of [...census, ...photonKept]) {
