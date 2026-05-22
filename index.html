@@ -6525,49 +6525,77 @@ function AdminHaulRequests({ db, setDb, navigate }) {
 // mirrors LiveOperationsTileMap — same CartoCDN raster tiles, same halo+dot
 // pin recipe, same `db.geocode` / `db.routes` cache pattern with Nominatim
 // + OSRM fallback fetch when an address pair is uncached.
+// Always mounted from AdminHaulRequestDetail — the Card renders for every
+// haul request and self-adjusts when addresses are missing, mid-fetch, or
+// the external geocode/route calls fail.
 function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
   const containerRef = useRef(null);
   const mapRef = useRef(null);
   const markersRef = useRef([]);
+  // Lifecycle of the two external calls. Lets us distinguish "still loading"
+  // from "geocode failed" / "route failed" so the placeholder copy stays honest.
+  const [status, setStatus] = useState({ geocode: 'idle', route: 'idle' });
+
+  const pickAddr = (pickupAddress || '').trim();
+  const dropAddr = (dropoffAddress || '').trim();
+  const hasAddresses = !!(pickAddr && dropAddr);
 
   const geocode = (db && db.geocode) || {};
   const routesCache = (db && db.routes) || {};
-  const pick = pickupAddress ? geocode[pickupAddress] : null;
-  const dump = dropoffAddress ? geocode[dropoffAddress] : null;
-  const routeKey = (pickupAddress && dropoffAddress) ? (pickupAddress + '|' + dropoffAddress) : null;
+  const pick = pickAddr ? geocode[pickAddr] : null;
+  const dump = dropAddr ? geocode[dropAddr] : null;
+  const routeKey = hasAddresses ? (pickAddr + '|' + dropAddr) : null;
   const route = routeKey ? routesCache[routeKey] : null;
 
   // Async fetch: geocode endpoints + OSRM-route them if not already cached.
-  // Writes back through setDb so the cache populates for future renders.
+  // Re-runs whenever the address pair changes (the EditableText fields commit
+  // on blur/Enter, so each commit propagates new props here). Writes through
+  // setDb so the cache populates for future renders.
   useEffect(() => {
-    if (!pickupAddress || !dropoffAddress) return undefined;
-    if (route) return undefined;
+    setStatus({ geocode: 'idle', route: 'idle' });
+    if (!hasAddresses) return undefined;
     let cancelled = false;
+    setStatus(s => ({ ...s, geocode: 'loading' }));
     (async () => {
-      let p = (db.geocode || {})[pickupAddress];
-      let d = (db.geocode || {})[dropoffAddress];
+      let p = (db.geocode || {})[pickAddr];
+      let d = (db.geocode || {})[dropAddr];
       if (!p) {
-        const g = await geocodeAddressViaNominatim(pickupAddress);
+        const g = await geocodeAddressViaNominatim(pickAddr);
         if (cancelled) return;
-        if (g) { p = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pickupAddress]: g } })); }
+        if (g) { p = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pickAddr]: g } })); }
       }
       if (!d) {
-        const g = await geocodeAddressViaNominatim(dropoffAddress);
+        const g = await geocodeAddressViaNominatim(dropAddr);
         if (cancelled) return;
-        if (g) { d = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [dropoffAddress]: g } })); }
+        if (g) { d = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [dropAddr]: g } })); }
       }
-      if (!p || !d) return;
+      if (!p || !d) {
+        if (!cancelled) setStatus(s => ({ ...s, geocode: 'failed' }));
+        return;
+      }
+      if (!cancelled) setStatus(s => ({ ...s, geocode: 'ready', route: 'loading' }));
+      const cachedR = (db.routes || {})[pickAddr + '|' + dropAddr];
+      if (cachedR) {
+        if (!cancelled) setStatus(s => ({ ...s, route: 'ready' }));
+        return;
+      }
       const r = await fetchOSRMDrivingRoute(p, d);
       if (cancelled) return;
-      if (r) setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [pickupAddress + '|' + dropoffAddress]: r } }));
+      if (r) {
+        setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [pickAddr + '|' + dropAddr]: r } }));
+        setStatus(s => ({ ...s, route: 'ready' }));
+      } else {
+        setStatus(s => ({ ...s, route: 'failed' }));
+      }
     })();
     return () => { cancelled = true; };
-  }, [pickupAddress, dropoffAddress, !!route]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pickAddr, dropAddr]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Map init — once per mount (and when MapLibre becomes available).
+  // Map init — only when we actually have an address pair to plot. Avoids
+  // mounting a MapLibre instance for haul requests that have no addresses yet.
   useEffect(() => {
-    if (!mlAvailable || !containerRef.current) return undefined;
+    if (!mlAvailable || !hasAddresses || !containerRef.current) return undefined;
     if (mapRef.current) return undefined;
     const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
     const retina = dpr > 1 ? '@2x' : '';
@@ -6603,14 +6631,20 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       try { map.remove(); } catch (e) { /* ignore */ }
       mapRef.current = null;
     };
-  }, [mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mlAvailable, hasAddresses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reconcile route geometry, pins, and bounds whenever the resolved coords change.
-  const routeCoords = route && Array.isArray(route.coords) ? route.coords : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
-  const isStraight = !route;
-  const coordsSig = routeCoords
-    ? routeCoords.length + (isStraight ? 's' : 'o') + ':' + (pick ? pick.lng.toFixed(4) + ',' + pick.lat.toFixed(4) : '-') + ':' + (dump ? dump.lng.toFixed(4) + ',' + dump.lat.toFixed(4) : '-')
-    : '';
+  // Show a dashed straight line while OSRM is still loading; suppress it entirely
+  // once OSRM has failed so the user sees just the two pins.
+  const haveRealRoute = !!route;
+  const showFallbackLine = !haveRealRoute && status.route !== 'failed' && pick && dump;
+  const routeCoords = haveRealRoute && Array.isArray(route.coords)
+    ? route.coords
+    : (showFallbackLine ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
+  const isStraight = !haveRealRoute;
+  const coordsSig = (pick ? pick.lng.toFixed(4) + ',' + pick.lat.toFixed(4) : '-')
+    + '|' + (dump ? dump.lng.toFixed(4) + ',' + dump.lat.toFixed(4) : '-')
+    + '|' + (haveRealRoute ? 'r' : (status.route === 'failed' ? 'f' : 'n'));
   useEffect(() => {
     let cancelled = false;
     const t = setTimeout(() => {
@@ -6622,8 +6656,13 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
         markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
         markersRef.current = [];
         const src = map.getSource && map.getSource('mini-route');
-        if (src && routeCoords) {
-          try { src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: { isStraight }, geometry: { type: 'LineString', coordinates: routeCoords } }] }); } catch (e) { /* ignore */ }
+        if (src) {
+          try {
+            const features = routeCoords
+              ? [{ type: 'Feature', properties: { isStraight }, geometry: { type: 'LineString', coordinates: routeCoords } }]
+              : [];
+            src.setData({ type: 'FeatureCollection', features });
+          } catch (e) { /* ignore */ }
         }
         const PICKUP_HALO = 'radial-gradient(circle, #f35f5f8c, #f35f5f2e 55%, #f35f5f00 75%)';
         const DUMP_HALO   = 'radial-gradient(circle, #b3e6358c, #b3e6352e 55%, #b3e63500 75%)';
@@ -6645,10 +6684,13 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
           if (pick) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(PICKUP_HALO, '#ef5b5b'), anchor: 'center' }).setLngLat([pick.lng, pick.lat]).addTo(map));
           if (dump) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(DUMP_HALO, '#B3E635'), anchor: 'center' }).setLngLat([dump.lng, dump.lat]).addTo(map));
         } catch (e) { /* ignore */ }
-        if (routeCoords && routeCoords.length >= 2) {
+        const fitPoints = routeCoords && routeCoords.length >= 2
+          ? routeCoords
+          : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
+        if (fitPoints) {
           try {
             const bounds = new window.maplibregl.LngLatBounds();
-            routeCoords.forEach(c => bounds.extend(c));
+            fitPoints.forEach(c => bounds.extend(c));
             map.fitBounds(bounds, { padding: 40, maxZoom: 13, duration: 0 });
           } catch (e) { /* ignore */ }
         }
@@ -6672,32 +6714,47 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   const loadsPerShift = cycleMin != null ? Math.floor(480 / cycleMin) : null;
   const cyPerDay = loadsPerShift != null ? loadsPerShift * (INVOICE_CY_RATE.TAN || 18) : null;
 
-  if (!pickupAddress || !dropoffAddress) return null;
+  // Subtitle copy reflects whichever state the widget is currently in.
+  const subtitle = !hasAddresses
+    ? 'Add pickup + dropoff addresses to see the route.'
+    : status.geocode === 'failed'
+      ? 'Could not locate one of the addresses.'
+      : status.route === 'failed'
+        ? 'Driving route unavailable — showing pins only.'
+        : 'Driving route + estimated tandem throughput.';
 
   return (
     <Card style={{ marginBottom: S[5] }}>
       <div style={{ marginBottom: S[4] }}>
         <Label color={C.accent}>Route preview</Label>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Driving route + estimated tandem throughput.</div>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{subtitle}</div>
       </div>
-      <div ref={containerRef} style={{ width: '100%', height: 300, borderRadius: R.md, overflow: 'hidden', background: C.surfaceHi, marginBottom: S[4] }} />
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
-        <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
-          <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>Drive time</div>
-          <div style={{ ...T.statValue, color: C.ink }}>
-            {driveMin != null ? driveMin : '—'} <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>{driveMin != null ? 'min one-way' : ''}</span>
+      {hasAddresses ? (
+        <>
+          <div ref={containerRef} style={{ width: '100%', height: 300, borderRadius: R.md, overflow: 'hidden', background: C.surfaceHi, marginBottom: S[4] }} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+            <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
+              <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>Drive time</div>
+              <div style={{ ...T.statValue, color: C.ink }}>
+                {driveMin != null ? driveMin : '—'} <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>{driveMin != null ? 'min one-way' : ''}</span>
+              </div>
+            </div>
+            <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
+              <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span>Est. CY/day · 1 TAN</span>
+                <span title="Assumes 10 min load + drive + 5 min dump + return drive, 8-hr productive shift, 18 CY per tandem load." style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, borderRadius: '50%', border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 9, cursor: 'help' }}>?</span>
+              </div>
+              <div style={{ ...T.statValue, color: C.ink }}>
+                {cyPerDay != null ? `~${cyPerDay} CY` : '—'} {loadsPerShift != null && <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>· {loadsPerShift} loads</span>}
+              </div>
+            </div>
           </div>
+        </>
+      ) : (
+        <div style={{ padding: S[5], borderRadius: R.md, background: C.surfaceHi, border: `1px dashed ${C.rule}`, textAlign: 'center', ...T.bodySm, color: C.inkFaint }}>
+          Edit pickup + dropoff in the Logistics card above to plot the route.
         </div>
-        <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
-          <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span>Est. CY/day · 1 TAN</span>
-            <span title="Assumes 10 min load + drive + 5 min dump + return drive, 8-hr productive shift, 18 CY per tandem load." style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, borderRadius: '50%', border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 9, cursor: 'help' }}>?</span>
-          </div>
-          <div style={{ ...T.statValue, color: C.ink }}>
-            {cyPerDay != null ? `~${cyPerDay} CY` : '—'} {loadsPerShift != null && <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>· {loadsPerShift} loads</span>}
-          </div>
-        </div>
-      </div>
+      )}
     </Card>
   );
 }
