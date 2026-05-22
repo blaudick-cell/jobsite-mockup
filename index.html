@@ -7705,7 +7705,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       {/* Route preview — mini-map + drive time + tandem throughput estimate */}
       <HaulRouteMiniMap db={db} setDb={setDb} pickupAddress={pickup.address} dropoffAddress={dropoff.address} />
 
-      {/* Request summary */}
+      {/* Request summary. v18: overall completion gauge moved here from the
+          per-truck assignment cards — each truck contributes to the haul's
+          total, so the percentage belongs at the haul level. */}
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
@@ -7722,7 +7724,21 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               </div>
             )}
           </div>
-          <StatusPill status={req.status} />
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
+            <StatusPill status={req.status} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
+                <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
+                  {totalDeliveredCY} / {req.volumeCY} CY
+                </div>
+                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
+                  {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
+                </div>
+              </div>
+              <Donut pct={overallPct} size={88} stroke={9} />
+            </div>
+          </div>
         </div>
       </Card>
 
@@ -7774,7 +7790,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             const t = db.trucks.find(x => x.id === a.truckId);
             const aHauler = db.haulers.find(h => h.id === a.haulerId);
             const truckCY = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
-            const truckPct = req.volumeCY > 0 ? (truckCY / req.volumeCY) * 100 : 0;
             const isAddingDay = addingDayFor === a.truckId;
             return (
               <Card key={a.truckId} padding={S[4]}>
@@ -7786,7 +7801,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>{aHauler ? aHauler.name : 'unknown hauler'}</div>
                     <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{truckCY} CY delivered</div>
                   </div>
-                  <Donut pct={truckPct} size={72} stroke={8} />
                   <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this haul" style={{
                     background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
                     width: 28, height: 28, borderRadius: R.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
