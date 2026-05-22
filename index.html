@@ -1728,7 +1728,7 @@ const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', '
 // project route not in the cache, then writes the result back via setDb.
 const ROUTES_SEED = {};
 
-// === v18: Cascade geocoder + autocomplete suggestions, plus OSRM router.
+// === v19: Cascade geocoder + autocomplete suggestions, plus OSRM router.
 // Browser fetches, no API key. Wrapped in try/catch — callers fall back to
 // straight-line rendering if everything fails (CDN down, rate-limited, etc.).
 //
@@ -1737,25 +1737,136 @@ const ROUTES_SEED = {};
 //      matches return canonical text + accurate coords). Empirically the only
 //      service that resolves things like "1105 Rogers Street, Golden Colorado"
 //      to its real zip 80401 — Photon and Nominatim both miss it.
+//      ⚠ Census does NOT send CORS headers — direct browser fetches are
+//      silently blocked. We route through api.allorigins.win (free public
+//      CORS proxy, ~2-3s latency).
 //   2. Photon (komoot) — great fuzzy / partial matching; non-US fallback.
 //   3. Nominatim — last resort.
 // Returns { lat, lng, displayName, source } or null.
 //
-// Autocomplete suggestions (suggestAddresses) come from Photon — it ranks
-// partial input well, which Census can't do.
-async function geocodeViaCensus(address) {
+// Autocomplete suggestions (suggestAddresses) query Census + Photon in
+// parallel and merge Census-first. For US-shaped queries with a house number
+// we also filter Photon's results to those whose street name overlaps with
+// the typed one — keeps "1105 12th Street" from winning when the user
+// typed "1105 Rogers" but Photon's index doesn't know Rogers St.
+const CENSUS_CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+function buildCensusUrl(address) {
+  return 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address='
+    + encodeURIComponent(address) + '&benchmark=Public_AR_Current&format=json';
+}
+async function fetchCensusJson(address) {
   try {
-    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(address) + '&benchmark=Public_AR_Current&format=json';
-    const resp = await fetch(url);
+    const resp = await fetch(CENSUS_CORS_PROXY + encodeURIComponent(buildCensusUrl(address)));
     if (!resp.ok) return null;
-    const data = await resp.json();
-    const m = data && data.result && data.result.addressMatches && data.result.addressMatches[0];
-    if (!m || !m.coordinates) return null;
-    const lat = parseFloat(m.coordinates.y);
-    const lng = parseFloat(m.coordinates.x);
-    if (!isFinite(lat) || !isFinite(lng)) return null;
-    return { lat, lng, displayName: m.matchedAddress || address, source: 'census' };
+    return await resp.json();
   } catch (e) { return null; }
+}
+// Query normalizer for Census. Census tolerates a lot but is happiest with
+// USPS-style: house number + street + USPS suffix abbreviation, comma,
+// city, comma, two-letter state. We send both the raw query and the
+// normalized form in parallel so we always have a fallback if one stumps it.
+const US_STATE_NAMES = {
+  alabama: 'AL', alaska: 'AK', arizona: 'AZ', arkansas: 'AR',
+  california: 'CA', colorado: 'CO', connecticut: 'CT', delaware: 'DE',
+  florida: 'FL', georgia: 'GA', hawaii: 'HI', idaho: 'ID',
+  illinois: 'IL', indiana: 'IN', iowa: 'IA', kansas: 'KS',
+  kentucky: 'KY', louisiana: 'LA', maine: 'ME', maryland: 'MD',
+  massachusetts: 'MA', michigan: 'MI', minnesota: 'MN', mississippi: 'MS',
+  missouri: 'MO', montana: 'MT', nebraska: 'NE', nevada: 'NV',
+  'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM',
+  'new york': 'NY', 'north carolina': 'NC', 'north dakota': 'ND',
+  ohio: 'OH', oklahoma: 'OK', oregon: 'OR', pennsylvania: 'PA',
+  'rhode island': 'RI', 'south carolina': 'SC', 'south dakota': 'SD',
+  tennessee: 'TN', texas: 'TX', utah: 'UT', vermont: 'VT',
+  virginia: 'VA', washington: 'WA', 'west virginia': 'WV',
+  wisconsin: 'WI', wyoming: 'WY', 'district of columbia': 'DC',
+};
+const US_STATE_ABBRS = new Set(Object.values(US_STATE_NAMES));
+const USPS_SUFFIXES = {
+  street: 'St', avenue: 'Ave', ave: 'Ave', av: 'Ave',
+  road: 'Rd', boulevard: 'Blvd', blvd: 'Blvd',
+  drive: 'Dr', parkway: 'Pkwy', pkwy: 'Pkwy',
+  lane: 'Ln', court: 'Ct', place: 'Pl',
+  circle: 'Cir', cir: 'Cir', trail: 'Trl', trl: 'Trl',
+  highway: 'Hwy', hwy: 'Hwy', way: 'Way',
+  terrace: 'Ter', ter: 'Ter', square: 'Sq',
+  alley: 'Aly', loop: 'Loop', expressway: 'Expy',
+  st: 'St', rd: 'Rd', dr: 'Dr', ln: 'Ln', ct: 'Ct', pl: 'Pl',
+};
+function titleCaseToken(t) {
+  return t ? t[0].toUpperCase() + t.slice(1).toLowerCase() : t;
+}
+function normalizeForCensus(input) {
+  let s = String(input || '').toLowerCase().trim();
+  if (!s) return '';
+  s = s.replace(/\s+/g, ' ').replace(/\s*,\s*/g, ', ').replace(/,+/g, ',');
+  // Multi-word state names first ("new mexico" → "NM")
+  for (const [name, abbr] of Object.entries(US_STATE_NAMES)) {
+    if (!name.includes(' ')) continue;
+    s = s.replace(new RegExp('(^|[ ,])' + name + '(?=$|[ ,])', 'g'), '$1' + abbr);
+  }
+  const tokens = s.split(/\s+/).map(raw => {
+    const trailing = (raw.match(/[,.]+$/) || [''])[0];
+    const clean = trailing ? raw.slice(0, -trailing.length) : raw;
+    const lc = clean.toLowerCase();
+    if (USPS_SUFFIXES[lc])  return USPS_SUFFIXES[lc] + trailing;
+    if (US_STATE_NAMES[lc]) return US_STATE_NAMES[lc] + trailing;
+    if (clean.length === 2 && US_STATE_ABBRS.has(clean.toUpperCase())) return clean.toUpperCase() + trailing;
+    return (clean ? titleCaseToken(clean) : '') + trailing;
+  });
+  let out = tokens.join(' ');
+  // Insert a comma before a trailing two-letter state code if missing.
+  out = out.replace(/([a-z]) ([A-Z]{2})(?=\b|$|\s|,)/g, (m, a, st) =>
+    US_STATE_ABBRS.has(st) ? a + ', ' + st : m);
+  return out.replace(/\s+/g, ' ').trim();
+}
+function isUsShapedQuery(input) {
+  const s = String(input || '').toLowerCase();
+  if (!s) return false;
+  for (const name of Object.keys(US_STATE_NAMES)) {
+    if (new RegExp('(?:^|[ ,])' + name + '(?:$|[ ,])', 'i').test(s)) return true;
+  }
+  const hits = s.match(/(?:^|[ ,])([a-z]{2})(?=[ ,]|$| \d)/g) || [];
+  return hits.some(h => US_STATE_ABBRS.has(h.replace(/[^a-z]/g, '').toUpperCase()));
+}
+// Pull the street-name tokens (between house number and USPS suffix/state).
+function extractQueryStreetTokens(query) {
+  const toks = String(query || '').toLowerCase().trim().split(/[\s,]+/).filter(Boolean);
+  if (!toks.length) return [];
+  let i = /^\d/.test(toks[0]) ? 1 : 0;
+  const out = [];
+  while (i < toks.length) {
+    const t = toks[i];
+    if (USPS_SUFFIXES[t]) break;
+    if (US_STATE_NAMES[t]) break;
+    if (t.length === 2 && US_STATE_ABBRS.has(t.toUpperCase())) break;
+    out.push(t);
+    i++;
+  }
+  return out;
+}
+function photonStreetMatchesQuery(displayName, queryTokens) {
+  if (!queryTokens.length) return true;
+  const dn = String(displayName || '').toLowerCase();
+  const m = dn.match(/\b\d+\s+([^,]+?)(?:,|$)/);
+  const streetText = m ? m[1] : dn;
+  return queryTokens.some(t => streetText.includes(t));
+}
+async function geocodeViaCensus(address) {
+  const raw = String(address || '').trim();
+  if (!raw) return null;
+  const norm = normalizeForCensus(raw);
+  const [a, b] = await Promise.all([
+    fetchCensusJson(raw),
+    norm && norm !== raw ? fetchCensusJson(norm) : Promise.resolve(null),
+  ]);
+  const pick = (a && a.result && a.result.addressMatches && a.result.addressMatches[0])
+            || (b && b.result && b.result.addressMatches && b.result.addressMatches[0]);
+  if (!pick || !pick.coordinates) return null;
+  const lat = parseFloat(pick.coordinates.y);
+  const lng = parseFloat(pick.coordinates.x);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  return { lat, lng, displayName: pick.matchedAddress || raw, source: 'census' };
 }
 function formatPhotonProps(p) {
   if (!p) return '';
@@ -1805,26 +1916,32 @@ async function geocodeAddress(address) {
 // list because it's the only source that handles POI/business names ("Home
 // Depot Lakewood CO") and partial input as the user types. Returns up to 6.
 async function suggestViaCensus(query) {
-  const q = String(query || '').trim();
+  const raw = String(query || '').trim();
   // Census wants something street-shaped — skip when input is too short or has
   // no digits (no house number = no match anyway, just wasted fetch).
-  if (q.length < 6 || !/\d/.test(q)) return [];
-  try {
-    const url = 'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' + encodeURIComponent(q) + '&benchmark=Public_AR_Current&format=json';
-    const resp = await fetch(url);
-    if (!resp.ok) return [];
-    const data = await resp.json();
-    const matches = (data && data.result && data.result.addressMatches) || [];
-    const out = [];
+  if (raw.length < 6 || !/\d/.test(raw)) return [];
+  const norm = normalizeForCensus(raw);
+  const [a, b] = await Promise.all([
+    fetchCensusJson(raw),
+    norm && norm !== raw ? fetchCensusJson(norm) : Promise.resolve(null),
+  ]);
+  const seen = new Set();
+  const out  = [];
+  for (const j of [a, b]) {
+    const matches = (j && j.result && j.result.addressMatches) || [];
     for (const m of matches) {
       if (!m || !m.coordinates) continue;
       const lat = parseFloat(m.coordinates.y);
       const lng = parseFloat(m.coordinates.x);
       if (!isFinite(lat) || !isFinite(lng)) continue;
-      out.push({ displayName: m.matchedAddress || q, lat, lng, source: 'census' });
+      const displayName = m.matchedAddress || raw;
+      const key = displayName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ displayName, lat, lng, source: 'census' });
     }
-    return out;
-  } catch (e) { return []; }
+  }
+  return out;
 }
 async function suggestViaPhoton(query) {
   const q = String(query || '').trim();
@@ -1852,9 +1969,19 @@ async function suggestAddresses(query) {
   const q = String(query || '').trim();
   if (q.length < 3) return [];
   const [census, photon] = await Promise.all([suggestViaCensus(q), suggestViaPhoton(q)]);
+  // When the user typed a US-shaped address with a house number, drop Photon
+  // results whose street name doesn't overlap with the typed one. This
+  // protects against Photon's "1105 12th Street" trap when its index doesn't
+  // know the real street (Rogers St) and Census hasn't returned yet.
+  const usShape   = isUsShapedQuery(q);
+  const hasNumber = /\d/.test(q);
+  const streetTokens = (usShape && hasNumber) ? extractQueryStreetTokens(q) : [];
+  const photonKept = streetTokens.length
+    ? photon.filter(p => photonStreetMatchesQuery(p.displayName, streetTokens))
+    : photon;
   const seen = new Set();
   const out  = [];
-  for (const s of [...census, ...photon]) {
+  for (const s of [...census, ...photonKept]) {
     if (!s || !s.displayName) continue;
     const key = s.displayName.toLowerCase();
     if (seen.has(key)) continue;
