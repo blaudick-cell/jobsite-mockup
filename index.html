@@ -361,6 +361,17 @@
     @media (max-width: 700px) {
       .haulers-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
       .haulers-drawer-grid { grid-template-columns: 1fr !important; }
+      /* Hauler card stat grid — 7 stats in repeat(4,1fr) overflows on phones.
+         Drop to 3-up so cards read like phone-shaped panels. */
+      .hauler-card-stats { grid-template-columns: repeat(3, 1fr) !important; }
+      /* Action row: stack vertically and shrink the collapse hint. */
+      .hauler-card-actions { flex-direction: column !important; align-items: stretch !important; }
+      .hauler-card-collapse-hint { text-align: center; }
+      .hauler-card-action-btns { justify-content: stretch !important; }
+      .hauler-card-action-btns > * { flex: 1; }
+    }
+    @media (max-width: 480px) {
+      .hauler-card-stats { grid-template-columns: repeat(2, 1fr) !important; }
     }
     /* Hover lift + glow on hauler cards */
     .hauler-ops-card:hover {
@@ -8175,7 +8186,7 @@ function AdminHaulers({ db, setDb, navigate }) {
     const trucks = h.trucks;
     return (
       <div style={{ borderTop: `1px solid ${C.rule}`, background: 'rgba(0,0,0,0.35)', padding: S[4] }}>
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4] }}
+        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.2fr) minmax(0, 1fr)', gap: S[4] }}
              className="haulers-drawer-grid">
           {/* Truck list */}
           <div>
@@ -8264,15 +8275,6 @@ function AdminHaulers({ db, setDb, navigate }) {
               </div>
             )}
 
-            {/* Future features placeholder rail */}
-            <div style={{ marginTop: S[4], padding: S[3], background: C.surface, border: `1px dashed ${C.rule}`, borderRadius: R.md }}>
-              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: S[2] }}>Telemetry roadmap</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                {['E-ticketing', 'Live GPS', 'Geofence events', 'Fuel usage', 'Driver ratings', 'Auto-dispatch', 'AI truck match', 'Compliance alerts'].map(label => (
-                  <span key={label} style={{ ...T.caption, padding: '3px 8px', borderRadius: R.pill, background: 'rgba(255,255,255,0.03)', color: C.inkFaint, border: `1px solid ${C.rule}`, fontFamily: F.mono, letterSpacing: 0.3 }}>{label}</span>
-                ))}
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -8333,7 +8335,7 @@ function AdminHaulers({ db, setDb, navigate }) {
           )}
 
           {/* Operational metrics row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[2], padding: `${S[3]}px ${S[3]}px`, background: 'rgba(0,0,0,0.25)', border: `1px solid ${C.rule}`, borderRadius: R.md, marginBottom: S[3] }}>
+          <div className="hauler-card-stats" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[2], padding: `${S[3]}px ${S[3]}px`, background: 'rgba(0,0,0,0.25)', border: `1px solid ${C.rule}`, borderRadius: R.md, marginBottom: S[3] }}>
             <div>
               <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Trucks</div>
               <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>
@@ -8368,11 +8370,11 @@ function AdminHaulers({ db, setDb, navigate }) {
           </div>
 
           {/* Quick actions */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
-            <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>
+          <div className="hauler-card-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
+            <div className="hauler-card-collapse-hint" style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>
               {isExpanded ? 'Click again to collapse' : 'Click to open dispatch detail'}
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div className="hauler-card-action-btns" style={{ display: 'flex', gap: 6 }}>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/haulers/' + h.id); }}>View fleet</Btn>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.alert('TODO: open assign-haul modal for ' + h.name); }}>Assign haul</Btn>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.location.href = 'mailto:' + (h.email || ''); }}>Message</Btn>
