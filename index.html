@@ -2338,29 +2338,32 @@ function WxIcon({ kind, size = 26 }) {
   );
 }
 
-// Skeleton row used while the NWS fetch is in flight.
+// Skeleton — compact small-tile layout matching the live card while NWS loads.
 function SiteConditionsSkeleton() {
-  const skel = { background: 'rgba(255,255,255,0.04)', borderRadius: R.xs, height: 16 };
+  const skel = { background: 'rgba(255,255,255,0.04)', borderRadius: R.xs, height: 14 };
   return (
-    <Card padding={0} style={{ marginBottom: S[5], overflow: 'hidden' }}>
-      <div style={{ padding: S[5] }}>
-        <div style={{ ...skel, width: 140, marginBottom: 12 }} />
-        <div style={{ ...skel, width: 220, height: 28, marginBottom: 18 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: S[4] }}>
-          {[0, 1, 2, 3].map(i => (
-            <div key={i}>
-              <div style={{ ...skel, width: 80, marginBottom: 8 }} />
-              <div style={{ ...skel, width: 60, height: 22, marginBottom: 6 }} />
-              <div style={{ ...skel, width: 90, height: 12 }} />
-            </div>
-          ))}
+    <Card padding={0}>
+      <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ ...skel, width: 90, marginBottom: 6 }} />
+          <div style={{ ...skel, width: 150, height: 16 }} />
         </div>
+        <div style={{ ...skel, width: 60, height: 20, borderRadius: R.pill }} />
       </div>
-      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: S[4] }}>
-        <div style={{ ...skel, width: 110, marginBottom: 14 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: S[2] }}>
+      <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: S[4] }}>
+        {[0, 1, 2, 3].map(i => (
+          <div key={i}>
+            <div style={{ ...skel, width: 70, marginBottom: 6 }} />
+            <div style={{ ...skel, width: 50, height: 18, marginBottom: 6 }} />
+            <div style={{ ...skel, width: 80, height: 11 }} />
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
+        <div style={{ ...skel, width: 90, marginBottom: 10 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
           {[0, 1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} style={{ ...skel, height: 70, borderRadius: R.sm }} />
+            <div key={i} style={{ ...skel, height: 60, borderRadius: R.sm }} />
           ))}
         </div>
       </div>
@@ -2409,12 +2412,12 @@ function SiteConditionsCard() {
 
   if (error || !forecast || forecast.periods.length === 0) {
     return (
-      <Card padding={S[4]} style={{ marginBottom: S[5], display: 'flex', alignItems: 'center', gap: S[3] }}>
-        <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">SITE CONDITIONS</Pill>
-        <div style={{ ...T.bodySm, color: C.inkDim }}>
-          Forecast unavailable · {NWS_DENVER.label}
-          <span style={{ ...T.caption, color: C.inkFaint, marginLeft: S[2] }}>(retrying every 30 min)</span>
+      <Card padding={S[4]} style={{ display: 'flex', alignItems: 'flex-start', gap: S[2], flexDirection: 'column' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+          <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">SITE CONDITIONS</Pill>
+          <span style={{ ...T.bodySm, color: C.inkDim }}>{NWS_DENVER.label}</span>
         </div>
+        <div style={{ ...T.caption, color: C.inkFaint }}>Forecast unavailable · retrying every 30 min</div>
       </Card>
     );
   }
@@ -2437,49 +2440,49 @@ function SiteConditionsCard() {
   const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   return (
-    <Card padding={0} style={{ marginBottom: S[5], overflow: 'hidden' }}>
-      <div style={{ padding: S[5] }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[3], marginBottom: S[4] }}>
-          <div>
-            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>Site conditions</div>
-            <div style={{ ...T.h3, color: C.ink }}>{NWS_DENVER.label} · {hhmm}</div>
-            <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{NWS_DENVER.city} · NWS</div>
-          </div>
-          <Pill color={cond.gradeTone} soft={cond.gradeSoft}>{cond.grade}</Pill>
+    <Card padding={0}>
+      {/* Header: matches the existing small-tile header pattern. */}
+      <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+        <div style={{ minWidth: 0 }}>
+          <Label color={C.accent}>Site conditions</Label>
+          <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{NWS_DENVER.label} · {hhmm}</div>
         </div>
+        <Pill color={cond.gradeTone} soft={cond.gradeSoft}>{cond.grade}</Pill>
+      </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: S[4] }}>
-          <div>
-            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Temperature</div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-              <div style={{ ...T.h2, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
-              <div style={{ color: C.inkDim }}><WxIcon kind={todayWx} size={24} /></div>
-            </div>
-            <div style={{ ...T.caption, color: C.inkFaint }}>
-              {todayHi != null ? `Hi ${todayHi}°` : ''}{todayHi != null && todayLo != null ? ' · ' : ''}{todayLo != null ? `Lo ${todayLo}°` : ''}
-            </div>
+      {/* Today: 2x2 stat grid (matches the existing small-tile body). */}
+      <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: S[4] }}>
+        <div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
+            <div style={{ color: C.inkDim, display: 'inline-flex' }}><WxIcon kind={todayWx} size={18} /></div>
           </div>
-          <div>
-            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Wind</div>
-            <div style={{ ...T.statValue, color: C.ink }}>{todayWind} mph</div>
-            <div style={{ ...T.caption, color: C.inkFaint }}>{todayWindDir || '—'}</div>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+            {todayHi != null ? `Hi ${todayHi}°` : ''}{todayHi != null && todayLo != null ? ' · ' : ''}{todayLo != null ? `Lo ${todayLo}°` : ''}
           </div>
-          <div>
-            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Precip risk</div>
-            <div style={{ ...T.statValue, color: todayPrecipPct >= 40 ? C.warn : C.ok }}>{todayPrecipPct}%</div>
-            <div style={{ ...T.caption, color: C.inkFaint }}>next period</div>
-          </div>
-          <div>
-            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Haul condition</div>
-            <div style={{ ...T.statValue, color: cond.gradeTone }}>{cond.label}</div>
-            <div style={{ ...T.caption, color: C.inkFaint }}>{cond.sub}</div>
-          </div>
+        </div>
+        <div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
+          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayWind} mph</div>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{todayWindDir || '—'}</div>
+        </div>
+        <div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
+          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: todayPrecipPct >= 40 ? C.warn : C.ok }}>{todayPrecipPct}%</div>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next period</div>
+        </div>
+        <div>
+          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
+          <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: cond.gradeTone }}>{cond.label}</div>
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{cond.sub}</div>
         </div>
       </div>
 
-      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: S[4] }}>
-        <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: S[3] }}>7-day forecast</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: S[2] }}>
+      {/* 7-day strip — condensed: dow / icon / hi / lo. */}
+      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
+        <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[2] }}>7-DAY FORECAST</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
           {days.map((d, i) => {
             const isFirst = i === 0;
             const primary = d.day || d.night;
@@ -2492,21 +2495,18 @@ function SiteConditionsCard() {
                 aria-label={`${wkLabel} ${d.iso} · ${primary && primary.shortForecast} · high ${hi != null ? hi : 'n/a'}, low ${lo != null ? lo : 'n/a'}`}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  gap: 6, padding: '10px 4px',
-                  borderRadius: R.sm,
+                  gap: 3, padding: '6px 2px',
+                  borderRadius: R.xs,
                   background: isFirst ? C.accentSoft : 'transparent',
-                  border: `1px solid ${isFirst ? C.accentSoft : 'transparent'}`,
                 }}>
-                <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 10 }}>
                   {isFirst ? 'Today' : (isoToWeekdayShort ? isoToWeekdayShort(d.iso) : wkLabel.slice(0, 3))}
                 </div>
-                <div style={{ color: isFirst ? C.accent : C.inkDim }}>
-                  <WxIcon kind={wx} size={26} />
+                <div style={{ color: isFirst ? C.accent : C.inkDim, display: 'inline-flex' }}>
+                  <WxIcon kind={wx} size={20} />
                 </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{hi != null ? `${hi}°` : '—'}</div>
-                  <div style={{ ...T.micro, color: C.inkFaint }}>{lo != null ? `${lo}°` : ''}</div>
-                </div>
+                <div style={{ ...T.micro, color: C.ink, fontWeight: 600, fontSize: 11, lineHeight: 1.2 }}>{hi != null ? `${hi}°` : '—'}</div>
+                <div style={{ ...T.micro, color: C.inkFaint, fontSize: 10, lineHeight: 1.2 }}>{lo != null ? `${lo}°` : ''}</div>
               </div>
             );
           })}
@@ -3812,8 +3812,6 @@ function AdminProjects({ db, setDb, navigate }) {
         </div>
       </div>
 
-      <SiteConditionsCard />
-
       {/* Operational KPI strip */}
       <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
         {kpis.map(k => (
@@ -3947,38 +3945,8 @@ function AdminProjects({ db, setDb, navigate }) {
           })()}
         </Card>
 
-        {/* Site Conditions */}
-        <Card padding={0}>
-          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div>
-              <Label color={C.accent}>Site conditions</Label>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Front Range · {String(new Date().getHours()).padStart(2,'0')}:{String(new Date().getMinutes()).padStart(2,'0')}</div>
-            </div>
-            <Pill color={C.ok} soft={C.okSoft}>Optimal</Pill>
-          </div>
-          <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: S[4] }}>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
-              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>62°F</div>
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>Hi 71° · Lo 48°</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
-              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>11 mph</div>
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>WSW · gusts 18</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
-              <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ok }}>12%</div>
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next 6 hrs</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
-              <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: C.ok }}>Dry</div>
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>no mud / freeze risk</div>
-            </div>
-          </div>
-        </Card>
+        {/* Site Conditions — live NWS forecast with today hero + 7-day strip */}
+        <SiteConditionsCard />
       </div>
 
       {/* Dispatch Timeline — horizontal operational events */}
