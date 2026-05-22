@@ -2105,41 +2105,53 @@ async function bootstrapCloud(localDb) {
     return { status: 'offline', db: localDb, reason: 'sdk-missing' };
   }
   try {
-    const results = await Promise.all([
-      ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
-      _sb.fetchRates(),
-      _sb.fetchMeta(),
-      _sb.fetchMaterials(),
-    ]);
-    const tableArrays   = results.slice(0, SB_TABLE_LIST.length);
-    const cloudRates    = results[SB_TABLE_LIST.length];
-    const cloudMeta     = results[SB_TABLE_LIST.length + 1];
-    const cloudMats     = results[SB_TABLE_LIST.length + 2];
-    const totalRows = tableArrays.reduce((s, a) => s + a.length, 0)
-                    + Object.keys(cloudRates).length
-                    + cloudMats.length;
-
-    if (totalRows === 0) {
-      // Fresh project — seed every table once from the JS constants.
-      await seedAllTables();
-      const reseeded = await Promise.all([
-        ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
-        _sb.fetchRates(),
-        _sb.fetchMeta(),
-        _sb.fetchMaterials(),
-      ]);
-      const ta2 = reseeded.slice(0, SB_TABLE_LIST.length);
-      const cr2 = reseeded[SB_TABLE_LIST.length];
-      const cm2 = reseeded[SB_TABLE_LIST.length + 1];
-      const seeded = assembleDbFromCloud(ta2, cr2, cm2, localDb);
-      return { status: 'online', db: seeded, reason: 'seeded' };
+    let [tableArrays, cloudRates, cloudMeta, cloudMats] = await fetchAllCloud();
+    // Per-table empty-check seed. Robust against the case where a previous
+    // browser tab partial-seeded (closed mid-flight) and 4 of the 13 tables
+    // never landed. We backfill ONLY the empty ones; tables with user data
+    // are never overwritten.
+    const didSeed = await seedMissingTables(tableArrays, cloudRates, cloudMats, cloudMeta);
+    if (didSeed) {
+      [tableArrays, cloudRates, cloudMeta, cloudMats] = await fetchAllCloud();
     }
     const assembled = assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb);
-    return { status: 'online', db: assembled, reason: 'fetched' };
+    return { status: 'online', db: assembled, reason: didSeed ? 'seeded' : 'fetched' };
   } catch (e) {
     console.warn('[jse] cloud bootstrap failed; offline mode:', e);
     return { status: 'offline', db: localDb, reason: 'fetch-failed' };
   }
+}
+
+async function fetchAllCloud() {
+  const results = await Promise.all([
+    ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
+    _sb.fetchRates(),
+    _sb.fetchMeta(),
+    _sb.fetchMaterials(),
+  ]);
+  const tableArrays = results.slice(0, SB_TABLE_LIST.length);
+  const cloudRates  = results[SB_TABLE_LIST.length];
+  const cloudMeta   = results[SB_TABLE_LIST.length + 1];
+  const cloudMats   = results[SB_TABLE_LIST.length + 2];
+  return [tableArrays, cloudRates, cloudMeta, cloudMats];
+}
+
+async function seedMissingTables(tableArrays, cloudRates, cloudMats, cloudMeta) {
+  const seed = buildSeed();
+  const byKey = {};
+  SB_TABLE_LIST.forEach((k, i) => { byKey[k] = tableArrays[i]; });
+  const ops = [];
+  for (const k of SB_TABLE_LIST) {
+    if (byKey[k].length === 0 && Array.isArray(seed[k]) && seed[k].length > 0) {
+      ops.push(_sb.upsertRows(k, seed[k]));
+    }
+  }
+  if (Object.keys(cloudRates).length === 0)      ops.push(_sb.upsertRates(seed.rates));
+  if (cloudMats.length === 0)                    ops.push(_sb.upsertMaterials(MATERIALS));
+  if (typeof cloudMeta.schema_version !== 'number') ops.push(_sb.upsertMeta('schema_version', DB_SCHEMA_VERSION));
+  if (ops.length === 0) return false;
+  await Promise.all(ops);
+  return true;
 }
 
 function assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb) {
@@ -2174,23 +2186,201 @@ function assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb) {
   }
 }
 
-async function seedAllTables() {
+// ---- Phase 3: write path -----------------------------------------------
+// Per-tab map of recent local writes — used to skip Realtime echoes of
+// changes this tab just made. Key: `${jsKey}:${rowKey}`. Value: { value,
+// expiresAt }. Entries expire after 10s; any postgres_changes payload
+// arriving during that window whose value deep-equals our snapshot is
+// treated as our own echo and dropped.
+const recentLocalWrites = new Map();
+const RECENT_WRITE_TTL_MS = 10000;
+
+function markLocalWrite(jsKey, rowKey, value) {
+  recentLocalWrites.set(jsKey + ':' + rowKey, {
+    value, expiresAt: Date.now() + RECENT_WRITE_TTL_MS,
+  });
+}
+function isLocalEcho(jsKey, rowKey, incomingValue) {
+  const k = jsKey + ':' + rowKey;
+  const entry = recentLocalWrites.get(k);
+  if (!entry) return false;
+  if (Date.now() > entry.expiresAt) { recentLocalWrites.delete(k); return false; }
+  // Deep-equal compare; null on both sides means "we just deleted this row,
+  // and Realtime is echoing the same delete."
+  return jsonEq(entry.value, incomingValue);
+}
+function jsonEq(a, b) {
+  if (a === b) return true;
+  try { return JSON.stringify(a) === JSON.stringify(b); } catch (e) { return false; }
+}
+function diffArrayById(oldArr, newArr) {
+  const oldById = new Map((oldArr || []).map(r => r && [r.id, r]).filter(Boolean));
+  const newById = new Map((newArr || []).map(r => r && [r.id, r]).filter(Boolean));
+  const toUpsert = [];
+  const toDelete = [];
+  for (const [id, row] of newById) {
+    const old = oldById.get(id);
+    if (!old || !jsonEq(old, row)) toUpsert.push(row);
+  }
+  for (const id of oldById.keys()) {
+    if (!newById.has(id)) toDelete.push(id);
+  }
+  return { toUpsert, toDelete };
+}
+
+// Diff prev/next db and push changed rows to Supabase. Fire-and-forget per
+// the brief — optimistic UI already updated by the time this runs. Errors
+// log to console (network flapping shouldn't spam toasts).
+async function syncDbToCloud(prev, next) {
+  if (!_sb.ready) return;
+  const tasks = [];
+
+  for (const jsKey of SB_TABLE_LIST) {
+    const oldArr = prev[jsKey];
+    const newArr = next[jsKey];
+    if (oldArr === newArr) continue;
+    const { toUpsert, toDelete } = diffArrayById(oldArr, newArr);
+    if (toUpsert.length > 0) {
+      toUpsert.forEach(r => markLocalWrite(jsKey, r.id, r));
+      tasks.push(_sb.upsertRows(jsKey, toUpsert).catch(e => {
+        console.warn('[jse] upsert failed on ' + jsKey + ':', e);
+      }));
+    }
+    if (toDelete.length > 0) {
+      toDelete.forEach(id => markLocalWrite(jsKey, id, null));
+      tasks.push(_sb.deleteRows(jsKey, toDelete).catch(e => {
+        console.warn('[jse] delete failed on ' + jsKey + ':', e);
+      }));
+    }
+  }
+
+  // Rates: flat object → row-per-truck-type upsert for changed keys only.
+  if (prev.rates !== next.rates && next.rates) {
+    const changed = {};
+    for (const k of Object.keys(next.rates)) {
+      if (!prev.rates || prev.rates[k] !== next.rates[k]) changed[k] = next.rates[k];
+    }
+    if (Object.keys(changed).length > 0) {
+      Object.entries(changed).forEach(([k, v]) => markLocalWrite('rates', k, { truck_type: k, rate_per_hour: v }));
+      tasks.push(_sb.upsertRates(changed).catch(e => console.warn('[jse] rates upsert failed:', e)));
+    }
+  }
+
+  // Scalar meta field.
+  if (prev.activityLastReadAt !== next.activityLastReadAt) {
+    markLocalWrite('meta', 'activity_last_read_at', next.activityLastReadAt);
+    tasks.push(_sb.upsertMeta('activity_last_read_at', next.activityLastReadAt || 0)
+      .catch(e => console.warn('[jse] meta upsert failed:', e)));
+  }
+
+  // Don't await — let React continue. Errors already swallowed per-task.
+  Promise.all(tasks).catch(() => {});
+}
+
+// ---- Phase 3: Realtime subscription ------------------------------------
+function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
+  const event = payload.eventType;
+  let rowKey, jsRowForCompare;
+  if (event === 'DELETE') {
+    rowKey = payload.old && payload.old.id;
+    jsRowForCompare = null;
+  } else {
+    const jsRow = sbRowToJs(jsKey, payload.new);
+    rowKey = jsRow.id;
+    jsRowForCompare = jsRow;
+  }
+  if (!rowKey) return;
+  if (isLocalEcho(jsKey, rowKey, jsRowForCompare)) return;
+  setDbRaw(prev => {
+    const arr = Array.isArray(prev[jsKey]) ? prev[jsKey] : [];
+    if (event === 'DELETE') {
+      const next = arr.filter(r => r.id !== rowKey);
+      if (next.length === arr.length) return prev;
+      return { ...prev, [jsKey]: next };
+    }
+    const idx = arr.findIndex(r => r.id === rowKey);
+    if (idx === -1) return { ...prev, [jsKey]: [...arr, jsRowForCompare] };
+    if (jsonEq(arr[idx], jsRowForCompare)) return prev;
+    const next = arr.slice();
+    next[idx] = jsRowForCompare;
+    return { ...prev, [jsKey]: next };
+  });
+  bumpRemote();
+}
+
+function applyRealtimeRates(payload, setDbRaw, bumpRemote) {
+  const event = payload.eventType;
+  if (event === 'DELETE') return; // we don't model rate deletes in the JS shape
+  const row = payload.new;
+  if (!row || !row.truck_type) return;
+  const incoming = { truck_type: row.truck_type, rate_per_hour: row.rate_per_hour };
+  if (isLocalEcho('rates', row.truck_type, incoming)) return;
+  setDbRaw(prev => {
+    const rates = prev.rates || {};
+    if (rates[row.truck_type] === row.rate_per_hour) return prev;
+    return { ...prev, rates: { ...rates, [row.truck_type]: row.rate_per_hour } };
+  });
+  bumpRemote();
+}
+
+function applyRealtimeMeta(payload, setDbRaw, bumpRemote) {
+  if (payload.eventType === 'DELETE') return;
+  const row = payload.new;
+  if (!row || !row.key) return;
+  if (row.key === 'activity_last_read_at') {
+    if (isLocalEcho('meta', 'activity_last_read_at', row.value)) return;
+    setDbRaw(prev => {
+      if (prev.activityLastReadAt === row.value) return prev;
+      return { ...prev, activityLastReadAt: typeof row.value === 'number' ? row.value : 0 };
+    });
+    bumpRemote();
+  }
+  // schema_version intentionally not piped to db at runtime — hydrateDb
+  // owns that value; cross-tab schema bumps require a page reload.
+}
+
+// Subscribe to postgres_changes across every JSE table + rates + meta. The
+// returned `cleanup` removes the channel — Realtime channels are connection-
+// scoped, so leaving one open after the component unmounts would leak.
+function subscribeRealtime(setDbRaw, bumpRemote) {
+  if (!_sb.ready || !_sb.client) return () => {};
+  const channel = _sb.client.channel('jse-db-realtime');
+  for (const jsKey of SB_TABLE_LIST) {
+    const sbTable = SB_TABLES[jsKey].sb;
+    channel.on('postgres_changes',
+      { event: '*', schema: 'public', table: sbTable },
+      (payload) => applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote));
+  }
+  channel.on('postgres_changes',
+    { event: '*', schema: 'public', table: 'rates' },
+    (payload) => applyRealtimeRates(payload, setDbRaw, bumpRemote));
+  channel.on('postgres_changes',
+    { event: '*', schema: 'public', table: 'meta' },
+    (payload) => applyRealtimeMeta(payload, setDbRaw, bumpRemote));
+  channel.subscribe();
+  return () => {
+    try { _sb.client.removeChannel(channel); } catch (e) {}
+  };
+}
+
+// ---- Phase 3: Reset Demo (cloud wipe + re-seed) ------------------------
+// Called from AdminShell's Reset button. Default to confirming — Robert's
+// safest-non-destructive-default rule (the brief explicitly defaults reset
+// to "YES wipe cloud", but we still want a confirm because every other
+// device sees the reset too).
+async function resetDemoCloud() {
+  if (!_sb.ready) return false;
+  await _sb.truncateAll();
+  // Re-seed every table from the JS constants (idempotent upsert).
   const seed = buildSeed();
   await Promise.all([
-    _sb.upsertRows('projects',     seed.projects),
-    _sb.upsertRows('haulers',      seed.haulers),
-    _sb.upsertRows('drivers',      seed.drivers),
-    _sb.upsertRows('trucks',       seed.trucks),
-    _sb.upsertRows('loads',        seed.loads),
-    _sb.upsertRows('hours',        seed.hours),
-    _sb.upsertRows('invoices',     seed.invoices),
-    _sb.upsertRows('haulRequests', seed.haulRequests),
-    _sb.upsertRows('activity',     seed.activity),
+    ...SB_TABLE_LIST.map(k => _sb.upsertRows(k, seed[k] || [])),
     _sb.upsertRates(seed.rates),
     _sb.upsertMaterials(MATERIALS),
     _sb.upsertMeta('schema_version', DB_SCHEMA_VERSION),
-    _sb.upsertMeta('activity_last_read_at', seed.activityLastReadAt || 0),
+    _sb.upsertMeta('activity_last_read_at', 0),
   ]);
+  return true;
 }
   </script>
 
@@ -8953,10 +9143,15 @@ function AdminShell({ db, setDb, navigate, hash }) {
   const [haulersExpanded, setHaulersExpanded] = useState(false);
   const [reportsExpanded, setReportsExpanded] = useState(() => parts[1] === 'reports' || parts[1] === 'reporting');
   const sidebarProps = { db, navigate, hash, haulersExpanded, setHaulersExpanded, reportsExpanded, setReportsExpanded };
+  // Phase 3: reset wipes Supabase too so the fresh seed lands across every
+  // device. Default is YES wipe cloud per the brief; the confirm is there
+  // because every other browser sees the reset too.
   const resetDemoData = () => {
-    if (!window.confirm('Reset all demo data? This will reload the page.')) return;
+    if (!window.confirm('Reset all demo data (including the cloud copy seen on every device)? This will reload the page.')) return;
     try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) {}
-    window.location.reload();
+    resetDemoCloud()
+      .catch(e => { console.warn('[jse] cloud reset failed (offline?):', e); })
+      .finally(() => { window.location.reload(); });
   };
   const resetBtn = <Btn variant="danger" size="sm" onClick={resetDemoData}>Reset demo data</Btn>;
   const navBtns = (
@@ -10767,7 +10962,7 @@ function CloudStatusChip({ status, message }) {
 
 function App() {
   const [hash, navigate] = useHash();
-  const [db, setDb] = useState(() => {
+  const [db, setDbRaw] = useState(() => {
     try {
       return hydrateDb(window.localStorage.getItem(DB_STORAGE_KEY));
     } catch (e) {
@@ -10779,6 +10974,17 @@ function App() {
   // working from localStorage; the chip in the corner makes the state visible).
   const [cloudStatus, setCloudStatus] = useState('loading');
   const [remoteUpdateNonce, setRemoteUpdateNonce] = useState(0);
+  // Phase 3 wrapped setter — diff prev/next and push changed rows to Supabase.
+  // Bootstrap, Realtime arrivals, and the cross-tab storage handler all bypass
+  // this via setDbRaw so they don't re-sync data we already have on the server.
+  const setDb = React.useCallback((updater) => {
+    setDbRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      // Fire-and-forget; React state already updated optimistically.
+      Promise.resolve().then(() => syncDbToCloud(prev, next));
+      return next;
+    });
+  }, []);
   // Track the last serialized payload we wrote (or received) so we can skip
   // redundant writes — including the write that would otherwise echo back the
   // value we just received from another tab.
@@ -10793,34 +10999,43 @@ function App() {
       // localStorage unavailable / quota exceeded — silently no-op
     }
   }, [db]);
-  // Phase 2 cloud bootstrap: on mount, attempt to fetch every Supabase table
-  // and replace `db` with the merged cloud state. If the cloud is empty,
-  // seed it from the JS constants first. On any failure, leave the
-  // localStorage-hydrated db in place and flip the chip to "Offline".
+  // Cloud bootstrap: on mount, fetch every Supabase table and replace `db`
+  // with the merged cloud state. Per-table seed fills any empty tables. On
+  // any failure, leave the localStorage-hydrated db in place + flip the chip.
+  // Uses setDbRaw so the initial assemble doesn't re-upsert what we just read.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const result = await bootstrapCloud(db);
       if (cancelled) return;
       if (result.status === 'online') {
-        setDb(result.db);
+        setDbRaw(result.db);
       }
       setCloudStatus(result.status);
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // Cross-tab sync: when another tab writes to jse_db_v1, hydrate the new value
-  // here. `storage` events do not fire in the originating tab, so no loop.
-  // newValue === null means a sibling tab cleared the key (Reset demo data) —
-  // hydrateDb(null) returns a fresh seed, so peer tabs reseed too.
+  // Phase 3 Realtime: once bootstrap reports 'online', subscribe to
+  // postgres_changes on every table + rates + meta. Echoes of this tab's own
+  // writes are dropped via recentLocalWrites + jsonEq compare; remote changes
+  // call setDbRaw (bypassing the syncDbToCloud wrapper — the row is already
+  // on the server, we'd just re-upsert what we just received) and bump
+  // remoteUpdateNonce so the existing jse-pulse cue fires on listening panels.
+  useEffect(() => {
+    if (cloudStatus !== 'online') return;
+    const cleanup = subscribeRealtime(setDbRaw, () => setRemoteUpdateNonce(n => n + 1));
+    return cleanup;
+  }, [cloudStatus]);
+  // Cross-tab sync (same-browser fallback): when another tab writes to
+  // jse_db_v1, hydrate the new value here. Uses setDbRaw so we don't re-sync
+  // the change back to Supabase (the originating tab already did).
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key !== DB_STORAGE_KEY) return;
       const next = hydrateDb(e.newValue);
-      // Pre-arm the persist guard so it won't re-write the value we just got.
       lastSerializedRef.current = e.newValue == null ? null : JSON.stringify(next);
-      setDb(next);
+      setDbRaw(next);
       setRemoteUpdateNonce(n => n + 1);
     };
     window.addEventListener('storage', onStorage);
