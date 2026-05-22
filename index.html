@@ -7181,6 +7181,94 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
+      {/* v18: Project & contractor — surfaces the data shown on the list-row
+          (project name + GC + contact) that was missing from the detail view.
+          Contractor = requester (project.gc + project.contactName/Phone/Email).
+          Hauler block surfaces only when at least one truck is assigned (it
+          de-dupes haulers across assignments since trucks may come from
+          different haulers on the same haul). */}
+      <Card style={{ marginBottom: S[5] }}>
+        <div style={{ marginBottom: S[4] }}>
+          <Label color={C.accent}>Project & contractor</Label>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5] }}>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Project</Label>
+            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
+              {project ? project.name : '—'}
+              {project && project.code ? (
+                <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2], fontWeight: 400 }}>· {project.code}</span>
+              ) : null}
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>
+              {project ? (project.address || '—') : '—'}
+            </div>
+          </div>
+          <div>
+            <Label style={{ marginBottom: S[2] }}>Contractor (requester)</Label>
+            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
+              {project && project.gc ? project.gc : '—'}
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
+              <span>{project && project.contactName ? project.contactName : '—'}</span>
+              {project && project.contactPhone ? (
+                <a href={'tel:' + project.contactPhone}
+                  style={{ color: C.inkDim, textDecoration: 'none' }}
+                  onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                  onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                  ☎ {project.contactPhone}
+                </a>
+              ) : null}
+              {project && project.contactEmail ? (
+                <a href={'mailto:' + project.contactEmail}
+                  style={{ color: C.inkDim, textDecoration: 'none' }}
+                  onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                  onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                  ✉ {project.contactEmail}
+                </a>
+              ) : null}
+            </div>
+          </div>
+          {(() => {
+            const haulerIds = new Set();
+            if (req.matchedHaulerId) haulerIds.add(req.matchedHaulerId);
+            for (const a of assignments) if (a.haulerId) haulerIds.add(a.haulerId);
+            if (haulerIds.size === 0) return null;
+            const haulers = Array.from(haulerIds).map(id => db.haulers.find(h => h.id === id)).filter(Boolean);
+            if (haulers.length === 0) return null;
+            return (
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Hauler{haulers.length > 1 ? 's' : ''} (fulfilling)</Label>
+                {haulers.map(h => (
+                  <div key={h.id} style={{ marginBottom: S[3] }}>
+                    <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{h.name}</div>
+                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
+                      <span>{h.contact || '—'}</span>
+                      {h.phone ? (
+                        <a href={'tel:' + h.phone}
+                          style={{ color: C.inkDim, textDecoration: 'none' }}
+                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                          ☎ {h.phone}
+                        </a>
+                      ) : null}
+                      {h.email ? (
+                        <a href={'mailto:' + h.email}
+                          style={{ color: C.inkDim, textDecoration: 'none' }}
+                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                          ✉ {h.email}
+                        </a>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      </Card>
+
       {/* Logistics details (v12) — pickup, dropoff, timing, and loading/dumping site access. */}
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ marginBottom: S[4] }}>
