@@ -363,31 +363,23 @@
     /* MapLibre default attribution can crowd the dispatch chrome — soften it. */
     .lom-tile-map .maplibregl-ctrl-attrib { font-size: 10px; opacity: 0.7; }
     .lom-tile-map .maplibregl-ctrl-attrib a { color: #B3E635; }
-    /* Halo+dot pin animation — `jx-haul-pin` parity with jobsiteexchange.com.
-       Pulses the halo span (which is centered behind the dot) so it's visibly
-       alive against the dark CartoCDN tiles. Inline-style halos couldn't get
-       a @keyframes animation, so the animation lives here and the inline JS
-       just sets `className: 'jx-pin-halo'`. */
-    @keyframes jx-pin-halo-pulse {
-      0%   { transform: translate(-50%, -50%) scale(0.7); opacity: 0.7; }
-      70%  { transform: translate(-50%, -50%) scale(1.6); opacity: 0; }
-      100% { transform: translate(-50%, -50%) scale(0.7); opacity: 0; }
+    /* Halo+dot pin — `jx-haul-pin` parity with jobsiteexchange.com (verbatim
+       from map-recon-haul-calc.md). Static (no animation) — the real site
+       does not animate the halo, and prior pulse keyframes caused visible
+       drift on zoom because scale() compounded with the -50% translate's
+       reference box. Container is 28x28; halo fills inset:0; dot is 16x16
+       centered with margin offset. Marker constructor uses anchor:'center'
+       so the dot's geographic center sits at the lng/lat point. */
+    .jx-haul-pin { position: relative; width: 28px; height: 28px; }
+    .jx-haul-pin .jx-haul-pin-halo {
+      position: absolute; inset: 0; border-radius: 50%;
+      opacity: 0.45; pointer-events: none;
     }
-    .jx-pin-halo {
+    .jx-haul-pin .jx-haul-pin-dot {
       position: absolute; top: 50%; left: 50%;
-      width: 36px; height: 36px; border-radius: 50%;
-      pointer-events: none;
-      animation: jx-pin-halo-pulse 2.4s ease-out infinite;
-      will-change: transform, opacity;
-    }
-    /* Disable pulse if user prefers reduced motion — still show the halo,
-       just statically at the 'middle' frame so the pin looks anchored. */
-    @media (prefers-reduced-motion: reduce) {
-      .jx-pin-halo {
-        animation: none;
-        transform: translate(-50%, -50%) scale(1);
-        opacity: 0.55;
-      }
+      width: 16px; height: 16px; margin: -8px 0 0 -8px;
+      border-radius: 50%; border: 3px solid #0A0A0A;
+      box-shadow: 0 1px 4px #0000008c;
     }
   </style>
 </head>
@@ -2570,25 +2562,33 @@ function AdminProjects({ db, setDb, navigate }) {
       const pick = resolveCoord(pickAddr);
       const dump = resolveCoord(dumpAddr);
       if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
-        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump };
+        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: p.address };
       }
       if (pick && dump) {
-        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump };
+        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: p.address };
       }
       return null;
     }).filter(Boolean);
 
     // Endpoints (pickup + dump markers) per project, derived from the same
-    // address pair. Dedupe by coord so the 5800 Federal Blvd self-marker
-    // (which is also a `db.projects[].address`) doesn't double-render.
+    // address pair. Per Robert: drop the marker for the endpoint that IS the
+    // project's own address — only the "other" endpoint (the off-site haul
+    // address) should get a pin. The polyline still draws between BOTH
+    // endpoints (it reads from `projectRoutes`, not this list). Normalize
+    // address strings for the comparison so trailing whitespace / casing
+    // edits later don't reintroduce the self-pin.
+    // Dedupe by coord so two projects sharing an off-site address don't
+    // double-render.
+    const norm = s => (s || '').trim().toLowerCase();
     const projectEndpoints = [];
     const seenEndpoint = new Set();
     projectRoutes.forEach(rt => {
-      if (rt.pick) {
+      const projN = norm(rt.projectAddress);
+      if (rt.pick && norm(rt.pickAddr) !== projN) {
         const k = rt.pickAddr;
         if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.status }); }
       }
-      if (rt.dump) {
+      if (rt.dump && norm(rt.dumpAddr) !== projN) {
         const k = rt.dumpAddr;
         if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.status }); }
       }
@@ -2709,20 +2709,29 @@ function AdminProjects({ db, setDb, navigate }) {
         if (cancelled) return;
         const map = mapRef.current;
         if (!map) return;
-        const mkHaloDotEl = (haloColor, dotColor) => {
+        // Halo gradients lifted verbatim from jobsiteexchange.com's
+        // `.jx-haul-pin .jx-haul-pin-halo` background (see map-recon-haul-calc.md).
+        // Pickup keeps the real-site red `#ef5b5b`; dump uses our brand accent
+        // `#B3E635` for the dot but the gradient color stops are matched to it
+        // so the halo reads as a coherent glow rather than two unrelated colors.
+        const PICKUP_HALO = 'radial-gradient(circle, #f35f5f8c, #f35f5f2e 55%, #f35f5f00 75%)';
+        const DUMP_HALO   = 'radial-gradient(circle, #b3e6358c, #b3e6352e 55%, #b3e63500 75%)';
+        const mkHaloDotEl = (haloBackground, dotColor) => {
           const el = document.createElement('div');
-          el.style.cssText = 'position:relative;width:40px;height:40px;display:flex;align-items:center;justify-content:center;cursor:pointer;pointer-events:auto;';
+          el.className = 'jx-haul-pin';
+          el.style.cursor = 'pointer';
           const halo = document.createElement('span');
-          halo.className = 'jx-pin-halo';
-          halo.style.background = haloColor;
-          halo.style.opacity = '0.45';
+          halo.className = 'jx-haul-pin-halo';
+          halo.style.background = haloBackground;
           const dot = document.createElement('span');
-          dot.style.cssText = 'position:relative;z-index:2;width:14px;height:14px;border-radius:50%;background:' + dotColor + ';border:3px solid #0A0A0A;box-shadow:0 1px 4px #0000008c,0 0 0 1px rgba(255,255,255,0.08);';
+          dot.className = 'jx-haul-pin-dot';
+          dot.style.background = dotColor;
           el.appendChild(halo);
           el.appendChild(dot);
           return el;
         };
-        const colorFor = (type) => type === 'pickup' ? '#ef5b5b' : '#B3E635';
+        const haloFor = (type) => type === 'pickup' ? PICKUP_HALO : DUMP_HALO;
+        const dotFor  = (type) => type === 'pickup' ? '#ef5b5b'    : '#B3E635';
         // Remove any previously-added markers so we don't accumulate duplicates
         // when projectEndpoints changes.
         markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
@@ -2731,8 +2740,7 @@ function AdminProjects({ db, setDb, navigate }) {
           if (cancelled) return;
           try {
             projectEndpoints.forEach(pt => {
-              const c = colorFor(pt.type);
-              const el = mkHaloDotEl(c, c);
+              const el = mkHaloDotEl(haloFor(pt.type), dotFor(pt.type));
               const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
                 .setLngLat([pt.coord.lng, pt.coord.lat])
                 .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
