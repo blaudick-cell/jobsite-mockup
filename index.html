@@ -339,6 +339,16 @@
       .hcc-kpi-grid { grid-template-columns: repeat(2, 1fr) !important; }
       .haul-op-card-grid { grid-template-columns: 1fr !important; }
     }
+    /* Site Conditions 7-day strip — lock to 7 columns at every viewport so the
+       strip never collapses to one day per row on mobile. Inline style sets
+       this too; class is a belt-and-suspenders defense against any cell whose
+       intrinsic min-width might otherwise force a row break in Safari. */
+    .site-cond-strip {
+      display: grid !important;
+      grid-template-columns: repeat(7, minmax(0, 1fr)) !important;
+      gap: 4px;
+    }
+    .site-cond-strip > * { min-width: 0; }
     /* Live Operations Map — header filter row wraps on narrow viewports */
     @media (max-width: 700px) {
       .lom-filters { width: 100%; }
@@ -2858,7 +2868,7 @@ function SiteConditionsSkeleton() {
       </div>
       <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
         <div style={{ ...skel, width: 90, marginBottom: 10 }} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+        <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
           {[0, 1, 2, 3, 4, 5, 6].map(i => (
             <div key={i} style={{ ...skel, height: 60, borderRadius: R.sm }} />
           ))}
@@ -2979,7 +2989,7 @@ function SiteConditionsCard() {
       {/* 7-day strip — condensed: dow / icon / hi / lo. */}
       <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
         <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[2] }}>7-DAY FORECAST</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+        <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
           {days.map((d, i) => {
             const isFirst = i === 0;
             const primary = d.day || d.night;
@@ -2992,18 +3002,18 @@ function SiteConditionsCard() {
                 aria-label={`${wkLabel} ${d.iso} · ${primary && primary.shortForecast} · high ${hi != null ? hi : 'n/a'}, low ${lo != null ? lo : 'n/a'}`}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  gap: 3, padding: '6px 2px',
+                  gap: 2, padding: '4px 1px', minWidth: 0, overflow: 'hidden',
                   borderRadius: R.xs,
                   background: isFirst ? C.accentSoft : 'transparent',
                 }}>
-                <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 10 }}>
+                <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.4, textTransform: 'uppercase', fontSize: 9 }}>
                   {isFirst ? 'Today' : (isoToWeekdayShort ? isoToWeekdayShort(d.iso) : wkLabel.slice(0, 3))}
                 </div>
                 <div style={{ color: isFirst ? C.accent : C.inkDim, display: 'inline-flex' }}>
-                  <WxIcon kind={wx} size={20} />
+                  <WxIcon kind={wx} size={18} />
                 </div>
-                <div style={{ ...T.micro, color: C.ink, fontWeight: 600, fontSize: 11, lineHeight: 1.2 }}>{hi != null ? `${hi}°` : '—'}</div>
-                <div style={{ ...T.micro, color: C.inkFaint, fontSize: 10, lineHeight: 1.2 }}>{lo != null ? `${lo}°` : ''}</div>
+                <div style={{ ...T.micro, color: C.ink, fontWeight: 600, fontSize: 10, lineHeight: 1.2 }}>{hi != null ? `${hi}°` : '—'}</div>
+                <div style={{ ...T.micro, color: C.inkFaint, fontSize: 9, lineHeight: 1.2 }}>{lo != null ? `${lo}°` : ''}</div>
               </div>
             );
           })}
