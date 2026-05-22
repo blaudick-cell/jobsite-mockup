@@ -838,8 +838,16 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
     setSuggestions([]);
     setHighlightIdx(-1);
     const canonical = s.displayName;
-    if (canonical !== (value || '')) onSave(canonical);
+    // Order matters: write geocode FIRST so the cache is populated before the
+    // address-text commit triggers HaulRouteMiniMap's [pickAddr, dropAddr]
+    // useEffect. React 18 batches both setDb calls into one render anyway,
+    // but this ordering keeps the dependency obvious for future readers and
+    // safe even if batching semantics ever change. The mini-map then reads
+    // the new entry on the very first re-run of its effect — no second pass,
+    // no Nominatim cascade re-fetch, instant pin placement → OSRM route fetch
+    // → drive time + tandem CY/day recalculate downstream.
     writeGeocode(canonical, { lat: s.lat, lng: s.lng, displayName: canonical, source: s.source });
+    if (canonical !== (value || '')) onSave(canonical);
   };
 
   const onInputChange = (e) => {
