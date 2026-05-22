@@ -7815,6 +7815,45 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         </div>
       </Card>
 
+      {/* Request summary. v18: overall completion gauge moved here from the
+          per-truck assignment cards — each truck contributes to the haul's
+          total, so the percentage belongs at the haul level.
+          v19: moved up to sit directly below Project & contractor so the
+          status pill + total-delivered gauge are visible above the fold. */}
+      <Card style={{ marginBottom: S[5] }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Request</Label>
+            <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
+              {req.volumeCY} CY of {material ? material.label : req.materialCode}
+            </h1>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
+              {project ? project.name : '—'} · requested at {req.requestedAt}
+            </div>
+            {req.notes && (
+              <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
+                {req.notes}
+              </div>
+            )}
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
+            <StatusPill status={req.status} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
+                <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
+                  {totalDeliveredCY} / {req.volumeCY} CY
+                </div>
+                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
+                  {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
+                </div>
+              </div>
+              <Donut pct={overallPct} size={88} stroke={9} />
+            </div>
+          </div>
+        </div>
+      </Card>
+
       {/* Logistics details (v12) — pickup, dropoff, timing, and loading/dumping site access. */}
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ marginBottom: S[4] }}>
@@ -7902,43 +7941,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 
       {/* Route preview — mini-map + drive time + tandem throughput estimate */}
       <HaulRouteMiniMap db={db} setDb={setDb} pickupAddress={pickup.address} dropoffAddress={dropoff.address} />
-
-      {/* Request summary. v18: overall completion gauge moved here from the
-          per-truck assignment cards — each truck contributes to the haul's
-          total, so the percentage belongs at the haul level. */}
-      <Card style={{ marginBottom: S[5] }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Request</Label>
-            <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
-              {req.volumeCY} CY of {material ? material.label : req.materialCode}
-            </h1>
-            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-              {project ? project.name : '—'} · requested at {req.requestedAt}
-            </div>
-            {req.notes && (
-              <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
-                {req.notes}
-              </div>
-            )}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
-            <StatusPill status={req.status} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
-                <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
-                  {totalDeliveredCY} / {req.volumeCY} CY
-                </div>
-                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
-                  {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
-                </div>
-              </div>
-              <Donut pct={overallPct} size={88} stroke={9} />
-            </div>
-          </div>
-        </div>
-      </Card>
 
       {/* Assignments — multi-truck, multi-day per-truck loads with completion donuts */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
