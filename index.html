@@ -2219,6 +2219,303 @@ function WizardShell({
 
 // Shared input style used across all admin wizards.
 const WIZARD_INPUT_STYLE = { background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '12px 14px', borderRadius: R.sm, fontFamily: F.body, fontSize: 15, width: '100%', boxSizing: 'border-box' };
+
+// =====================================================================
+// Site Conditions — live forecast widget for the Admin Control Center.
+// Pulls Denver / Front Range data from the National Weather Service:
+//   1) GET /points/{lat,lon}  →  read properties.forecast URL (gridpoint)
+//   2) GET that gridpoint URL →  14 day/night periods, paired by calendar date
+// NWS is keyless + CORS-open. Browsers send their own UA which satisfies NWS
+// (the documented "User-Agent" requirement applies to server-side callers;
+// fetch() can't override that header from the browser anyway).
+// =====================================================================
+const NWS_DENVER = { lat: 39.7392, lon: -104.9903, label: 'Front Range', city: 'Denver, CO' };
+
+// Cached across re-mounts so we don't re-hit /points/ on every refresh tick.
+let _nwsGridpointUrl = null;
+
+// Map NWS shortForecast text → one of our icon keys.
+function nwsShortToWxKind(short) {
+  const s = (short || '').toLowerCase();
+  if (s.includes('thunder') || s.includes('storm')) return 'storm';
+  if (s.includes('snow') || s.includes('flurr') || s.includes('sleet') || s.includes('blizzard')) return 'snow';
+  if (s.includes('rain') || s.includes('shower') || s.includes('drizzle')) return 'rain';
+  if (s.includes('fog') || s.includes('haze') || s.includes('smoke')) return 'fog';
+  if (s.includes('partly') || s.includes('mostly cloud') || s.includes('mostly sunny')) return 'partly';
+  if (s.includes('cloud') || s.includes('overcast')) return 'cloud';
+  if (s.includes('sun') || s.includes('clear') || s.includes('fair')) return 'sun';
+  return 'cloud';
+}
+
+// NWS reports wind as "5 to 9 mph" or "6 mph"; extract the upper-bound number.
+function nwsParseWindMph(speed) {
+  if (!speed) return null;
+  const nums = String(speed).match(/\d+/g);
+  if (!nums) return null;
+  return Math.max(...nums.map(Number));
+}
+
+// Pair 14 day/night periods into [{ iso, day, night }] for up to 7 calendar days.
+// NWS may start with a "Tonight" period (no day component) — handle that.
+function nwsPairDaily(periods) {
+  const byIso = new Map();
+  for (const p of periods) {
+    const iso = (p.startTime || '').slice(0, 10);
+    if (!iso) continue;
+    if (!byIso.has(iso)) byIso.set(iso, { iso, day: null, night: null });
+    const bucket = byIso.get(iso);
+    if (p.isDaytime) bucket.day = p; else bucket.night = p;
+  }
+  return Array.from(byIso.values()).slice(0, 7);
+}
+
+// Derive haul-readiness label + grade pill tone from a day's conditions.
+// Decision rule (per session spec, no AskUserQuestion):
+//   precip >= 60% OR snow/storm        → HOLD     (C.warn, soft warn bg)
+//   precip 20-59% OR rain OR wind >=25 → CAUTION  (C.warn, soft warn bg)
+//   otherwise                          → OPTIMAL  (C.ok,   soft ok bg)
+// Tokens only define C.ok / C.warn / C.info — there is no separate amber, so
+// CAUTION + HOLD both ride C.warn and rely on the label to disambiguate.
+function haulConditionFromNws({ wx, precipPct, windMph }) {
+  const pct = precipPct == null ? 0 : precipPct;
+  const wind = windMph == null ? 0 : windMph;
+  if (pct >= 60 || wx === 'snow' || wx === 'storm') {
+    return { grade: 'HOLD',    gradeTone: C.warn, gradeSoft: C.warnSoft, label: 'Muddy / Hold',   sub: 'high mud risk' };
+  }
+  if (pct >= 20 || wx === 'rain' || wind >= 25) {
+    return { grade: 'CAUTION', gradeTone: C.warn, gradeSoft: C.warnSoft, label: 'Wet / Caution',  sub: 'soft ground possible' };
+  }
+  return   { grade: 'OPTIMAL', gradeTone: C.ok,   gradeSoft: C.okSoft,   label: 'Dry',             sub: 'no mud / freeze risk' };
+}
+
+// Inline SVG weather glyph — uses 'currentColor' so the parent can theme it.
+function WxIcon({ kind, size = 26 }) {
+  const s = { stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
+  const glyphs = {
+    sun: (
+      <g {...s}>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+      </g>
+    ),
+    cloud: <path {...s} d="M6 18h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 18z" />,
+    partly: (
+      <g {...s}>
+        <circle cx="9" cy="8.5" r="2.6" />
+        <path d="M9 2.8v1.4M9 12.8v1.4M2.8 8.5h1.4M13.8 8.5h1.4M4.6 4.1l1 1M13.4 12.9l1 1M4.6 12.9l1-1" />
+        <path d="M10 20h7a3 3 0 0 0 .4-5.97 4.5 4.5 0 0 0-8.4-.5A2.75 2.75 0 0 0 10 20z" />
+      </g>
+    ),
+    rain: (
+      <g {...s}>
+        <path d="M6 15h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 15z" />
+        <path d="M8 18l-1 3M12 18l-1 3M16 18l-1 3" />
+      </g>
+    ),
+    snow: (
+      <g {...s}>
+        <path d="M6 14h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 14z" />
+        <path d="M8 17.5v3.5M6.5 19l3 1M6.5 20l3-1M12 17.5v3.5M10.5 19l3 1M10.5 20l3-1M16 17.5v3.5M14.5 19l3 1" />
+      </g>
+    ),
+    storm: (
+      <g {...s}>
+        <path d="M6 14h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 14z" />
+        <path d="M12 14l-2.5 4.5h3L10.5 22" />
+      </g>
+    ),
+    fog: (
+      <g {...s}>
+        <path d="M6 14h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 14z" />
+        <path d="M4 18h16M6 21h12" />
+      </g>
+    ),
+  };
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+      {glyphs[kind] || glyphs.cloud}
+    </svg>
+  );
+}
+
+// Skeleton row used while the NWS fetch is in flight.
+function SiteConditionsSkeleton() {
+  const skel = { background: 'rgba(255,255,255,0.04)', borderRadius: R.xs, height: 16 };
+  return (
+    <Card padding={0} style={{ marginBottom: S[5], overflow: 'hidden' }}>
+      <div style={{ padding: S[5] }}>
+        <div style={{ ...skel, width: 140, marginBottom: 12 }} />
+        <div style={{ ...skel, width: 220, height: 28, marginBottom: 18 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: S[4] }}>
+          {[0, 1, 2, 3].map(i => (
+            <div key={i}>
+              <div style={{ ...skel, width: 80, marginBottom: 8 }} />
+              <div style={{ ...skel, width: 60, height: 22, marginBottom: 6 }} />
+              <div style={{ ...skel, width: 90, height: 12 }} />
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: S[4] }}>
+        <div style={{ ...skel, width: 110, marginBottom: 14 }} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: S[2] }}>
+          {[0, 1, 2, 3, 4, 5, 6].map(i => (
+            <div key={i} style={{ ...skel, height: 70, borderRadius: R.sm }} />
+          ))}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// Live forecast card — today hero + 7-day strip, fed by NWS.
+// Refetches every 30 min; HH:MM clock ticks every minute without remounting.
+function SiteConditionsCard() {
+  const [forecast, setForecast] = useState(null);
+  const [error, setError] = useState(null);
+  const [clockTick, setClockTick] = useState(0);
+
+  useEffect(() => {
+    let alive = true;
+    async function load() {
+      try {
+        if (!_nwsGridpointUrl) {
+          const pointsRes = await fetch(`https://api.weather.gov/points/${NWS_DENVER.lat},${NWS_DENVER.lon}`, { headers: { Accept: 'application/geo+json' } });
+          if (!pointsRes.ok) throw new Error(`NWS points ${pointsRes.status}`);
+          const pointsJson = await pointsRes.json();
+          _nwsGridpointUrl = pointsJson.properties && pointsJson.properties.forecast;
+          if (!_nwsGridpointUrl) throw new Error('NWS missing forecast url');
+        }
+        const fcRes = await fetch(_nwsGridpointUrl, { headers: { Accept: 'application/geo+json' } });
+        if (!fcRes.ok) throw new Error(`NWS forecast ${fcRes.status}`);
+        const fcJson = await fcRes.json();
+        const periods = (fcJson.properties && fcJson.properties.periods) || [];
+        if (alive) { setForecast({ periods, fetchedAt: Date.now() }); setError(null); }
+      } catch (e) {
+        if (alive) setError(e.message || 'forecast unavailable');
+      }
+    }
+    load();
+    const refetchId = setInterval(load, 30 * 60 * 1000);
+    return () => { alive = false; clearInterval(refetchId); };
+  }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setClockTick(n => n + 1), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  if (!forecast && !error) return <SiteConditionsSkeleton />;
+
+  if (error || !forecast || forecast.periods.length === 0) {
+    return (
+      <Card padding={S[4]} style={{ marginBottom: S[5], display: 'flex', alignItems: 'center', gap: S[3] }}>
+        <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">SITE CONDITIONS</Pill>
+        <div style={{ ...T.bodySm, color: C.inkDim }}>
+          Forecast unavailable · {NWS_DENVER.label}
+          <span style={{ ...T.caption, color: C.inkFaint, marginLeft: S[2] }}>(retrying every 30 min)</span>
+        </div>
+      </Card>
+    );
+  }
+
+  const days = nwsPairDaily(forecast.periods);
+  // Find "today" — first calendar date with a usable period. Use whichever of
+  // day/night exists (so an evening fetch that opens with "Tonight" still works).
+  const todayBucket = days[0] || { day: null, night: null };
+  const todayPrimary = todayBucket.day || todayBucket.night;
+  const todayWx = nwsShortToWxKind(todayPrimary && todayPrimary.shortForecast);
+  const todayPrecipPct = (todayPrimary && todayPrimary.probabilityOfPrecipitation && todayPrimary.probabilityOfPrecipitation.value) || 0;
+  const todayWind = nwsParseWindMph(todayPrimary && todayPrimary.windSpeed) || 0;
+  const todayWindDir = (todayPrimary && todayPrimary.windDirection) || '';
+  const todayTempNow = todayPrimary ? todayPrimary.temperature : null;
+  const todayHi = todayBucket.day ? todayBucket.day.temperature : (todayPrimary ? todayPrimary.temperature : null);
+  const todayLo = todayBucket.night ? todayBucket.night.temperature : null;
+  const cond = haulConditionFromNws({ wx: todayWx, precipPct: todayPrecipPct, windMph: todayWind });
+
+  const now = new Date();
+  const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+  return (
+    <Card padding={0} style={{ marginBottom: S[5], overflow: 'hidden' }}>
+      <div style={{ padding: S[5] }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[3], marginBottom: S[4] }}>
+          <div>
+            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: 4 }}>Site conditions</div>
+            <div style={{ ...T.h3, color: C.ink }}>{NWS_DENVER.label} · {hhmm}</div>
+            <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{NWS_DENVER.city} · NWS</div>
+          </div>
+          <Pill color={cond.gradeTone} soft={cond.gradeSoft}>{cond.grade}</Pill>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: S[4] }}>
+          <div>
+            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Temperature</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+              <div style={{ ...T.h2, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
+              <div style={{ color: C.inkDim }}><WxIcon kind={todayWx} size={24} /></div>
+            </div>
+            <div style={{ ...T.caption, color: C.inkFaint }}>
+              {todayHi != null ? `Hi ${todayHi}°` : ''}{todayHi != null && todayLo != null ? ' · ' : ''}{todayLo != null ? `Lo ${todayLo}°` : ''}
+            </div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Wind</div>
+            <div style={{ ...T.statValue, color: C.ink }}>{todayWind} mph</div>
+            <div style={{ ...T.caption, color: C.inkFaint }}>{todayWindDir || '—'}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Precip risk</div>
+            <div style={{ ...T.statValue, color: todayPrecipPct >= 40 ? C.warn : C.ok }}>{todayPrecipPct}%</div>
+            <div style={{ ...T.caption, color: C.inkFaint }}>next period</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1, textTransform: 'uppercase', marginBottom: 4 }}>Haul condition</div>
+            <div style={{ ...T.statValue, color: cond.gradeTone }}>{cond.label}</div>
+            <div style={{ ...T.caption, color: C.inkFaint }}>{cond.sub}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: S[4] }}>
+        <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 1.2, textTransform: 'uppercase', marginBottom: S[3] }}>7-day forecast</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: S[2] }}>
+          {days.map((d, i) => {
+            const isFirst = i === 0;
+            const primary = d.day || d.night;
+            const wx = nwsShortToWxKind(primary && primary.shortForecast);
+            const hi = d.day ? d.day.temperature : (primary ? primary.temperature : null);
+            const lo = d.night ? d.night.temperature : null;
+            const wkLabel = primary ? primary.name : '';
+            return (
+              <div key={d.iso}
+                aria-label={`${wkLabel} ${d.iso} · ${primary && primary.shortForecast} · high ${hi != null ? hi : 'n/a'}, low ${lo != null ? lo : 'n/a'}`}
+                style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center',
+                  gap: 6, padding: '10px 4px',
+                  borderRadius: R.sm,
+                  background: isFirst ? C.accentSoft : 'transparent',
+                  border: `1px solid ${isFirst ? C.accentSoft : 'transparent'}`,
+                }}>
+                <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.6, textTransform: 'uppercase' }}>
+                  {isFirst ? 'Today' : (isoToWeekdayShort ? isoToWeekdayShort(d.iso) : wkLabel.slice(0, 3))}
+                </div>
+                <div style={{ color: isFirst ? C.accent : C.inkDim }}>
+                  <WxIcon kind={wx} size={26} />
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{hi != null ? `${hi}°` : '—'}</div>
+                  <div style={{ ...T.micro, color: C.inkFaint }}>{lo != null ? `${lo}°` : ''}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // =====================================================================
 // ADMIN
 // =====================================================================
@@ -3514,6 +3811,8 @@ function AdminProjects({ db, setDb, navigate }) {
           <Btn variant="primary" size="sm" onClick={() => navigate('/admin/new')}>+ New haul</Btn>
         </div>
       </div>
+
+      <SiteConditionsCard />
 
       {/* Operational KPI strip */}
       <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
