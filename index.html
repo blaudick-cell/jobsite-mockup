@@ -6520,6 +6520,188 @@ function AdminHaulRequests({ db, setDb, navigate }) {
   );
 }
 
+// Mini-map for a single haul request: pickup + dropoff pins, OSRM driving
+// polyline, drive time, and an 18-CY tandem throughput estimate. Pattern
+// mirrors LiveOperationsTileMap — same CartoCDN raster tiles, same halo+dot
+// pin recipe, same `db.geocode` / `db.routes` cache pattern with Nominatim
+// + OSRM fallback fetch when an address pair is uncached.
+function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
+  const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const markersRef = useRef([]);
+
+  const geocode = (db && db.geocode) || {};
+  const routesCache = (db && db.routes) || {};
+  const pick = pickupAddress ? geocode[pickupAddress] : null;
+  const dump = dropoffAddress ? geocode[dropoffAddress] : null;
+  const routeKey = (pickupAddress && dropoffAddress) ? (pickupAddress + '|' + dropoffAddress) : null;
+  const route = routeKey ? routesCache[routeKey] : null;
+
+  // Async fetch: geocode endpoints + OSRM-route them if not already cached.
+  // Writes back through setDb so the cache populates for future renders.
+  useEffect(() => {
+    if (!pickupAddress || !dropoffAddress) return undefined;
+    if (route) return undefined;
+    let cancelled = false;
+    (async () => {
+      let p = (db.geocode || {})[pickupAddress];
+      let d = (db.geocode || {})[dropoffAddress];
+      if (!p) {
+        const g = await geocodeAddressViaNominatim(pickupAddress);
+        if (cancelled) return;
+        if (g) { p = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pickupAddress]: g } })); }
+      }
+      if (!d) {
+        const g = await geocodeAddressViaNominatim(dropoffAddress);
+        if (cancelled) return;
+        if (g) { d = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [dropoffAddress]: g } })); }
+      }
+      if (!p || !d) return;
+      const r = await fetchOSRMDrivingRoute(p, d);
+      if (cancelled) return;
+      if (r) setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [pickupAddress + '|' + dropoffAddress]: r } }));
+    })();
+    return () => { cancelled = true; };
+  }, [pickupAddress, dropoffAddress, !!route]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Map init — once per mount (and when MapLibre becomes available).
+  useEffect(() => {
+    if (!mlAvailable || !containerRef.current) return undefined;
+    if (mapRef.current) return undefined;
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    const retina = dpr > 1 ? '@2x' : '';
+    const tileTemplate = `https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${retina}.png`;
+    const tileUrls = ['a', 'b', 'c', 'd'].map(s => tileTemplate.replace('{s}', s));
+    let map;
+    try {
+      map = new window.maplibregl.Map({
+        container: containerRef.current,
+        style: {
+          version: 8,
+          sources: { carto: { type: 'raster', tiles: tileUrls, tileSize: 256, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>' } },
+          layers: [{ id: 'carto-layer', type: 'raster', source: 'carto' }],
+        },
+        center: [-105.0, 39.95],
+        zoom: 8.4,
+        attributionControl: { compact: true },
+      });
+      map.scrollZoom.disable();
+    } catch (e) { return undefined; }
+    mapRef.current = map;
+    map.on('load', () => {
+      try { map.addSource('mini-route', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } }); } catch (e) { /* ignore */ }
+      try { map.addLayer({ id: 'mini-route-casing', type: 'line', source: 'mini-route', paint: { 'line-color': '#0A0A0A', 'line-width': 5, 'line-opacity': 0.55 }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
+      try { map.addLayer({ id: 'mini-route-glow', type: 'line', source: 'mini-route', paint: { 'line-color': '#B3E635', 'line-width': 8, 'line-opacity': 0.22, 'line-blur': 5 }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
+      try { map.addLayer({ id: 'mini-route-line', type: 'line', source: 'mini-route', filter: ['==', ['get', 'isStraight'], false], paint: { 'line-color': '#B3E635', 'line-width': 3, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
+      try { map.addLayer({ id: 'mini-route-fallback', type: 'line', source: 'mini-route', filter: ['==', ['get', 'isStraight'], true], paint: { 'line-color': '#B3E635', 'line-width': 3, 'line-opacity': 0.45, 'line-dasharray': [2, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
+    });
+    let ro = null;
+    try { ro = new ResizeObserver(() => { if (mapRef.current) mapRef.current.resize(); }); ro.observe(containerRef.current); } catch (e) { /* ignore */ }
+    return () => {
+      if (ro) ro.disconnect();
+      try { map.remove(); } catch (e) { /* ignore */ }
+      mapRef.current = null;
+    };
+  }, [mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reconcile route geometry, pins, and bounds whenever the resolved coords change.
+  const routeCoords = route && Array.isArray(route.coords) ? route.coords : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
+  const isStraight = !route;
+  const coordsSig = routeCoords
+    ? routeCoords.length + (isStraight ? 's' : 'o') + ':' + (pick ? pick.lng.toFixed(4) + ',' + pick.lat.toFixed(4) : '-') + ':' + (dump ? dump.lng.toFixed(4) + ',' + dump.lat.toFixed(4) : '-')
+    : '';
+  useEffect(() => {
+    let cancelled = false;
+    const t = setTimeout(() => {
+      if (cancelled) return;
+      const map = mapRef.current;
+      if (!map) return;
+      const apply = () => {
+        if (cancelled) return;
+        markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
+        markersRef.current = [];
+        const src = map.getSource && map.getSource('mini-route');
+        if (src && routeCoords) {
+          try { src.setData({ type: 'FeatureCollection', features: [{ type: 'Feature', properties: { isStraight }, geometry: { type: 'LineString', coordinates: routeCoords } }] }); } catch (e) { /* ignore */ }
+        }
+        const PICKUP_HALO = 'radial-gradient(circle, #f35f5f8c, #f35f5f2e 55%, #f35f5f00 75%)';
+        const DUMP_HALO   = 'radial-gradient(circle, #b3e6358c, #b3e6352e 55%, #b3e63500 75%)';
+        const mkPin = (haloBg, dotColor) => {
+          const el = document.createElement('div');
+          el.className = 'jx-haul-pin';
+          el.style.cursor = 'default';
+          const halo = document.createElement('span');
+          halo.className = 'jx-haul-pin-halo';
+          halo.style.background = haloBg;
+          const dot = document.createElement('span');
+          dot.className = 'jx-haul-pin-dot';
+          dot.style.background = dotColor;
+          el.appendChild(halo);
+          el.appendChild(dot);
+          return el;
+        };
+        try {
+          if (pick) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(PICKUP_HALO, '#ef5b5b'), anchor: 'center' }).setLngLat([pick.lng, pick.lat]).addTo(map));
+          if (dump) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(DUMP_HALO, '#B3E635'), anchor: 'center' }).setLngLat([dump.lng, dump.lat]).addTo(map));
+        } catch (e) { /* ignore */ }
+        if (routeCoords && routeCoords.length >= 2) {
+          try {
+            const bounds = new window.maplibregl.LngLatBounds();
+            routeCoords.forEach(c => bounds.extend(c));
+            map.fitBounds(bounds, { padding: 40, maxZoom: 13, duration: 0 });
+          } catch (e) { /* ignore */ }
+        }
+      };
+      if (map.loaded && map.loaded()) apply();
+      else if (map.once) map.once('load', apply);
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+      markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
+      markersRef.current = [];
+    };
+  }, [coordsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Throughput math: cycle = 10 min load + drive + 5 min dump + drive (one-way
+  // drive used both directions). 8-hr productive shift. CY/load = INVOICE_CY_RATE.TAN.
+  const durSec = route && Number.isFinite(route.durationSeconds) ? route.durationSeconds : null;
+  const driveMin = durSec != null ? Math.max(1, Math.round(durSec / 60)) : null;
+  const cycleMin = driveMin != null ? 15 + 2 * driveMin : null;
+  const loadsPerShift = cycleMin != null ? Math.floor(480 / cycleMin) : null;
+  const cyPerDay = loadsPerShift != null ? loadsPerShift * (INVOICE_CY_RATE.TAN || 18) : null;
+
+  if (!pickupAddress || !dropoffAddress) return null;
+
+  return (
+    <Card style={{ marginBottom: S[5] }}>
+      <div style={{ marginBottom: S[4] }}>
+        <Label color={C.accent}>Route preview</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Driving route + estimated tandem throughput.</div>
+      </div>
+      <div ref={containerRef} style={{ width: '100%', height: 300, borderRadius: R.md, overflow: 'hidden', background: C.surfaceHi, marginBottom: S[4] }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+        <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
+          <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>Drive time</div>
+          <div style={{ ...T.statValue, color: C.ink }}>
+            {driveMin != null ? driveMin : '—'} <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>{driveMin != null ? 'min one-way' : ''}</span>
+          </div>
+        </div>
+        <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
+          <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>Est. CY/day · 1 TAN</span>
+            <span title="Assumes 10 min load + drive + 5 min dump + return drive, 8-hr productive shift, 18 CY per tandem load." style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 14, height: 14, borderRadius: '50%', border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 9, cursor: 'help' }}>?</span>
+          </div>
+          <div style={{ ...T.statValue, color: C.ink }}>
+            {cyPerDay != null ? `~${cyPerDay} CY` : '—'} {loadsPerShift != null && <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>· {loadsPerShift} loads</span>}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const requests = db.haulRequests || [];
   const req = requests.find(r => r.id === requestId);
@@ -6772,6 +6954,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
       </Card>
+
+      {/* Route preview — mini-map + drive time + tandem throughput estimate */}
+      <HaulRouteMiniMap db={db} setDb={setDb} pickupAddress={pickup.address} dropoffAddress={dropoff.address} />
 
       {/* Request summary */}
       <Card style={{ marginBottom: S[5] }}>
