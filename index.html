@@ -1062,6 +1062,69 @@ function EditableSelect({ value, options, onSave, style = {} }) {
   );
 }
 
+// Click-to-edit material picker — wraps EditableSelect's pattern but adds
+// an "Other…" sentinel option that switches the control to a free-text
+// input. Lets users either pick from MATERIALS or type a custom material
+// name that survives end-to-end as the raw materialCode string. Display
+// resolves through materialLabel() so a custom name renders verbatim.
+function EditableMaterial({ value, onSave, style = {} }) {
+  const knownMat = MATERIALS.find(m => m.code === value);
+  // 'view' | 'select' | 'other'
+  const [mode, setMode] = useState('view');
+  const [otherText, setOtherText] = useState(knownMat ? '' : (value || ''));
+  useEffect(() => { if (mode === 'view') setOtherText(knownMat ? '' : (value || '')); }, [value, mode, knownMat]);
+
+  if (mode === 'select') {
+    return (
+      <select autoFocus value={knownMat ? value : '__other__'}
+        onChange={e => {
+          const v = e.target.value;
+          if (v === '__other__') { setMode('other'); return; }
+          if (v !== value) onSave(v);
+          setMode('view');
+        }}
+        onBlur={() => setMode('view')}
+        onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
+        style={{ background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', ...style }}>
+        {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+        <option value="__other__">Other…</option>
+      </select>
+    );
+  }
+
+  if (mode === 'other') {
+    const commit = () => {
+      const next = (otherText || '').trim();
+      if (next && next !== value) onSave(next);
+      setMode('view');
+    };
+    const cancel = () => { setOtherText(knownMat ? '' : (value || '')); setMode('view'); };
+    return (
+      <input autoFocus value={otherText}
+        onChange={e => setOtherText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); commit(); }
+          if (e.key === 'Escape') cancel();
+        }}
+        onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
+        placeholder="Custom material name…"
+        style={{ background: C.bg, color: 'inherit', border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', minWidth: 220, ...style }} />
+    );
+  }
+
+  const displayLabel = knownMat ? knownMat.label : (value || '—');
+  return (
+    <span
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMode('select'); }}
+      onMouseDown={e => e.stopPropagation()}
+      style={{ cursor: 'pointer', padding: '3px 6px', margin: '-3px -6px', borderRadius: R.xs, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
+      onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
+      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+      title="Click to change material">{displayLabel}</span>
+  );
+}
+
 function PhonePreview({ children, label = 'Driver view', scale = 0.78 }) {
   const W = 360 * scale, H = 740 * scale;
   return (
@@ -7913,10 +7976,21 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           <div style={{ flex: 1, minWidth: 240 }}>
             <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Request</Label>
             <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
-              {req.volumeCY} CY of {material ? material.label : req.materialCode}
+              <EditableText value={String(req.volumeCY == null ? '' : req.volumeCY)}
+                onSave={(v) => {
+                  const n = parseFloat((v || '').trim());
+                  if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                    updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                  }
+                }}
+                placeholder="0" mono />
+              {' CY of '}
+              <EditableMaterial value={req.materialCode}
+                onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }} />
             </h1>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
               {project ? project.name : '—'} · requested at {req.requestedAt}
+              <span style={{ color: C.inkFaint }}> · click amount or material to edit</span>
             </div>
             {req.notes && (
               <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
