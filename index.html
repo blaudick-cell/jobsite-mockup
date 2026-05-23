@@ -412,6 +412,16 @@
     /* MapLibre default attribution can crowd the dispatch chrome — soften it. */
     .lom-tile-map .maplibregl-ctrl-attrib { font-size: 10px; opacity: 0.7; }
     .lom-tile-map .maplibregl-ctrl-attrib a { color: #B3E635; }
+    /* v23: route-click popup styling. Strip MapLibre's default white card
+       chrome so our inner widget controls all visuals. Tip + close button
+       recolored to match the dark theme. */
+    .maplibregl-popup.lom-route-popup .maplibregl-popup-content { padding: 0; background: transparent; box-shadow: none; border-radius: 8px; }
+    .maplibregl-popup.lom-route-popup .maplibregl-popup-tip { border-top-color: #2A2A2A; border-bottom-color: #2A2A2A; }
+    .maplibregl-popup.lom-route-popup .maplibregl-popup-close-button {
+      color: #9A9A9A; font-size: 18px; padding: 2px 8px; right: 2px; top: 2px;
+      background: rgba(20, 20, 20, 0.7); border-radius: 50%; line-height: 1;
+    }
+    .maplibregl-popup.lom-route-popup .maplibregl-popup-close-button:hover { color: #fff; background: rgba(20, 20, 20, 0.95); }
     /* Halo+dot pin — `jx-haul-pin` parity with jobsiteexchange.com (verbatim
        from map-recon-haul-calc.md). Static (no animation) — the real site
        does not animate the halo, and prior pulse keyframes caused visible
@@ -4547,6 +4557,87 @@ function AdminProjects({ db, setDb, navigate }) {
           paint: { 'line-color': statusColor, 'line-width': 3, 'line-opacity': 0.45, 'line-dasharray': [2, 2] },
           layout: { 'line-cap': 'round', 'line-join': 'round' },
         }); } catch (e) { /* ignore */ }
+
+        // v23: auto-fit bounds to the union of every route coord + endpoint
+        // marker + project marker on first load. Replaces the hardcoded
+        // [-105, 39.95] @ zoom 8.4 framing. maxZoom 12 keeps the view from
+        // zooming uselessly tight when there's a single tiny route.
+        try {
+          const b = new window.maplibregl.LngLatBounds();
+          let extended = false;
+          projectRoutes.forEach(rt => {
+            rt.coords.forEach(c => { b.extend(c); extended = true; });
+          });
+          projectEndpoints.forEach(p => { b.extend([p.coord.lng, p.coord.lat]); extended = true; });
+          projectPoints.forEach(p => { b.extend([p.coord.lng, p.coord.lat]); extended = true; });
+          if (extended) {
+            map.fitBounds(b, { padding: { top: 40, bottom: 40, left: 40, right: 40 }, maxZoom: 12, duration: 0 });
+          }
+        } catch (e) { /* fitBounds failed; keep default framing */ }
+
+        // v23: route click → popup widget → drill to project's request list.
+        // Hovering switches cursor to pointer for affordance. Click opens
+        // a MapLibre popup with a custom DOM widget; widget click navigates
+        // to /admin/requests?projectId=<id> (closure-captured `navigate`).
+        const routeLayerIds = ['routes-lines', 'routes-lines-fallback'];
+        routeLayerIds.forEach(layerId => {
+          map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
+          map.on('mouseleave', layerId, () => { map.getCanvas().style.cursor = ''; });
+          map.on('click', layerId, (ev) => {
+            try {
+              const f = ev.features && ev.features[0];
+              if (!f) return;
+              const projId = f.properties && f.properties.id;
+              const proj = (db && db.projects ? db.projects : []).find(p => p.id === projId);
+              if (!proj) return;
+              // Derive HAS/NEEDS colors (mirror HasNeedsPill at raw-DOM level
+              // since the popup is rendered outside React).
+              const isNeeds = proj.haulType !== 'HAS';
+              const pillColor = isNeeds ? '#B3E635' : '#FF6B47';
+              const pillSoft  = isNeeds ? 'rgba(179, 230, 53, 0.10)' : 'rgba(255, 107, 71, 0.08)';
+              const pillLabel = isNeeds ? 'NEEDS' : 'HAS';
+              // Material label — resolve from project.material[0] if MATERIALS
+              // catalog is available at runtime, else fall back to the code.
+              let matLabel = 'Material';
+              try {
+                const code = Array.isArray(proj.material) ? proj.material[0] : proj.material;
+                const found = (typeof MATERIALS !== 'undefined' && MATERIALS) ? MATERIALS.find(m => m.code === code) : null;
+                matLabel = found ? found.label : (code || matLabel);
+              } catch (e) { /* keep fallback */ }
+              const qtyStr = proj.volumeCYNeeded != null ? Number(proj.volumeCYNeeded).toLocaleString() + ' CY of ' + matLabel : matLabel;
+              // Build the widget element. Inline styles only — MapLibre's
+              // popup container reparents into a non-React DOM tree.
+              const el = document.createElement('div');
+              el.setAttribute('role', 'link');
+              el.setAttribute('tabindex', '0');
+              el.style.cssText = 'cursor:pointer;min-width:240px;max-width:300px;padding:10px 12px;background:#141414;border-radius:8px;border:1px solid #2A2A2A;color:#fff;font-family:Inter,sans-serif;line-height:1.35;';
+              el.innerHTML = ''
+                + '<div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:-0.2px;">' + (proj.name || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>'
+                + '<div style="font-size:12px;color:#9A9A9A;margin-top:2px;">' + (proj.gc || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>'
+                + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">'
+                +   '<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:' + pillSoft + ';color:' + pillColor + ';font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;line-height:1.1;">' + pillLabel + '</span>'
+                +   '<span style="font-size:13px;font-weight:600;color:#fff;">' + qtyStr.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</span>'
+                + '</div>'
+                + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul request &rsaquo;</div>';
+              el.addEventListener('click', (clickEv) => {
+                clickEv.stopPropagation();
+                try { popup.remove(); } catch (e) {}
+                try { navigate('/admin/requests?projectId=' + projId); } catch (e) {}
+              });
+              el.addEventListener('keydown', (kev) => {
+                if (kev.key === 'Enter' || kev.key === ' ') {
+                  kev.preventDefault();
+                  try { popup.remove(); } catch (e) {}
+                  try { navigate('/admin/requests?projectId=' + projId); } catch (e) {}
+                }
+              });
+              const popup = new window.maplibregl.Popup({ offset: 12, closeButton: true, className: 'lom-route-popup', maxWidth: '320px' })
+                .setLngLat(ev.lngLat)
+                .setDOMContent(el)
+                .addTo(map);
+            } catch (e) { /* swallow — popup is best-effort */ }
+          });
+        });
 
       });
 
