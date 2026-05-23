@@ -9424,6 +9424,49 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     setEditing(false);
   };
   const cancelEdit = () => { setEditing(false); };
+  // === Delete hauler ====================================================
+  // Cascade-detach every reference, then remove the hauler. Single setDb
+  // call so the diff cycle generates UPSERT(invoices/trucks/haulRequests)
+  // alongside DELETE(haulers); the proposal ships a matching Supabase
+  // migration changing invoices.hauler_id from CASCADE to SET NULL so the
+  // cleanup is race-free at the DB layer as well.
+  const deleteHauler = () => {
+    const truckCount    = db.trucks.filter(t => t.haulerId === hauler.id).length;
+    const invoiceCount  = (db.invoices || []).filter(i => i.haulerId === hauler.id).length;
+    const matchedCount  = (db.haulRequests || []).filter(r => r.matchedHaulerId === hauler.id).length;
+    const assignedCount = (db.haulRequests || []).filter(r => Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === hauler.id)).length;
+    const refLine = [
+      truckCount    && `${truckCount} truck${truckCount === 1 ? '' : 's'}`,
+      invoiceCount  && `${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}`,
+      matchedCount  && `${matchedCount} matched haul request${matchedCount === 1 ? '' : 's'}`,
+      assignedCount && `${assignedCount} haul request${assignedCount === 1 ? '' : 's'} with assignments`,
+    ].filter(Boolean).join(', ');
+    const msg = refLine
+      ? `Delete ${hauler.name}? ${refLine} will be unlinked (kept, hauler set to none). This can't be undone.`
+      : `Delete ${hauler.name}? This can't be undone.`;
+    if (!window.confirm(msg)) return;
+    setDb(prev => appendActivity({
+      ...prev,
+      haulers:  prev.haulers.filter(h => h.id !== hauler.id),
+      trucks:   prev.trucks.map(t => t.haulerId === hauler.id ? { ...t, haulerId: null, hauler: null } : t),
+      invoices: (prev.invoices || []).map(i => i.haulerId === hauler.id ? { ...i, haulerId: null } : i),
+      haulRequests: (prev.haulRequests || []).map(r => {
+        let next = r;
+        if (r.matchedHaulerId === hauler.id) next = { ...next, matchedHaulerId: null };
+        if (Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === hauler.id)) {
+          next = { ...next, assignments: r.assignments.filter(a => !a || a.haulerId !== hauler.id) };
+        }
+        return next;
+      }),
+    }, {
+      type: 'hauler.deleted', actorRole: 'admin', actorId: null,
+      summary: refLine
+        ? `Admin deleted ${hauler.name} (unlinked ${refLine})`
+        : `Admin deleted ${hauler.name}`,
+      refId: hauler.id,
+    }));
+    navigate('/admin/haulers');
+  };
 
   // Attachments: 4 doc categories. Each entry shows current upload state or empty placeholder.
   // For the mockup we simulate uploads by generating filenames + ISO dates client-side.
@@ -9478,9 +9521,12 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
-            <Btn variant="secondary" size="sm" onClick={cancelEdit}>Cancel</Btn>
-            <Btn variant="primary" size="sm" onClick={saveEdit} disabled={!emailValid}>Save changes</Btn>
+          <div style={{ display: 'flex', gap: S[2], alignItems: 'center', justifyContent: 'space-between' }}>
+            <Btn variant="danger" size="sm" onClick={deleteHauler}>Delete hauler</Btn>
+            <div style={{ display: 'flex', gap: S[2] }}>
+              <Btn variant="secondary" size="sm" onClick={cancelEdit}>Cancel</Btn>
+              <Btn variant="primary" size="sm" onClick={saveEdit} disabled={!emailValid}>Save changes</Btn>
+            </div>
           </div>
         </Card>
       ) : (
