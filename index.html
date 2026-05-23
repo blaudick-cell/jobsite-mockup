@@ -1129,11 +1129,11 @@ function EditableMaterial({ value, onSave, style = {} }) {
 // picking "Other…" swaps to a text input for a custom material name.
 // Unknown values (custom strings) survive as a "(custom)" option so they
 // stay selectable.
-function MaterialField({ value, onSave }) {
+function MaterialField({ value, onSave, style = {} }) {
   const knownMat = MATERIALS.find(m => m.code === value);
   const [isEditingCustom, setIsEditingCustom] = useState(false);
   const [draftText, setDraftText] = useState(value || '');
-  const fieldStyle = { ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box' };
+  const fieldStyle = { ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box', ...style };
 
   if (isEditingCustom) {
     const commit = () => {
@@ -7998,30 +7998,25 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
             <Label color={C.accent} style={{ marginBottom: S[3] }}>Haul Request</Label>
-            <div style={{ display: 'flex', gap: S[5], flexWrap: 'wrap', marginBottom: S[4] }}>
-              <div>
-                <Label style={{ marginBottom: S[2] }}>Quantity (CY)</Label>
-                <input type="number" min="1" step="1"
-                  value={req.volumeCY == null ? '' : req.volumeCY}
-                  onChange={e => {
-                    const raw = e.target.value;
-                    if (raw === '') return;
-                    const n = parseFloat(raw);
-                    if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
-                      updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
-                    }
-                  }}
-                  style={{ ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono, fontWeight: 700, width: 140, boxSizing: 'border-box' }} />
-              </div>
-              <div>
-                <Label style={{ marginBottom: S[2] }}>Material</Label>
-                <MaterialField value={req.materialCode}
-                  onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }} />
-              </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
+              <input type="number" min="1" step="1"
+                value={req.volumeCY == null ? '' : req.volumeCY}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (raw === '') return;
+                  const n = parseFloat(raw);
+                  if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                    updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                  }
+                }}
+                aria-label="Quantity in cubic yards"
+                title="Click to edit quantity"
+                style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, fontFamily: F.mono, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 96, textAlign: 'center', boxSizing: 'border-box' }} />
+              <span style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>CY of</span>
+              <MaterialField value={req.materialCode}
+                onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
+                style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, fontFamily: F.display, padding: '2px 8px', minWidth: 0 }} />
             </div>
-            <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
-              {req.volumeCY == null ? '—' : req.volumeCY} CY of {material ? material.label : (req.materialCode || '—')}
-            </h1>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
               {project ? project.name : '—'} · requested at {req.requestedAt}
             </div>
