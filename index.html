@@ -3858,7 +3858,7 @@ function AdminProjects({ db, setDb, navigate }) {
       title: p.name,
       body: 'Upcoming haul · needs truck assignments before start',
       actionLabel: 'Review haul',
-      onAction: () => navigate('/admin/p/' + p.id),
+      onAction: () => navigate('/admin/requests?projectId=' + p.id),
     });
   });
   // Offline / unassigned trucks (any roster truck with no driver) — surface
@@ -3959,18 +3959,18 @@ function AdminProjects({ db, setDb, navigate }) {
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'space-between', gap: S[2], alignItems: 'flex-end' }}>
             <div style={{ display: 'flex', flexDirection: 'column', gap: S[1], alignItems: 'stretch', minWidth: 130 }}>
               {p.healthStatus === 'critical' && (
-                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Resolve delay</Btn>
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/requests?projectId=' + p.id)}>Resolve delay</Btn>
               )}
               {p.healthStatus === 'atrisk' && (
-                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Assign trucks</Btn>
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/requests?projectId=' + p.id)}>Assign trucks</Btn>
               )}
               {p.healthStatus === 'healthy' && p.loadsCompleted >= p.loadsTarget && (
                 <Btn variant="primary" size="sm" onClick={() => updateProject(p.id, { status: 'completed' })}>Close haul</Btn>
               )}
               {!(p.healthStatus === 'critical' || p.healthStatus === 'atrisk' || (p.healthStatus === 'healthy' && p.loadsCompleted >= p.loadsTarget)) && (
-                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/p/' + p.id)}>Open dispatch</Btn>
+                <Btn variant="primary" size="sm" onClick={() => navigate('/admin/requests?projectId=' + p.id)}>Open dispatch</Btn>
               )}
-              <Btn variant="secondary" size="xs" onClick={() => navigate('/admin/p/' + p.id)}>View route</Btn>
+              <Btn variant="secondary" size="xs" onClick={() => navigate('/admin/requests?projectId=' + p.id)}>View route</Btn>
             </div>
             <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>{fmtHours(p.totalHours)} hrs · {fmtMoney(p.totalRevenue)}</div>
           </div>
@@ -4979,7 +4979,7 @@ function AdminProjects({ db, setDb, navigate }) {
                     <div style={{ gridColumn: '1 / span 2' }}>Material<br/><span style={{ ...T.body, color: C.ink, fontWeight: 700 }}>{r.materialType}</span></div>
                   </div>
                   <div style={{ marginTop: S[3], display: 'flex', justifyContent: 'flex-end', gap: S[2] }}>
-                    <Btn variant="primary" size="xs" onClick={() => navigate('/admin/p/' + r.id)}>Open dispatch</Btn>
+                    <Btn variant="primary" size="xs" onClick={() => navigate('/admin/requests?projectId=' + r.id)}>Open dispatch</Btn>
                   </div>
                 </div>
               </div>
@@ -5286,7 +5286,7 @@ function AdminProjects({ db, setDb, navigate }) {
             </thead>
             <tbody>
               {completed.map(p => (
-                <Tr key={p.id} onClick={() => navigate('/admin/p/' + p.id)} style={{ opacity: 0.7 }}>
+                <Tr key={p.id} onClick={() => navigate('/admin/requests?projectId=' + p.id)} style={{ opacity: 0.7 }}>
                   <Td><span style={{ fontWeight: 600, color: C.ink }}>{p.name}</span></Td>
                   <Td dim>{p.gc}</Td>
                   <Td align="right" mono>{p.loadsCompleted}</Td>
@@ -5303,117 +5303,21 @@ function AdminProjects({ db, setDb, navigate }) {
   );
 }
 
-function AdminProject({ projectId, db, setDb, navigate }) {
-  const [showAdd, setShowAdd] = useState(false);
-  const project = db.projects.find(p => p.id === projectId);
-  if (!project) return <NotFound navigate={navigate} />;
-  const haulers = db.haulers.filter(o => o.projectIds.includes(projectId));
-  const trucks = db.trucks.filter(t => t.projectId === projectId);
-  const hours = db.hours.filter(h => h.projectId === projectId);
-  const loads = db.loads.filter(l => l.projectId === projectId);
-  const updateProject = (patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === project.id ? { ...p, ...patch } : p) }));
-  const addHauler = (form) => {
-    const id = 'op-' + Math.random().toString(36).substring(2, 7);
-    setDb(prev => appendActivity(
-      { ...prev, haulers: [...prev.haulers, { id, ...form, projectIds: [projectId] }] },
-      { type: 'hauler.created', actorRole: 'admin', actorId: null, summary: `Admin added ${form.name} as a hauler on ${projectName(prev, projectId)}`, refId: id }
-    ));
-    setShowAdd(false);
-  };
-
+// === Legacy /admin/p/:projectId redirect ====================================
+// The old project-landing page ("Admin > Hauls > [project]") duplicated info
+// that lives more naturally on the haul-request detail page. The route is kept
+// so external bookmarks and internal references that escaped the migration
+// still land somewhere sensible: the haul-requests list filtered to this
+// project. Users with no haul requests for the project see an empty filtered
+// list with a one-click "clear filter" pill.
+function HaulProjectRedirect({ projectId, navigate }) {
+  useEffect(() => {
+    navigate('/admin/requests?projectId=' + projectId);
+  }, [projectId, navigate]);
   return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls', to: '/admin' }, { label: project.name }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[5] }}>
-        <div style={{ flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: 6 }}>
-            <span style={{ ...T.caption }}>started <EditableText value={project.startDate} onSave={(v) => updateProject({ startDate: v })} mono placeholder="YYYY-MM-DD" /></span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-            <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: 0, color: C.ink }}>
-              <EditableText value={project.name} onSave={(v) => updateProject({ name: v })} />
-            </h1>
-            <StatusPill status={project.status || 'active'} />
-          </div>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            <EditableText value={project.gc} onSave={(v) => updateProject({ gc: v })} /> · <EditableText value={project.address} onSave={(v) => updateProject({ address: v })} />
-          </div>
-          {project.material && project.material.length > 0 && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2], marginTop: S[3] }}>
-              {project.material.map(mc => {
-                const m = MATERIALS.find(x => x.code === mc);
-                return <Pill key={mc}>{m ? m.label : mc}</Pill>;
-              })}
-            </div>
-          )}
-        </div>
-      </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Haulers" value={haulers.length} /></Card>
-        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} assigned`} /></Card>
-        <Card padding={S[4]}><Stat label="Total loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
-        <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0))} /></Card>
-      </div>
-      <div style={{ marginBottom: S[3] }}><Label>Haulers on this haul</Label></div>
-      <Card padding={0}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Hauler</Th><Th>Contact</Th><Th align="right">Trucks managed</Th><Th align="right">Active now</Th><Th align="right">Total hours</Th><Th></Th></tr></thead>
-          <tbody>
-            {haulers.map(op => {
-              const opTrucks = trucks.filter(t => t.haulerId === op.id);
-              const opTruckIds = new Set(opTrucks.map(t => t.id));
-              const opActive = opTrucks.filter(t => t.driverId && hours.some(h => h.truckId === t.id && h.status === 'open')).length;
-              const opHours = hours.filter(h => opTruckIds.has(h.truckId)).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-              return (
-                <Tr key={op.id} onClick={() => navigate(`/admin/p/${projectId}/o/${op.id}`)}>
-                  <Td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                      <Avatar name={op.name} color={C.accent} logo={op.logo} />
-                      <div>
-                        <div style={{ fontWeight: 600 }}>{op.name}</div>
-                        <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>Hauler · {op.projectIds.length > 1 ? `${op.projectIds.length} hauls` : '1 haul'}</div>
-                      </div>
-                    </div>
-                  </Td>
-                  <Td dim mono style={{ ...T.caption }}>{op.phone}<br/>{op.email}</Td>
-                  <Td align="right" mono>{opTrucks.length}</Td>
-                  <Td align="right" mono>{opActive}</Td>
-                  <Td align="right" mono>{fmtHours(opHours)}</Td>
-                  <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
-                </Tr>
-              );
-            })}
-            <tr onClick={() => setShowAdd(true)} style={{ cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
-              onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-              <td colSpan={6} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Assign hauler to this haul</td>
-            </tr>
-          </tbody>
-        </table>
-      </Card>
-      {showAdd && <AddHaulerForm onAdd={addHauler} onCancel={() => setShowAdd(false)} />}
+    <div style={{ padding: S[6], maxWidth: 600, margin: '60px auto', textAlign: 'center', color: C.inkDim }}>
+      Redirecting to haul requests…
     </div>
-  );
-}
-
-function AddHaulerForm({ onAdd, onCancel }) {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [email, setEmail] = useState('');
-  const inputStyle = { ...T.body, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '10px 12px', borderRadius: R.sm, width: '100%', boxSizing: 'border-box' };
-  return (
-    <Card style={{ marginTop: S[4] }}>
-      <Label style={{ marginBottom: S[3] }}>Assign hauler</Label>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 2fr auto', gap: S[3], alignItems: 'flex-end' }}>
-        <div><div style={{ ...T.caption, marginBottom: 4 }}>Name</div><input value={name} onChange={e => setName(e.target.value)} placeholder="Full name" style={inputStyle} autoFocus /></div>
-        <div><div style={{ ...T.caption, marginBottom: 4 }}>Phone</div><input value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 555-1234" style={inputStyle} /></div>
-        <div><div style={{ ...T.caption, marginBottom: 4 }}>Email</div><input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="email@company.com" style={inputStyle} /></div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
-          <Btn onClick={() => { if (name) onAdd({ name, phone, email }); }} disabled={!name}>Assign hauler</Btn>
-        </div>
-      </div>
-    </Card>
   );
 }
 
@@ -5500,7 +5404,7 @@ function AdminNewProject({ db, setDb, navigate }) {
         refId: newProject.id,
       }
     ));
-    navigate('/admin/p/' + id);
+    navigate('/admin/requests?projectId=' + id);
   };
 
   const Chip = ({ active, onClick, children, warn }) => (
@@ -6739,7 +6643,7 @@ function AdminReports({ db, navigate }) {
             {sortedRows.map(r => {
               const sc = statusColor[r.status] || statusColor.active;
               return (
-                <Tr key={r.id} onClick={() => navigate(`/admin/p/${r.id}`)}>
+                <Tr key={r.id} onClick={() => navigate(`/admin/requests?projectId=${r.id}`)}>
                   <Td><span style={{ fontWeight: 600 }}>{r.name}</span></Td>
                   <Td><Pill color={sc.color} soft={sc.soft}>{sc.label}</Pill></Td>
                   <Td align="right" mono>{r.haulers}</Td>
@@ -6841,8 +6745,18 @@ function AdminReports({ db, navigate }) {
 // =====================================================================
 // Haul Requests — admin views (v3)
 // =====================================================================
-function AdminHaulRequests({ db, setDb, navigate }) {
+function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const requests = db.haulRequests || [];
+  // === Project filter, driven by `?projectId=<id>` on the hash ===
+  // Legacy `/admin/p/:projectId` URLs redirect into this list pre-filtered
+  // to that project's haul requests. The filter pill below offers a one-
+  // click way out, and AdminProjects rows now jump straight here.
+  const projectIdFilter = (() => {
+    const params = new URLSearchParams((hash || '').split('?')[1] || '');
+    const pid = params.get('projectId');
+    return pid && db.projects.some(p => p.id === pid) ? pid : null;
+  })();
+  const filterProject = projectIdFilter ? db.projects.find(p => p.id === projectIdFilter) : null;
   // === Filter / search state ===
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -6897,6 +6811,7 @@ function AdminHaulRequests({ db, setDb, navigate }) {
 
   // === Apply filters ===
   const filtered = enriched.filter(e => {
+    if (projectIdFilter && e.r.projectId !== projectIdFilter) return false;
     if (statusFilter !== 'all' && e.r.status !== statusFilter) return false;
     if (materialFilter !== 'all' && e.r.materialCode !== materialFilter) return false;
     if (priorityFilter !== 'all' && e.priority !== priorityFilter) return false;
@@ -7061,6 +6976,25 @@ function AdminHaulRequests({ db, setDb, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
+      {filterProject && (
+        <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+          <div style={{
+            ...T.bodySm, display: 'inline-flex', alignItems: 'center', gap: S[2],
+            padding: '6px 12px', borderRadius: R.pill,
+            background: C.accentSoft, color: C.accent,
+            border: `1px solid ${C.accent}`,
+          }}>
+            <span style={{ fontFamily: F.mono, fontSize: 11, letterSpacing: 0.4, textTransform: 'uppercase', opacity: 0.85 }}>Filtered by haul</span>
+            <span style={{ fontWeight: 700 }}>{filterProject.name}</span>
+            <button
+              type="button"
+              onClick={() => navigate('/admin/requests')}
+              aria-label="Clear haul filter"
+              style={{ background: 'transparent', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}
+            >&times;</button>
+          </div>
+        </div>
+      )}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 6 }}>
@@ -10445,7 +10379,7 @@ function AdminActivity({ db, setDb, navigate }) {
     }
     if (id.startsWith('ld-')) {
       const ld = db.loads.find(l => l.id === id);
-      if (ld && ld.projectId) { navigate('/admin/p/' + ld.projectId); return; }
+      if (ld && ld.projectId) { navigate('/admin/requests?projectId=' + ld.projectId); return; }
       return;
     }
     if (id.startsWith('dr-')) {
@@ -10454,7 +10388,7 @@ function AdminActivity({ db, setDb, navigate }) {
     }
     // Project codes are uppercase letters/digits without a known prefix.
     if (/^[A-Z0-9]{2,6}$/.test(id) && db.projects.some(p => p.id === id)) {
-      navigate('/admin/p/' + id); return;
+      navigate('/admin/requests?projectId=' + id); return;
     }
   };
 
@@ -10802,7 +10736,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
@@ -10812,7 +10746,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 5 && parts[1] === 'trucks'  && parts[2] === 'new' && parts[3] === 'for' && <AdminNewTruck db={db} setDb={setDb} navigate={navigate} prefillHaulerId={parts[4]} />}
           {parts.length === 3 && parts[1] === 'drivers' && parts[2] === 'new' && <AdminNewDriver db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] !== 'new' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
-          {parts.length === 3 && parts[1] === 'p' && <AdminProject projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'p' && <HaulProjectRedirect projectId={parts[2]} navigate={navigate} />}
           {parts.length === 5 && parts[3] === 'o' && <HaulerProject haulerId={parts[4]} projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} viewer="admin" />}
           {parts.length === 7 && parts[5] === 't' && <HaulerTruckView haulerId={parts[4]} projectId={parts[2]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} viewer="admin" />}
         </main>
@@ -10997,8 +10931,8 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
   const crumbs = isAdmin
     ? [
         { label: 'Admin', to: '/admin' },
-        { label: 'Hauls', to: '/admin' },
-        { label: project.name, to: `/admin/p/${projectId}` },
+        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name },
       ]
     : [
@@ -11096,8 +11030,8 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   const crumbs = isAdmin
     ? [
         { label: 'Admin', to: '/admin' },
-        { label: 'Hauls', to: '/admin' },
-        { label: project.name, to: `/admin/p/${projectId}` },
+        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name, to: `/admin/p/${projectId}/o/${haulerId}` },
         { label: `Truck #${truck.plate}` },
       ]
