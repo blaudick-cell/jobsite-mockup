@@ -4230,23 +4230,33 @@ function AdminProjects({ db, setDb, navigate }) {
       return { id: 'proj-' + p.id, type: 'project', coord: c, label: p.name + ' · ' + (p.gc || ''), status: p.status || 'active' };
     }).filter(Boolean);
 
-    // v17: per-project OSRM driving routes. Each project carries explicit
-    // `pickupLocation` + `dumpLocation` address strings; the map renders the
-    // OSRM-fetched polyline if cached, otherwise a straight line as fallback
-    // until OSRM completes. Status colors per project status.
-    const projectRoutes = (db.projects || []).map(p => {
-      const pickAddr = p.pickupLocation;
-      const dumpAddr = p.dumpLocation;
+    // v24: per-haul-REQUEST OSRM driving routes (replaces per-project routes).
+    // Each req carries its own pickupLocation.address / dropoffLocation.address;
+    // those addresses fall back to the parent project's pickupLocation /
+    // dumpLocation if the req hasn't been customized yet. Filter drops
+    // completed + closed hauls so the map only reflects work in flight.
+    // Color is driven by req status: 'pending' -> red, anything else (open /
+    // matched / accepted / active / approved / upcoming) -> green.
+    const reqRoutes = (db.haulRequests || []).map(req => {
+      if (!req) return null;
+      if (req.status === 'completed' || req.status === 'closed') return null;
+      const proj = (db.projects || []).find(p => p.id === req.projectId) || null;
+      const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
+      const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
       if (!pickAddr || !dumpAddr) return null;
       const key = pickAddr + '|' + dumpAddr;
       const cached = routesCache[key];
       const pick = resolveCoord(pickAddr);
       const dump = resolveCoord(dumpAddr);
+      const isPending = req.status === 'pending';
+      const reqStatus = isPending ? 'pending' : 'active';
+      const lineId = req.id;
+      const label = (proj ? proj.name : '') + ' · ' + (req.volumeCY != null ? req.volumeCY + ' CY' : '');
       if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
-        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: p.address };
+        return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
       }
       if (pick && dump) {
-        return { id: p.id, status: p.status || 'active', label: p.name, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: p.address };
+        return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
       }
       return null;
     }).filter(Boolean);
@@ -4255,7 +4265,7 @@ function AdminProjects({ db, setDb, navigate }) {
     // address pair. Per Robert: drop the marker for the endpoint that IS the
     // project's own address — only the "other" endpoint (the off-site haul
     // address) should get a pin. The polyline still draws between BOTH
-    // endpoints (it reads from `projectRoutes`, not this list). Normalize
+    // endpoints (it reads from `reqRoutes`, not this list). Normalize
     // address strings for the comparison so trailing whitespace / casing
     // edits later don't reintroduce the self-pin.
     // Dedupe by coord so two projects sharing an off-site address don't
@@ -4263,15 +4273,15 @@ function AdminProjects({ db, setDb, navigate }) {
     const norm = s => (s || '').trim().toLowerCase();
     const projectEndpoints = [];
     const seenEndpoint = new Set();
-    projectRoutes.forEach(rt => {
+    reqRoutes.forEach(rt => {
       const projN = norm(rt.projectAddress);
       if (rt.pick && norm(rt.pickAddr) !== projN) {
         const k = rt.pickAddr;
-        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.status }); }
+        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.reqStatus }); }
       }
       if (rt.dump && norm(rt.dumpAddr) !== projN) {
         const k = rt.dumpAddr;
-        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.status }); }
+        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.reqStatus }); }
       }
     });
 
@@ -4279,7 +4289,9 @@ function AdminProjects({ db, setDb, navigate }) {
     // coord list grows (e.g., OSRM completed and replaced the 2-pt straight
     // line with a 200-pt driving polyline). Triggers map.getSource().setData()
     // without recreating the map.
-    const routesSignature = projectRoutes.map(rt => rt.key + '#' + rt.coords.length + (rt.isStraight ? 's' : 'o')).join('|');
+    // v24: signature now also includes reqStatus so a pending->active flip
+    // (or vice versa) triggers a re-paint with the correct color.
+    const routesSignature = reqRoutes.map(rt => rt.id + ':' + rt.reqStatus + ':' + rt.key + '#' + rt.coords.length + (rt.isStraight ? 's' : 'o')).join('|');
 
     // Stable signature for the MARKERS effect: changes when the set of
     // endpoints (or their coords) changes. Drives reconciliation of marker
@@ -4303,50 +4315,69 @@ function AdminProjects({ db, setDb, navigate }) {
     // Pending-route signature for the ASYNC-FETCH effect: changes when the set
     // of un-cached project routes changes. Used as a deps array so the effect
     // doesn't loop after a successful fetch.
-    const pendingKey = (db.projects || [])
-      .filter(p => p.pickupLocation && p.dumpLocation && !routesCache[p.pickupLocation + '|' + p.dumpLocation])
-      .map(p => p.pickupLocation + '|' + p.dumpLocation)
-      .join(',');
+    // v24: pendingKey now scans haul REQUESTS for un-cached routes.
+    const pendingKey = (() => {
+      const keys = new Set();
+      (db.haulRequests || []).forEach(req => {
+        if (!req || req.status === 'completed' || req.status === 'closed') return;
+        const proj = (db.projects || []).find(p => p.id === req.projectId);
+        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
+        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+        if (!pickAddr || !dumpAddr) return;
+        const k = pickAddr + '|' + dumpAddr;
+        if (!routesCache[k]) keys.add(k);
+      });
+      return Array.from(keys).join(',');
+    })();
 
-    // Async fetch: for each project whose route isn't cached yet, geocode any
-    // missing endpoint via Nominatim, then call OSRM. Each successful step
-    // writes back via setDb so the map's source data updates on next render.
-    // Cancelled on unmount via the `cancelled` flag.
+    // Async fetch: for each request whose route isn't cached yet, geocode
+    // missing endpoints via Nominatim, then call OSRM. Writes back via setDb
+    // so the map's source data updates on next render. Cancelled on unmount.
     useEffect(() => {
       if (!mlAvailable) return undefined;
       if (!pendingKey) return undefined;
       let cancelled = false;
       (async () => {
-        const projects = (db.projects || []).filter(p => p.pickupLocation && p.dumpLocation);
-        for (const p of projects) {
+        const seen = new Set();
+        const pairs = [];
+        (db.haulRequests || []).forEach(req => {
+          if (!req || req.status === 'completed' || req.status === 'closed') return;
+          const proj = (db.projects || []).find(p => p.id === req.projectId);
+          const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
+          const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+          if (!pickAddr || !dumpAddr) return;
+          const k = pickAddr + '|' + dumpAddr;
+          if (seen.has(k)) return;
+          seen.add(k);
+          pairs.push({ pickAddr, dumpAddr, k });
+        });
+        for (const pair of pairs) {
           if (cancelled) return;
-          const key = p.pickupLocation + '|' + p.dumpLocation;
-          if ((db.routes || {})[key]) continue;
-          // Geocode endpoints if missing
-          let pick = (db.geocode || {})[p.pickupLocation];
-          let dump = (db.geocode || {})[p.dumpLocation];
+          if ((db.routes || {})[pair.k]) continue;
+          let pick = (db.geocode || {})[pair.pickAddr];
+          let dump = (db.geocode || {})[pair.dumpAddr];
           if (!pick) {
-            const g = await geocodeAddress(p.pickupLocation);
+            const g = await geocodeAddress(pair.pickAddr);
             if (cancelled) return;
-            if (g) { pick = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.pickupLocation]: g } })); }
+            if (g) { pick = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pair.pickAddr]: g } })); }
           }
           if (!dump) {
-            const g = await geocodeAddress(p.dumpLocation);
+            const g = await geocodeAddress(pair.dumpAddr);
             if (cancelled) return;
-            if (g) { dump = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [p.dumpLocation]: g } })); }
+            if (g) { dump = g; setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [pair.dumpAddr]: g } })); }
           }
           if (!pick || !dump) continue;
           const route = await fetchOSRMDrivingRoute(pick, dump);
           if (cancelled) return;
           if (route) {
-            setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [key]: route } }));
+            setDb(prev => ({ ...prev, routes: { ...(prev.routes || {}), [pair.k]: route } }));
           }
         }
       })();
       return () => { cancelled = true; };
     }, [mlAvailable, pendingKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Source-data update effect: whenever projectRoutes changes (OSRM completed,
+    // Source-data update effect: whenever reqRoutes changes (OSRM completed,
     // turning straight lines into real road geometry), push the new GeoJSON to
     // the existing source rather than recreating the map.
     //
@@ -4361,9 +4392,9 @@ function AdminProjects({ db, setDb, navigate }) {
           if (cancelled) return;
           const src = mapRef.current.getSource && mapRef.current.getSource('routes');
           if (!src) return;
-          const features = projectRoutes.map(rt => ({
+          const features = reqRoutes.map(rt => ({
             type: 'Feature',
-            properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
+            properties: { id: rt.id, reqId: rt.reqId, projectId: rt.projectId, reqStatus: rt.reqStatus, isStraight: !!rt.isStraight },
             geometry: { type: 'LineString', coordinates: rt.coords },
           }));
           try { src.setData({ type: 'FeatureCollection', features }); } catch (e) { /* ignore */ }
@@ -4516,20 +4547,19 @@ function AdminProjects({ db, setDb, navigate }) {
         // block subsequent layers OR the marker creation that follows.
         // Previous bug: routes-lines threw on data-expression dasharray and
         // markers never got added because the exception escaped this callback.
-        const routeFeatures = projectRoutes.map(rt => ({
+        const routeFeatures = reqRoutes.map(rt => ({
           type: 'Feature',
-          properties: { id: rt.id, status: rt.status, isStraight: !!rt.isStraight },
+          properties: { id: rt.id, reqId: rt.reqId, projectId: rt.projectId, reqStatus: rt.reqStatus, isStraight: !!rt.isStraight },
           geometry: { type: 'LineString', coordinates: rt.coords },
         }));
         try {
           map.addSource('routes', { type: 'geojson', data: { type: 'FeatureCollection', features: routeFeatures } });
         } catch (e) { /* source exists or addSource failed */ }
-        const statusColor = ['match', ['get', 'status'],
-          'active',    '#B3E635',
-          'upcoming',  '#5AAEFF',
-          'delayed',   '#FF6B47',
-          'completed', '#9A9A9A',
-          /* default */ '#B3E635',
+        // v24: color by req status. 'pending' -> red, everything else
+        // (we already filtered completed/closed) -> green.
+        const statusColor = ['match', ['get', 'reqStatus'],
+          'pending', '#FF6B47',
+          /* default (active) */ '#B3E635',
         ];
         // Dark casing — sits under the colored route line for highway-shield depth.
         try { map.addLayer({
@@ -4565,7 +4595,7 @@ function AdminProjects({ db, setDb, navigate }) {
         try {
           const b = new window.maplibregl.LngLatBounds();
           let extended = false;
-          projectRoutes.forEach(rt => {
+          reqRoutes.forEach(rt => {
             rt.coords.forEach(c => { b.extend(c); extended = true; });
           });
           projectEndpoints.forEach(p => { b.extend([p.coord.lng, p.coord.lat]); extended = true; });
@@ -4587,48 +4617,54 @@ function AdminProjects({ db, setDb, navigate }) {
             try {
               const f = ev.features && ev.features[0];
               if (!f) return;
-              const projId = f.properties && f.properties.id;
-              const proj = (db && db.projects ? db.projects : []).find(p => p.id === projId);
-              if (!proj) return;
-              // Derive HAS/NEEDS colors (mirror HasNeedsPill at raw-DOM level
-              // since the popup is rendered outside React).
-              const isNeeds = proj.haulType !== 'HAS';
+              // v24: features now carry reqId (specific haul request).
+              const reqId = (f.properties && (f.properties.reqId || f.properties.id)) || null;
+              const projId = f.properties && f.properties.projectId;
+              const req = reqId ? (db && db.haulRequests ? db.haulRequests : []).find(r => r.id === reqId) : null;
+              const proj = projId ? (db && db.projects ? db.projects : []).find(p => p.id === projId) : null;
+              if (!req && !proj) return;
+              const haulType = proj ? proj.haulType : 'NEEDS';
+              const isNeeds = haulType !== 'HAS';
               const pillColor = isNeeds ? '#B3E635' : '#FF6B47';
               const pillSoft  = isNeeds ? 'rgba(179, 230, 53, 0.10)' : 'rgba(255, 107, 71, 0.08)';
               const pillLabel = isNeeds ? 'NEEDS' : 'HAS';
-              // Material label — resolve from project.material[0] if MATERIALS
-              // catalog is available at runtime, else fall back to the code.
               let matLabel = 'Material';
               try {
-                const code = Array.isArray(proj.material) ? proj.material[0] : proj.material;
+                const code = (req && req.materialCode) || (proj && (Array.isArray(proj.material) ? proj.material[0] : proj.material));
                 const found = (typeof MATERIALS !== 'undefined' && MATERIALS) ? MATERIALS.find(m => m.code === code) : null;
                 matLabel = found ? found.label : (code || matLabel);
               } catch (e) { /* keep fallback */ }
-              const qtyStr = proj.volumeCYNeeded != null ? Number(proj.volumeCYNeeded).toLocaleString() + ' CY of ' + matLabel : matLabel;
+              const qty = (req && req.volumeCY != null) ? req.volumeCY : (proj && proj.volumeCYNeeded);
+              const qtyStr = qty != null ? Number(qty).toLocaleString() + ' CY of ' + matLabel : matLabel;
               // Build the widget element. Inline styles only — MapLibre's
               // popup container reparents into a non-React DOM tree.
               const el = document.createElement('div');
               el.setAttribute('role', 'link');
               el.setAttribute('tabindex', '0');
               el.style.cssText = 'cursor:pointer;min-width:240px;max-width:300px;padding:10px 12px;background:#141414;border-radius:8px;border:1px solid #2A2A2A;color:#fff;font-family:Inter,sans-serif;line-height:1.35;';
+              const escape = (s) => (s || '').toString().replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+              const heading = proj ? proj.name : (req ? ('Haul ' + req.id) : 'Haul Request');
+              const subhead = proj ? proj.gc : '';
               el.innerHTML = ''
-                + '<div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:-0.2px;">' + (proj.name || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>'
-                + '<div style="font-size:12px;color:#9A9A9A;margin-top:2px;">' + (proj.gc || '').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</div>'
+                + '<div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:-0.2px;">' + escape(heading) + '</div>'
+                + (subhead ? '<div style="font-size:12px;color:#9A9A9A;margin-top:2px;">' + escape(subhead) + '</div>' : '')
                 + '<div style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap;">'
                 +   '<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:' + pillSoft + ';color:' + pillColor + ';font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;line-height:1.1;">' + pillLabel + '</span>'
-                +   '<span style="font-size:13px;font-weight:600;color:#fff;">' + qtyStr.replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c])) + '</span>'
+                +   '<span style="font-size:13px;font-weight:600;color:#fff;">' + escape(qtyStr) + '</span>'
                 + '</div>'
                 + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul request &rsaquo;</div>';
+              // v24: navigate to the SPECIFIC haul request page.
+              const target = reqId ? ('/admin/requests/' + reqId) : (projId ? ('/admin/requests?projectId=' + projId) : '/admin/requests');
               el.addEventListener('click', (clickEv) => {
                 clickEv.stopPropagation();
                 try { popup.remove(); } catch (e) {}
-                try { navigate('/admin/requests?projectId=' + projId); } catch (e) {}
+                try { navigate(target); } catch (e) {}
               });
               el.addEventListener('keydown', (kev) => {
                 if (kev.key === 'Enter' || kev.key === ' ') {
                   kev.preventDefault();
                   try { popup.remove(); } catch (e) {}
-                  try { navigate('/admin/requests?projectId=' + projId); } catch (e) {}
+                  try { navigate(target); } catch (e) {}
                 }
               });
               const popup = new window.maplibregl.Popup({ offset: 12, closeButton: true, className: 'lom-route-popup', maxWidth: '320px' })
@@ -4661,10 +4697,10 @@ function AdminProjects({ db, setDb, navigate }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
           <Label color={C.accent}>Live operations map</Label>
           <span style={{ ...T.caption, color: C.inkDim }}>
-            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {projectRoutes.length} route{projectRoutes.length === 1 ? '' : 's'} {(() => {
-              const osrm = projectRoutes.filter(r => !r.isStraight).length;
-              const totalMeters = projectRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
-              const totalMinutes = projectRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
+            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {reqRoutes.length} haul{reqRoutes.length === 1 ? '' : 's'} ({reqRoutes.filter(r => r.isPending).length} pending) {(() => {
+              const osrm = reqRoutes.filter(r => !r.isStraight).length;
+              const totalMeters = reqRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
+              const totalMinutes = reqRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
               if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
               return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
             })()}
