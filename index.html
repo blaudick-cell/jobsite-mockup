@@ -8016,19 +8016,29 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
-      {/* v18: Project & contractor — surfaces the data shown on the list-row
-          (project name + GC + contact) that was missing from the detail view.
-          Contractor = requester (project.gc + project.contactName/Phone/Email).
-          Hauler block surfaces only when at least one truck is assigned (it
-          de-dupes haulers across assignments since trucks may come from
-          different haulers on the same haul). */}
+      {/* v20: Combined HAUL REQUEST tile — collapses Project & contractor /
+          Haul Request / Logistics into one Card with an Edit-mode gateway.
+          Read-only by default; "Edit" up top reveals all editable
+          affordances simultaneously and surfaces the danger Delete button
+          at the bottom. Done exits edit mode (saves are already incremental
+          via updateLogistics). MARKER: v20-haul-detail-combined-tile */}
       <Card style={{ marginBottom: S[5] }}>
-        <div style={{ marginBottom: S[4] }}>
-          <Label color={C.accent}>Project & contractor</Label>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], marginBottom: S[4] }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Label color={C.accent}>Haul Request</Label>
+            {isEditing && (
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Click any value to edit. Changes save as you go.</div>
+            )}
+          </div>
+          <Btn variant="secondary" size="sm" onClick={() => setIsEditing(v => !v)}>
+            {isEditing ? 'Done' : 'Edit'}
+          </Btn>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5] }}>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Project</Label>
+
+        {/* ── PROJECT (always read-only) ── */}
+        <div>
+          <Label color={C.inkDim}>Project</Label>
+          <div style={{ marginTop: S[2] }}>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
               {project ? project.name : '—'}
             </div>
@@ -8036,8 +8046,12 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               {project ? (project.address || '—') : '—'}
             </div>
           </div>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Contractor (requester)</Label>
+        </div>
+
+        {/* ── CONTRACTOR (always read-only) ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Contractor (requester)</Label>
+          <div style={{ marginTop: S[2] }}>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
               {project && project.gc ? project.gc : '—'}
             </div>
@@ -8069,176 +8083,260 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             const haulers = Array.from(haulerIds).map(id => db.haulers.find(h => h.id === id)).filter(Boolean);
             if (haulers.length === 0) return null;
             return (
-              <div>
-                <Label style={{ marginBottom: S[2] }}>Hauler{haulers.length > 1 ? 's' : ''} (fulfilling)</Label>
-                {haulers.map(h => (
-                  <div key={h.id} style={{ marginBottom: S[3] }}>
-                    <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{h.name}</div>
-                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
-                      <span>{h.contact || '—'}</span>
-                      {h.phone ? (
-                        <a href={'tel:' + h.phone}
-                          style={{ color: C.inkDim, textDecoration: 'none' }}
-                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                          ☎ {h.phone}
-                        </a>
-                      ) : null}
-                      {h.email ? (
-                        <a href={'mailto:' + h.email}
-                          style={{ color: C.inkDim, textDecoration: 'none' }}
-                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                          ✉ {h.email}
-                        </a>
-                      ) : null}
+              <div style={{ marginTop: S[4] }}>
+                <Label color={C.inkDim}>Hauler{haulers.length > 1 ? 's' : ''} (fulfilling)</Label>
+                <div style={{ marginTop: S[2] }}>
+                  {haulers.map(h => (
+                    <div key={h.id} style={{ marginBottom: S[3] }}>
+                      <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{h.name}</div>
+                      <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
+                        <span>{h.contact || '—'}</span>
+                        {h.phone ? (
+                          <a href={'tel:' + h.phone}
+                            style={{ color: C.inkDim, textDecoration: 'none' }}
+                            onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                            ☎ {h.phone}
+                          </a>
+                        ) : null}
+                        {h.email ? (
+                          <a href={'mailto:' + h.email}
+                            style={{ color: C.inkDim, textDecoration: 'none' }}
+                            onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
+                            ✉ {h.email}
+                          </a>
+                        ) : null}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             );
           })()}
         </div>
-      </Card>
 
-      {/* Request summary. v18: overall completion gauge moved here from the
-          per-truck assignment cards — each truck contributes to the haul's
-          total, so the percentage belongs at the haul level.
-          v19: moved up to sit directly below Project & contractor so the
-          status pill + total-delivered gauge are visible above the fold. */}
-      <Card style={{ marginBottom: S[5] }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
-          <div style={{ flex: 1, minWidth: 240 }}>
-            <Label color={C.accent} style={{ marginBottom: S[3] }}>Haul Request</Label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
-              <input type="number" min="1" step="1"
-                value={req.volumeCY == null ? '' : req.volumeCY}
-                onChange={e => {
-                  const raw = e.target.value;
-                  if (raw === '') return;
-                  const n = parseFloat(raw);
-                  if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
-                    updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
-                  }
-                }}
-                aria-label="Quantity in cubic yards"
-                title="Click to edit quantity"
-                style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, fontFamily: F.mono, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 96, textAlign: 'center', boxSizing: 'border-box' }} />
-              <span style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>CY of</span>
-              <MaterialField value={req.materialCode}
-                onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
-                style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, fontFamily: F.display, padding: '2px 8px', minWidth: 0 }} />
+        {/* ── HAUL (qty + material; edit-mode swaps plain text for inputs) ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Haul</Label>
+          <div style={{ marginTop: S[2], display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 240 }}>
+              {isEditing ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
+                  <input type="number" min="1" step="1"
+                    value={req.volumeCY == null ? '' : req.volumeCY}
+                    onChange={e => {
+                      const raw = e.target.value;
+                      if (raw === '') return;
+                      const n = parseFloat(raw);
+                      if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                        updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                      }
+                    }}
+                    aria-label="Quantity in cubic yards"
+                    title="Click to edit quantity"
+                    style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, fontFamily: F.mono, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 96, textAlign: 'center', boxSizing: 'border-box' }} />
+                  <span style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>CY of</span>
+                  <MaterialField value={req.materialCode}
+                    onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
+                    style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, fontFamily: F.display, padding: '2px 8px', minWidth: 0 }} />
+                </div>
+              ) : (
+                <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, margin: 0 }}>
+                  {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
+                </div>
+              )}
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
+                {project ? project.name : '—'} · requested at {req.requestedAt}
+              </div>
+              {req.notes && (
+                <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
+                  {req.notes}
+                </div>
+              )}
             </div>
-            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-              {project ? project.name : '—'} · requested at {req.requestedAt}
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
+              <StatusPill status={req.status} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
+                  <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
+                    {totalDeliveredCY} / {req.volumeCY} CY
+                  </div>
+                  <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
+                    {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
+                  </div>
+                </div>
+                <Donut pct={overallPct} size={88} stroke={9} />
+              </div>
             </div>
-            {req.notes && (
-              <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
-                {req.notes}
+          </div>
+        </div>
+
+        {/* ── PICKUP LOCATION ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Pickup location</Label>
+          <div style={{ marginTop: S[2] }}>
+            {isEditing ? (
+              <>
+                <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+                  <EditableText value={pickup.name}
+                    placeholder="Site or yard name…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
+                </div>
+                <div style={{ ...T.bodySm, color: C.inkDim }}>
+                  <AddressAutocomplete value={pickup.address}
+                    placeholder="Start typing a street address…"
+                    db={db} setDb={setDb}
+                    onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
+                </div>
+              </>
+            ) : (() => {
+              const cached = (db && db.geocode && db.geocode[pickup.address]) || null;
+              const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
+              return (
+                <>
+                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{pickup.name || '—'}</div>
+                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                    <span>{pickup.address || '—'}</span>
+                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 11 }}>✓ verified</span>}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* ── DROPOFF LOCATION ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Dropoff location</Label>
+          <div style={{ marginTop: S[2] }}>
+            {isEditing ? (
+              <>
+                <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+                  <EditableText value={dropoff.name}
+                    placeholder="Site or yard name…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
+                </div>
+                <div style={{ ...T.bodySm, color: C.inkDim }}>
+                  <AddressAutocomplete value={dropoff.address}
+                    placeholder="Start typing a street address…"
+                    db={db} setDb={setDb}
+                    onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
+                </div>
+              </>
+            ) : (() => {
+              const cached = (db && db.geocode && db.geocode[dropoff.address]) || null;
+              const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
+              return (
+                <>
+                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{dropoff.name || '—'}</div>
+                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                    <span>{dropoff.address || '—'}</span>
+                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 11 }}>✓ verified</span>}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+        </div>
+
+        {/* ── TIMING ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Timing</Label>
+          <div style={{ marginTop: S[2] }}>
+            {isEditing ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                <input type="date" value={timing.startDate}
+                  onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
+                  style={dateInputStyle} />
+                <span style={{ ...T.bodySm, color: C.inkFaint }}>→</span>
+                <input type="date" value={timing.endDate}
+                  onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
+                  min={timing.startDate || undefined}
+                  style={dateInputStyle} />
+                <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2] }}>{timingDisplay}</span>
+              </div>
+            ) : (
+              <div style={{ ...T.body, color: C.ink }}>
+                {timing.startDate
+                  ? (timing.endDate
+                      ? `${fmtTimingISO(timing.startDate)} → ${fmtTimingISO(timing.endDate)}`
+                      : fmtTimingISO(timing.startDate))
+                  : <span style={{ color: C.inkFaint }}>Not set</span>}
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
-            <StatusPill status={req.status} />
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
-                <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
-                  {totalDeliveredCY} / {req.volumeCY} CY
+        </div>
+
+        {/* ── SITE ACCESS — LOADING ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Site access — loading</Label>
+          <div style={{ marginTop: S[2] }}>
+            {isEditing ? (
+              <>
+                <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+                  <EditableText value={loading.notes} multiline
+                    placeholder="Loading site notes…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, notes: v }, dumping } }), 'loading site notes')} />
                 </div>
-                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
-                  {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
+                <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's loading the haul</div>
+                <div style={{ ...T.bodySm, color: C.ink }}>
+                  <EditableText value={loading.equipment}
+                    placeholder="Equipment / loader…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, equipment: v }, dumping } }), 'loading equipment')} />
                 </div>
-              </div>
-              <Donut pct={overallPct} size={88} stroke={9} />
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      {/* Logistics details (v12) — pickup, dropoff, timing, and loading/dumping site access. */}
-      <Card style={{ marginBottom: S[5] }}>
-        <div style={{ marginBottom: S[4] }}>
-          <Label color={C.accent}>Logistics</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Click any value to edit.</div>
-        </div>
-
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5], marginBottom: S[5] }}>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Pickup location</Label>
-            <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
-              <EditableText value={pickup.name}
-                placeholder="Site or yard name…"
-                onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
-            </div>
-            <div style={{ ...T.bodySm, color: C.inkDim }}>
-              <AddressAutocomplete value={pickup.address}
-                placeholder="Start typing a street address…"
-                db={db} setDb={setDb}
-                onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
-            </div>
-          </div>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Dropoff location</Label>
-            <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
-              <EditableText value={dropoff.name}
-                placeholder="Site or yard name…"
-                onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
-            </div>
-            <div style={{ ...T.bodySm, color: C.inkDim }}>
-              <AddressAutocomplete value={dropoff.address}
-                placeholder="Start typing a street address…"
-                db={db} setDb={setDb}
-                onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
-            </div>
+              </>
+            ) : (() => {
+              const hasAny = loading.notes || loading.equipment;
+              if (!hasAny) return <div style={{ ...T.bodySm, color: C.inkFaint }}>—</div>;
+              return (
+                <>
+                  {loading.notes && <div style={{ ...T.bodySm, color: C.ink, whiteSpace: 'pre-wrap' }}>{loading.notes}</div>}
+                  {loading.equipment && <div style={{ ...T.bodySm, color: C.inkDim, marginTop: loading.notes ? 4 : 0 }}>{loading.equipment}</div>}
+                </>
+              );
+            })()}
           </div>
         </div>
 
-        <div style={{ marginBottom: S[5] }}>
-          <Label style={{ marginBottom: S[2] }}>Timing</Label>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-            <input type="date" value={timing.startDate}
-              onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
-              style={dateInputStyle} />
-            <span style={{ ...T.bodySm, color: C.inkFaint }}>→</span>
-            <input type="date" value={timing.endDate}
-              onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
-              min={timing.startDate || undefined}
-              style={dateInputStyle} />
-            <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2] }}>{timingDisplay}</span>
+        {/* ── SITE ACCESS — DUMPING ── */}
+        <div style={{ marginTop: S[5] }}>
+          <Label color={C.inkDim}>Site access — dumping</Label>
+          <div style={{ marginTop: S[2] }}>
+            {isEditing ? (
+              <>
+                <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+                  <EditableText value={dumping.notes} multiline
+                    placeholder="Dump site notes…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, notes: v } } }), 'dump site notes')} />
+                </div>
+                <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's needed at the dump site</div>
+                <div style={{ ...T.bodySm, color: C.ink }}>
+                  <EditableText value={dumping.equipment}
+                    placeholder="Equipment / spotter…"
+                    onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, equipment: v } } }), 'dump site equipment')} />
+                </div>
+              </>
+            ) : (() => {
+              const hasAny = dumping.notes || dumping.equipment;
+              if (!hasAny) return <div style={{ ...T.bodySm, color: C.inkFaint }}>—</div>;
+              return (
+                <>
+                  {dumping.notes && <div style={{ ...T.bodySm, color: C.ink, whiteSpace: 'pre-wrap' }}>{dumping.notes}</div>}
+                  {dumping.equipment && <div style={{ ...T.bodySm, color: C.inkDim, marginTop: dumping.notes ? 4 : 0 }}>{dumping.equipment}</div>}
+                </>
+              );
+            })()}
           </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5] }}>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Site access — loading</Label>
-            <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
-              <EditableText value={loading.notes} multiline
-                placeholder="Loading site notes…"
-                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, notes: v }, dumping } }), 'loading site notes')} />
-            </div>
-            <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's loading the haul</div>
-            <div style={{ ...T.bodySm, color: C.ink }}>
-              <EditableText value={loading.equipment}
-                placeholder="Equipment / loader…"
-                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, equipment: v }, dumping } }), 'loading equipment')} />
-            </div>
+        {/* ── DELETE (edit mode only) ── */}
+        {isEditing && (
+          <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: S[4], marginTop: S[5] }}>
+            <Btn variant="danger" size="sm" onClick={deleteHaulRequest}>Delete this haul request</Btn>
           </div>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Site access — dumping</Label>
-            <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
-              <EditableText value={dumping.notes} multiline
-                placeholder="Dump site notes…"
-                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, notes: v } } }), 'dump site notes')} />
-            </div>
-            <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's needed at the dump site</div>
-            <div style={{ ...T.bodySm, color: C.ink }}>
-              <EditableText value={dumping.equipment}
-                placeholder="Equipment / spotter…"
-                onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, equipment: v } } }), 'dump site equipment')} />
-            </div>
-          </div>
-        </div>
+        )}
       </Card>
 
       {/* Route preview — mini-map + drive time + tandem throughput estimate */}
