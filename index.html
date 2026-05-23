@@ -7295,7 +7295,7 @@ function AdminHaulRequestCreate({ db, setDb, navigate }) {
             <select value={projectId} onChange={e => setProjectId(e.target.value)} style={fInputStyle}>
               {projects.length === 0 && <option value="">— no projects —</option>}
               {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name} ({p.code}) — {p.gc || '—'}</option>
+                <option key={p.id} value={p.id}>{p.name} — {p.gc || '—'}</option>
               ))}
             </select>
           </div>
@@ -7893,9 +7893,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             <Label style={{ marginBottom: S[2] }}>Project</Label>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
               {project ? project.name : '—'}
-              {project && project.code ? (
-                <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2], fontWeight: 400 }}>· {project.code}</span>
-              ) : null}
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>
               {project ? (project.address || '—') : '—'}
@@ -10067,7 +10064,7 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
             <Label style={{ marginBottom: S[2] }}>Haul request</Label>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{project ? project.name : '—'}</div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
-              {req ? <>Haul #{req.id.slice(5)} · {req.volumeCY} CY requested<br /></> : null}
+              {req ? <>{req.volumeCY} CY requested<br /></> : null}
               {req && req.pickupLocation && req.pickupLocation.address ? <>Pickup: {req.pickupLocation.address}<br /></> : null}
               {req && req.dropoffLocation && req.dropoffLocation.address ? <>Dropoff: {req.dropoffLocation.address}</> : null}
             </div>
