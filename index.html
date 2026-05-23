@@ -8860,135 +8860,271 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             const aHauler = db.haulers.find(h => h.id === a.haulerId);
             const truckCY = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
             const isAddingDay = addingDayFor === a.truckId;
+            // v29-TRUCK-KPI: per-assignment KPI metadata. hours are NOT
+            // tracked per load — daily d.hours is the billing source of truth
+            // (Start to finish elapsed time); dollars derive from h × rate.
+            const typeMeta = TRUCK_TYPES.find(x => x.code === (t && t.type)) || null;
+            const hourlyRate = (t && t.ratePerHour != null)
+              ? t.ratePerHour
+              : ((t && db.rates && db.rates[t.type]) || (typeMeta && typeMeta.rate) || 0);
+            const totalHoursForTruck = a.days.reduce((s, dd) => s + (typeof dd.hours === 'number' ? dd.hours : 0), 0);
+            const totalDollarsForTruck = totalHoursForTruck * hourlyRate;
+            const todayDay = a.days.find(dd => isToday(dd.date)) || null;
+            const todayStart = todayDay ? (todayDay.startTime || '—') : '—';
+            const sortedDays = [...a.days].sort((x, y) => (y.date || '').localeCompare(x.date || ''));
+            const fmtUSD = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             return (
-              <Card key={a.truckId} padding={S[4]}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[3] }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>
-                      #{t ? t.plate : a.truckId} <span style={{ ...T.bodySm, color: C.inkFaint, marginLeft: 4, fontWeight: 500 }}>{t ? t.type : ''}</span>
+                  <Card key={a.truckId} padding={S[4]}>
+                    {/* Truck header row — title + close button */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: S[2] }}>
+                      <span aria-hidden="true" style={{
+                        width: 28, height: 28, borderRadius: R.sm,
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 16, flexShrink: 0,
+                      }}>🚚</span>
+                      <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3, minWidth: 0 }}>
+                        #{t ? t.plate : a.truckId}
+                      </div>
+                      {t && t.type ? (
+                        <span style={{
+                          ...T.monoSm, padding: '2px 8px', borderRadius: R.sm,
+                          background: C.warnSoft, color: C.warn, fontWeight: 700, letterSpacing: 0.4,
+                        }}>{t.type}</span>
+                      ) : null}
+                      <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this haul" style={{
+                        marginLeft: 'auto',
+                        background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
+                        width: 28, height: 28, borderRadius: R.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: 18, lineHeight: 1, padding: 0,
+                      }}
+                        onMouseEnter={e => { e.currentTarget.style.color = C.warn; e.currentTarget.style.background = C.warnSoft; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
+                      >×</button>
                     </div>
-                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>{aHauler ? aHauler.name : 'unknown hauler'}</div>
-                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>{truckCY} CY delivered</div>
-                  </div>
-                  <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this haul" style={{
-                    background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                    width: 28, height: 28, borderRadius: R.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 18, lineHeight: 1, padding: 0, marginLeft: -4, marginTop: -4,
-                  }}
-                    onMouseEnter={e => { e.currentTarget.style.color = C.warn; e.currentTarget.style.background = C.warnSoft; }}
-                    onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
-                  >×</button>
-                </div>
 
-                {a.days.map(d => {
-                  const dailyCY = d.loads.reduce((s, l) => s + (l.cy || 0), 0);
-                  const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
-                  return (
-                    <div key={d.date} style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: S[2], flexWrap: 'wrap' }}>
-                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' }}>
-                          <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>
-                            {isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date)}
+                    {/* Hauler name + verified indicator */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[1], marginBottom: S[3] }}>
+                      <div style={{ ...T.bodySm, color: C.ink, fontWeight: 700 }}>{aHauler ? aHauler.name : 'Unknown hauler'}</div>
+                      <span aria-hidden="true" style={{ color: C.ok, fontSize: 12 }}>✓</span>
+                    </div>
+
+                    {/* v29: 6-card KPI strip — hauler-level totals up top so
+                        billing/operational context is one glance. Stat values
+                        are derived (never hardcoded). Mobile: auto-fit
+                        collapses to 2 columns then 1 column. */}
+                    <div style={{
+                      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                      gap: S[2], padding: S[2], border: `1px solid ${C.rule}`, borderRadius: R.md,
+                      marginBottom: S[3],
+                    }}>
+                      {/* TOTAL DELIVERED CY */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.accent}`, color: C.accent, fontSize: 14,
+                        }}>📦</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>
+                            {truckCY}<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>CY</span>
                           </div>
-                          {/* v26: startTime is now click-to-edit. */}
-                          <span style={{ ...T.monoSm, color: C.inkFaint, fontWeight: 500 }}>· start{' '}
-                            <span style={{ color: C.inkDim }}>
-                              <EditableText value={d.startTime || ''} placeholder="HH:MM"
-                                onSave={(v) => { const t = (v || '').trim(); if (t !== d.startTime) updateDay(a.truckId, d.date, { startTime: t }); }} />
-                            </span>
-                          </span>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                          {/* v26: hours per day — click-to-edit. Stored on the
-                              day object inside the JSON assignments array, so
-                              no schema migration required. */}
-                          <div style={{ ...T.monoSm, color: C.inkDim, display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                            <EditableText value={d.hours != null && d.hours !== '' ? String(d.hours) : ''} placeholder="0"
-                              onSave={(v) => { const n = parseHours(v); if (n !== d.hours) updateDay(a.truckId, d.date, { hours: n }); }} />
-                            <span style={{ color: C.inkFaint }}>h</span>
-                          </div>
-                          <div style={{ ...T.monoSm, color: C.inkDim }}>·</div>
-                          <div style={{ ...T.monoSm, color: C.inkDim }}>{dailyCY} CY</div>
-                          {a.days.length > 1 && (
-                            <button onClick={() => removeDay(a.truckId, d.date)} aria-label="Remove day" title="Remove day" style={{
-                              background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                              width: 22, height: 22, borderRadius: R.xs, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                              fontSize: 16, lineHeight: 1, padding: 0,
-                            }}
-                              onMouseEnter={e => { e.currentTarget.style.color = C.warn; }}
-                              onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; }}
-                            >×</button>
-                          )}
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total delivered</div>
                         </div>
                       </div>
 
-                      {d.loads.length === 0 ? (
-                        <div style={{ ...T.caption, color: C.inkFaint, padding: `${S[2]}px 0` }}>No loads yet today.</div>
-                      ) : (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                          {d.loads.map(l => (
-                            <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: S[2], ...T.bodySm }}>
-                              {/* v26: load time is click-to-edit. */}
-                              <span style={{ ...T.monoSm, color: C.inkDim, minWidth: 48, display: 'inline-block' }}>
-                                <EditableText value={l.time || ''} placeholder="HH:MM"
-                                  onSave={(v) => { const t = (v || '').trim(); if (t !== l.time) updateLoad(a.truckId, d.date, l.id, { time: t }); }} />
-                              </span>
-                              {/* v26: load CY is click-to-edit. parseCY strips
-                                  unit suffix so "14 CY" -> 14. */}
-                              <span style={{ flex: 1, color: C.ink, display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
-                                <EditableText value={l.cy != null ? String(l.cy) : ''} placeholder="0"
-                                  onSave={(v) => { const n = parseCY(v); if (n != null && n !== l.cy) updateLoad(a.truckId, d.date, l.id, { cy: n }); }} />
-                                <span style={{ color: C.inkFaint, ...T.monoSm }}>CY</span>
-                              </span>
-                              <button onClick={() => removeLoad(a.truckId, d.date, l.id)} style={{
-                                background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                                ...T.caption, padding: '2px 6px', borderRadius: R.xs,
-                              }}
-                                onMouseEnter={e => { e.currentTarget.style.color = C.warn; }}
-                                onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; }}
-                              >remove</button>
-                            </div>
-                          ))}
+                      {/* TOTAL BILLED HRS — Start to finish */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.accent}`, color: C.accent, fontSize: 14, lineHeight: 1,
+                        }}>◷</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>
+                            {fmtHours(totalHoursForTruck)}<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>HRS</span>
+                          </div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Start to finish</div>
                         </div>
-                      )}
+                      </div>
 
-                      {isAddingLoad ? (
-                        <div style={{ marginTop: S[2], display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
-                          <input type="time" value={addLoadForm.time} onChange={e => setAddLoadForm(f => ({ ...f, time: e.target.value }))}
-                            style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                          <input type="number" min="0" step="0.5" placeholder="CY" value={addLoadForm.cy} onChange={e => setAddLoadForm(f => ({ ...f, cy: e.target.value }))}
-                            style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, width: 80 }} />
-                          <Btn variant="primary" size="sm" onClick={() => addLoad(a.truckId, d.date, addLoadForm.time, addLoadForm.cy)}>Add</Btn>
-                          <Btn variant="ghost" size="sm" onClick={() => setAddLoadForm({ truckId: null, date: null, time: '', cy: '' })}>Cancel</Btn>
+                      {/* TOTAL BILLED $ — based on hours */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.accent}`, color: C.accent, fontFamily: F.mono, fontSize: 14, fontWeight: 700, lineHeight: 1,
+                        }}>$</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtUSD(totalDollarsForTruck)}</div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Based on hours</div>
                         </div>
-                      ) : (
-                        <button onClick={() => setAddLoadForm({ truckId: a.truckId, date: d.date, time: '', cy: '' })} style={{
-                          marginTop: S[2], background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
-                          ...T.caption, padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
-                        }}>+ Add load</button>
-                      )}
+                      </div>
+
+                      {/* TRUCK TYPE */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.info}`, color: C.info, fontSize: 14,
+                        }}>🛒</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: 0.3 }}>
+                            {(typeMeta && typeMeta.label) || (t && t.type) || '—'}
+                          </div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Truck type</div>
+                        </div>
+                      </div>
+
+                      {/* HOURLY RATE — informational */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.info}`, color: C.info, fontSize: 14,
+                        }}>🏷</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtUSD(hourlyRate)}</div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Hourly rate</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>For information</div>
+                        </div>
+                      </div>
+
+                      {/* TODAY START TIME */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
+                        <span aria-hidden="true" style={{
+                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          border: `1.5px solid ${C.warn}`, color: C.warn, fontSize: 14,
+                        }}>📅</span>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontFamily: F.mono, fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>Start {todayStart}</div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Today</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>First load time</div>
+                        </div>
+                      </div>
                     </div>
-                  );
-                })}
 
-                {isAddingDay ? (
-                  <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
-                    <input type="date" value={newDayDate} onChange={e => setNewDayDate(e.target.value)}
-                      style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                    <input type="time" value={newDayStart} onChange={e => setNewDayStart(e.target.value)}
-                      style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                    <Btn variant="primary" size="sm" onClick={() => addDay(a.truckId)}>Add day</Btn>
-                    <Btn variant="ghost" size="sm" onClick={() => { setAddingDayFor(null); setNewDayDate(TODAY_ISO); setNewDayStart('08:00'); }}>Cancel</Btn>
-                  </div>
-                ) : (
-                  <button onClick={() => setAddingDayFor(a.truckId)} style={{
-                    marginTop: S[3], width: '100%', background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
-                    ...T.bodySm, padding: '8px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
-                  }}>+ Add day</button>
-                )}
-              </Card>
-            );
-          })}
+                    {/* Day sections — newest first. Each header shows daily
+                        totals (h • CY • $) computed from d.hours × hourlyRate;
+                        load rows only carry time + CY + remove. */}
+                    {sortedDays.map(d => {
+                      const dailyCY = d.loads.reduce((s, l) => s + (l.cy || 0), 0);
+                      const dailyHours = typeof d.hours === 'number' ? d.hours : 0;
+                      const dailyDollars = dailyHours * hourlyRate;
+                      const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
+                      const dayLabel = isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date);
+                      return (
+                        <div key={d.date} style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, border: `1px solid ${C.rule}` }}>
+                          {/* Header row — date + start time (editable) on the left, daily totals on the right */}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
+                              <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{dayLabel}</div>
+                              <span aria-hidden="true" style={{ ...T.monoSm, color: C.ok }}>•</span>
+                              <span style={{ ...T.monoSm, color: C.inkDim, fontWeight: 500 }}>Start{' '}
+                                <span style={{ color: C.ink }}>
+                                  <EditableText value={d.startTime || ''} placeholder="HH:MM"
+                                    onSave={(v) => { const tt = (v || '').trim(); if (tt !== d.startTime) updateDay(a.truckId, d.date, { startTime: tt }); }} />
+                                </span>
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                              {/* Daily hours — editable. Authoritative billing source. */}
+                              <div style={{ ...T.monoSm, color: C.ink, fontWeight: 600, display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
+                                <EditableText value={d.hours != null && d.hours !== '' ? String(d.hours) : ''} placeholder="0"
+                                  onSave={(v) => { const n = parseHours(v); if (n !== d.hours) updateDay(a.truckId, d.date, { hours: n }); }} />
+                                <span style={{ color: C.inkFaint }}>h</span>
+                              </div>
+                              <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
+                              <span style={{ ...T.monoSm, color: C.inkDim }}>{dailyCY} CY</span>
+                              <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
+                              <span style={{ ...T.monoSm, color: C.ink, fontWeight: 700 }}>{fmtUSD(dailyDollars)}</span>
+                              {a.days.length > 1 && (
+                                <button onClick={() => removeDay(a.truckId, d.date)} aria-label="Remove day" title="Remove day" style={{
+                                  background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
+                                  width: 22, height: 22, borderRadius: R.xs, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: 16, lineHeight: 1, padding: 0,
+                                }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = C.warn; }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; }}
+                                >×</button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Compact column header — TIME | CY HAULED */}
+                          {d.loads.length > 0 && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginTop: S[2], paddingBottom: 4, borderBottom: `1px solid ${C.rule}` }}>
+                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', minWidth: 64 }}>Time</span>
+                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', flex: 1 }}>CY Hauled</span>
+                            </div>
+                          )}
+
+                          {d.loads.length === 0 ? (
+                            <div style={{ ...T.caption, color: C.inkFaint, padding: `${S[2]}px 0` }}>No loads yet today.</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column' }}>
+                              {d.loads.map(l => (
+                                <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>
+                                  <span style={{ ...T.monoSm, color: C.info, fontWeight: 600, minWidth: 64, display: 'inline-block' }}>
+                                    <EditableText value={l.time || ''} placeholder="HH:MM"
+                                      onSave={(v) => { const tt = (v || '').trim(); if (tt !== l.time) updateLoad(a.truckId, d.date, l.id, { time: tt }); }} />
+                                  </span>
+                                  <span style={{ flex: 1, color: C.ink, display: 'inline-flex', alignItems: 'baseline', gap: 4, ...T.bodySm, fontWeight: 600 }}>
+                                    <EditableText value={l.cy != null ? String(l.cy) : ''} placeholder="0"
+                                      onSave={(v) => { const n = parseCY(v); if (n != null && n !== l.cy) updateLoad(a.truckId, d.date, l.id, { cy: n }); }} />
+                                    <span style={{ color: C.inkFaint, ...T.monoSm, fontWeight: 400 }}>CY</span>
+                                  </span>
+                                  <button onClick={() => removeLoad(a.truckId, d.date, l.id)} style={{
+                                    background: 'transparent', border: 'none', color: C.warn, cursor: 'pointer',
+                                    ...T.bodySm, padding: '2px 6px', borderRadius: R.xs, fontWeight: 600,
+                                  }}
+                                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.7'; }}
+                                    onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
+                                  >Remove</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {isAddingLoad ? (
+                            <div style={{ marginTop: S[2], display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
+                              <input type="time" value={addLoadForm.time} onChange={e => setAddLoadForm(f => ({ ...f, time: e.target.value }))}
+                                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                              <input type="number" min="0" step="0.5" placeholder="CY" value={addLoadForm.cy} onChange={e => setAddLoadForm(f => ({ ...f, cy: e.target.value }))}
+                                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, width: 80 }} />
+                              <Btn variant="primary" size="sm" onClick={() => addLoad(a.truckId, d.date, addLoadForm.time, addLoadForm.cy)}>Add</Btn>
+                              <Btn variant="ghost" size="sm" onClick={() => setAddLoadForm({ truckId: null, date: null, time: '', cy: '' })}>Cancel</Btn>
+                            </div>
+                          ) : (
+                            <button onClick={() => setAddLoadForm({ truckId: a.truckId, date: d.date, time: '', cy: '' })} style={{
+                              marginTop: S[2], background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.info,
+                              ...T.caption, padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
+                            }}>+ Add load</button>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {isAddingDay ? (
+                      <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
+                        <input type="date" value={newDayDate} onChange={e => setNewDayDate(e.target.value)}
+                          style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                        <input type="time" value={newDayStart} onChange={e => setNewDayStart(e.target.value)}
+                          style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
+                        <Btn variant="primary" size="sm" onClick={() => addDay(a.truckId)}>Add day</Btn>
+                        <Btn variant="ghost" size="sm" onClick={() => { setAddingDayFor(null); setNewDayDate(TODAY_ISO); setNewDayStart('08:00'); }}>Cancel</Btn>
+                      </div>
+                    ) : (
+                      <button onClick={() => setAddingDayFor(a.truckId)} style={{
+                        marginTop: S[3], width: '100%', background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
+                        ...T.bodySm, padding: '10px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
+                      }}>+ Add day</button>
+                    )}
+                  </Card>
+                );
+              })}
         </div>
       )}
 
