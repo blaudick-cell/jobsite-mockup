@@ -2399,6 +2399,51 @@ function haulRequestLabel(state, req) {
   return `${req.volumeCY} CY ${matName}`;
 }
 
+// v22: HAS/NEEDS is the haul-direction signal (was on project.haulType only).
+// Derive from the project that owns the request. Falls back to 'NEEDS' so
+// the pill always renders and the toggle has a starting state.
+function haulTypeForReq(state, req) {
+  if (!req || !state || !state.projects) return 'NEEDS';
+  const proj = state.projects.find(p => p.id === req.projectId);
+  if (proj && proj.haulType === 'HAS') return 'HAS';
+  if (proj && proj.haulType === 'NEEDS') return 'NEEDS';
+  return 'NEEDS';
+}
+
+// HAS/NEEDS pill — green for NEEDS, orange for HAS. Optional onClick makes
+// it a toggle (used in haul-request edit mode); without onClick it renders
+// as a static badge with the same visual style.
+function HasNeedsPill({ type, onClick, style = {} }) {
+  const isNeeds = type !== 'HAS';
+  const color = isNeeds ? C.accent : C.warn;
+  const soft  = isNeeds ? C.accentSoft : C.warnSoft;
+  const label = isNeeds ? 'NEEDS' : 'HAS';
+  if (onClick) {
+    return (
+      <button onClick={(e) => { e.stopPropagation(); onClick(); }}
+        aria-label={`Toggle haul direction (currently ${label})`}
+        title="Click to toggle HAS/NEEDS"
+        style={{
+          display: 'inline-flex', alignItems: 'center', gap: S[1],
+          padding: '4px 10px', borderRadius: R.pill,
+          background: soft, color, border: `1px solid ${color}`,
+          fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+          cursor: 'pointer',
+          ...style,
+        }}>{label} <span style={{ fontSize: 9, opacity: 0.7 }}>⇄</span></button>
+    );
+  }
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: S[1],
+      padding: '4px 10px', borderRadius: R.pill,
+      background: soft, color,
+      fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+      ...style,
+    }}>{label}</span>
+  );
+}
+
 // Seeded activity events spread across the last few days. Real timestamps
 // (Date.now() minus offsets) so day grouping reflects wall-clock time.
 const ACTIVITY_SEED = (() => {
@@ -4055,9 +4100,15 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
-            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
-              <Pill color={C.accent} soft={C.accentSoft}>{p.haulType}</Pill>
-              <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{p.materialType}</Pill>
+            {/* v22: HAS/NEEDS + qty + material collapsed into one line.
+                Replaces the two pills below (Import/Export + Clean Fill).
+                Qty pulled from project.volumeCYNeeded; falls back to "--"
+                when the project hasn't recorded a target yet. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+              <HasNeedsPill type={p.haulType} />
+              <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
+                {p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() : '—'} CY of {p.materialType}
+              </span>
             </div>
           </div>
           <div style={{ minWidth: 0 }}>
@@ -7016,12 +7067,15 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 
         {/* CENTER — material / volume / trucks / distance */}
         <div style={{ minWidth: 0 }}>
+          {/* v22: HAS/NEEDS + qty + material collapsed into one line. Drops
+              the previous matFlow pill ("Import -- Clean Fill", derived from
+              material code) AND the separate VOLUME label/value row. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 6 }}>
-            <Pill color={C.accent} soft={C.accentSoft}>{e.matFlow}</Pill>
-            <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{e.material ? e.material.label : e.r.materialCode}</Pill>
+            <HasNeedsPill type={haulTypeForReq(db, e.r)} />
+            <span style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{e.r.volumeCY} CY</span>
+            <span style={{ ...T.bodySm, color: C.inkDim }}>of</span>
+            <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{e.material ? e.material.label : e.r.materialCode}</span>
           </div>
-          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>VOLUME</div>
-          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink, marginBottom: 6 }}>{e.r.volumeCY} CY</div>
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
             <span style={{ color: C.ink, fontWeight: 600 }}>{e.trucksAssigned}/{e.trucksNeeded}</span> trucks
             <span style={{ color: C.inkFaint }}> · </span>
@@ -7772,6 +7826,22 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         summary: `Admin updated ${label} on ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
   };
+  // v22: HAS/NEEDS toggle. Direction lives on project.haulType (was on
+  // project only -- req inherits). Flipping it from a haul-request page
+  // updates the parent project so every req under it stays consistent.
+  // Cheaper than threading a separate req.haulType column through the
+  // Supabase schema, and matches user mental model (a project is one or
+  // the other, not a mix). Emits a project.updated activity entry.
+  const projectHaulType = haulTypeForReq(db, req);
+  const toggleProjectHaulType = () => {
+    if (!project) return;
+    const next = projectHaulType === 'HAS' ? 'NEEDS' : 'HAS';
+    setDb(prev => appendActivity(
+      { ...prev, projects: prev.projects.map(p => p.id === project.id ? { ...p, haulType: next } : p) },
+      { type: 'project.updated', actorRole: 'admin', actorId: null,
+        summary: `Admin set ${project.name} direction to ${next}`, refId: project.id }
+    ));
+  };
   // v20: delete the entire haul request from the combined tile's edit mode.
   // Mirrors the `confirm()` precedent used by removeAssignment / removeTruck.
   // Emits a `haul_request.deleted` activity event (the feed has no type
@@ -8144,7 +8214,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             was ~120px tall on its own. Now sits at ~56px including bar. ── */}
         <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+              {/* v22: HAS/NEEDS pill leads the line. Clickable in edit mode
+                  (toggles project.haulType); static otherwise. Green for
+                  NEEDS, orange for HAS -- same palette as the existing pills. */}
+              <HasNeedsPill type={projectHaulType} onClick={isEditing ? toggleProjectHaulType : undefined} />
               {isEditing ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
                   <input type="number" min="1" step="1"
