@@ -7709,9 +7709,39 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const [addLoadForm, setAddLoadForm] = useState({ truckId: null, date: null, time: '', cy: '' });
   // v20: Edit-mode gateway for the combined haul-request tile (Project &
   // contractor / Haul Request / Logistics rolled into one Card). Default
-  // view is read-only; "Edit" toggles editable affordances simultaneously
+  // view is read-only; "Edit ↗" toggles editable affordances simultaneously
   // and reveals the destructive "Delete this haul request" button.
+  // v20.1: Cancel discards via snapshot restore — we capture the editable
+  // slice of `req` on entry and rewind setDb on Cancel. Saves are still
+  // atomic (auto-save via updateLogistics on each blur), so Done is a
+  // pure exit; Cancel is the rollback path.
   const [isEditing, setIsEditing] = useState(false);
+  const [editSnapshot, setEditSnapshot] = useState(null);
+  const enterEditMode = () => {
+    setEditSnapshot({
+      volumeCY: req.volumeCY,
+      materialCode: req.materialCode,
+      pickupLocation: req.pickupLocation ? { ...req.pickupLocation } : null,
+      dropoffLocation: req.dropoffLocation ? { ...req.dropoffLocation } : null,
+      timing: req.timing ? { ...req.timing } : null,
+      siteAccess: req.siteAccess ? {
+        loading: req.siteAccess.loading ? { ...req.siteAccess.loading } : null,
+        dumping: req.siteAccess.dumping ? { ...req.siteAccess.dumping } : null,
+      } : null,
+    });
+    setIsEditing(true);
+  };
+  const exitEditDone = () => { setEditSnapshot(null); setIsEditing(false); };
+  const exitEditCancel = () => {
+    if (editSnapshot) {
+      setDb(prev => ({
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, ...editSnapshot } : r),
+      }));
+    }
+    setEditSnapshot(null);
+    setIsEditing(false);
+  };
   if (!req) return <NotFound navigate={navigate} />;
   const project = db.projects.find(p => p.id === req.projectId);
   const material = MATERIALS.find(m => m.code === req.materialCode);
@@ -7968,12 +7998,55 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           <div style={{ flex: 1, minWidth: 0 }}>
             <Label color={C.accent}>Haul Request</Label>
             {isEditing && (
-              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Click any value to edit. Changes save as you go.</div>
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Tap any value to edit. Done keeps changes · Cancel rolls back.</div>
             )}
           </div>
-          <Btn variant="secondary" size="sm" onClick={() => setIsEditing(v => !v)}>
-            {isEditing ? 'Done' : 'Edit'}
-          </Btn>
+          {/* v20.1: Edit ↗ hotspot — mono caps + accent border, matches the
+              jse-design-system Pill silhouette but interactive. In edit mode
+              swaps to a Cancel + Done pair (Done = exit, Cancel = rollback). */}
+          {isEditing ? (
+            <div style={{ display: 'flex', gap: S[2], flexShrink: 0 }}>
+              <button onClick={exitEditCancel}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '6px 12px', borderRadius: R.pill,
+                  background: 'transparent', color: C.inkDim,
+                  border: `1px solid ${C.ruleHi}`,
+                  fontFamily: F.mono, fontSize: 11, fontWeight: 700,
+                  letterSpacing: 0.8, textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
+                onMouseLeave={e => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+              >Cancel</button>
+              <button onClick={exitEditDone}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  padding: '6px 12px', borderRadius: R.pill,
+                  background: C.accentSoft, color: C.accent,
+                  border: `1px solid ${C.accent}`,
+                  fontFamily: F.mono, fontSize: 11, fontWeight: 700,
+                  letterSpacing: 0.8, textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >Done</button>
+            </div>
+          ) : (
+            <button onClick={enterEditMode}
+              aria-label="Edit haul request details"
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '6px 12px', borderRadius: R.pill,
+                background: 'transparent', color: C.accent,
+                border: `1px solid ${C.accent}`,
+                fontFamily: F.mono, fontSize: 11, fontWeight: 700,
+                letterSpacing: 0.8, textTransform: 'uppercase',
+                cursor: 'pointer', flexShrink: 0,
+              }}
+              onMouseEnter={e => { e.currentTarget.style.background = C.accentSoft; }}
+              onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+            >Edit <span style={{ fontSize: 12, lineHeight: 1 }}>↗</span></button>
+          )}
         </div>
 
         {/* ── PROJECT (always read-only) ── */}
@@ -7990,7 +8063,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         </div>
 
         {/* ── CONTRACTOR (always read-only) ── */}
-        <div style={{ marginTop: S[5] }}>
+        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
           <Label color={C.inkDim}>Contractor (requester)</Label>
           <div style={{ marginTop: S[2] }}>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
@@ -8058,7 +8131,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         </div>
 
         {/* ── HAUL (qty + material; edit-mode swaps plain text for inputs) ── */}
-        <div style={{ marginTop: S[5] }}>
+        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
           <Label color={C.inkDim}>Haul</Label>
           <div style={{ marginTop: S[2], display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
             <div style={{ flex: 1, minWidth: 240 }}>
@@ -8114,8 +8187,15 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
+        {/* ── PICKUP + DROPOFF — side-by-side on desktop, stacked on mobile via
+            auto-fit minmax (no breakpoint media query needed). Each location is
+            still its own labeled sub-section; the grid just lays them out. ── */}
+        <div style={{
+          marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}`,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5],
+        }}>
         {/* ── PICKUP LOCATION ── */}
-        <div style={{ marginTop: S[5] }}>
+        <div>
           <Label color={C.inkDim}>Pickup location</Label>
           <div style={{ marginTop: S[2] }}>
             {isEditing ? (
@@ -8148,8 +8228,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
-        {/* ── DROPOFF LOCATION ── */}
-        <div style={{ marginTop: S[5] }}>
+        {/* ── DROPOFF LOCATION (sibling cell in the side-by-side grid) ── */}
+        <div>
           <Label color={C.inkDim}>Dropoff location</Label>
           <div style={{ marginTop: S[2] }}>
             {isEditing ? (
@@ -8182,8 +8262,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
+        </div>{/* end PICKUP+DROPOFF grid */}
+
         {/* ── TIMING ── */}
-        <div style={{ marginTop: S[5] }}>
+        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
           <Label color={C.inkDim}>Timing</Label>
           <div style={{ marginTop: S[2] }}>
             {isEditing ? (
@@ -8210,8 +8292,12 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
-        {/* ── SITE ACCESS — LOADING ── */}
-        <div style={{ marginTop: S[5] }}>
+        {/* ── SITE ACCESS — LOADING + DUMPING — side-by-side on desktop ── */}
+        <div style={{
+          marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}`,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5],
+        }}>
+        <div>
           <Label color={C.inkDim}>Site access — loading</Label>
           <div style={{ marginTop: S[2] }}>
             {isEditing ? (
@@ -8241,8 +8327,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
-        {/* ── SITE ACCESS — DUMPING ── */}
-        <div style={{ marginTop: S[5] }}>
+        {/* sibling cell in the LOADING+DUMPING side-by-side grid */}
+        <div>
           <Label color={C.inkDim}>Site access — dumping</Label>
           <div style={{ marginTop: S[2] }}>
             {isEditing ? (
@@ -8271,6 +8357,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             })()}
           </div>
         </div>
+
+        </div>{/* end LOADING+DUMPING grid */}
 
         {/* ── DELETE (edit mode only) ── */}
         {isEditing && (
