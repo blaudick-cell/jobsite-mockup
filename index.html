@@ -2431,6 +2431,46 @@ function totalBilledHoursForRequest(req) {
   return total;
 }
 
+// v30: canonical assignment-derived rollups. Single source of truth so the
+// project tile, dispatch row, and haul detail all agree. Reads from the
+// haul-request → assignments → days → loads tree (the live operational
+// data), NOT the legacy db.loads / db.hours collections that seed older
+// dashboard tables.
+function deliveredCYForRequest(req) {
+  if (!req || !Array.isArray(req.assignments)) return 0;
+  let total = 0;
+  for (const a of req.assignments) {
+    if (!a || !Array.isArray(a.days)) continue;
+    for (const d of a.days) {
+      if (!Array.isArray(d.loads)) continue;
+      for (const l of d.loads) total += Number(l.cy) || 0;
+    }
+  }
+  return total;
+}
+function dollarsForRequest(req, db) {
+  if (!req || !Array.isArray(req.assignments) || !db) return 0;
+  let total = 0;
+  for (const a of req.assignments) {
+    const truck = (db.trucks || []).find(t => t.id === a.truckId);
+    const rate = (truck && truck.ratePerHour != null)
+      ? truck.ratePerHour
+      : ((truck && db.rates && db.rates[truck.type]) || 0);
+    if (!Array.isArray(a.days)) continue;
+    for (const d of a.days) {
+      const h = typeof d.hours === 'number' ? d.hours : 0;
+      total += h * rate;
+    }
+  }
+  return total;
+}
+function assignedTruckCountForRequest(req) {
+  if (!req || !Array.isArray(req.assignments)) return 0;
+  const ids = new Set();
+  for (const a of req.assignments) if (a && a.truckId) ids.add(a.truckId);
+  return ids.size;
+}
+
 function haulTypeForReq(state, req) {
   if (!req || !state || !state.projects) return 'NEEDS';
   const proj = state.projects.find(p => p.id === req.projectId);
@@ -3981,20 +4021,38 @@ function AdminProjects({ db, setDb, navigate }) {
     // CY moved on this project — sum of approved loads' cubic yards. This is
     // the top-line "actual dirt moved" metric and replaces the LOADS/TRUCKS
     // dashboard pair (v22). Pending CY trails behind for the "+N pending" pill.
-    const cyCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    const cyPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    // Loads in transit ≈ open shifts on this project's trucks (a load is "in
-    // flight" while a driver is clocked-in on it).
-    const loadsInTransit = trucksActive;
-    const totalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-    const totalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
+    // v30: legacy db.loads / db.hours rollups — kept under `legacy*` so
+    // any view that genuinely operates on those collections (e.g. the
+    // historical /admin/loads + /admin/hours tables seeded for demo
+    // dashboards) still has access. The Hauling Overview tile, dispatch
+    // row, and haul detail now all consume the assignment-derived
+    // canonical totals below instead — guaranteeing one truth across views.
+    const legacyCYCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+    const legacyCYPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+    const legacyTotalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+    const legacyTotalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
       const t = db.trucks.find(t => t.id === h.truckId);
       const rate = t ? db.rates[t.type] : 0;
       return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * rate;
     }, 0);
+    // Loads in transit ≈ open shifts on this project's trucks (a load is "in
+    // flight" while a driver is clocked-in on it).
+    const loadsInTransit = trucksActive;
     // Haul requests on this project — used for target volume + dispatch queue.
     const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
     const targetCY = reqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+    // v30: CANONICAL rollups derived from assignments → days → loads.
+    // Identical formula to AdminHaulRequestDetail and DispatchRow.
+    // cyPending = sum of (volumeCY - delivered) on requests that aren't
+    // fully delivered yet, so the "+N pending" pill aligns with what the
+    // detail page would show as "to deliver".
+    const cyCompleted = reqs.reduce((s, r) => s + deliveredCYForRequest(r), 0);
+    const cyPending   = reqs.reduce((s, r) => {
+      if (r.status === 'completed' || r.status === 'closed') return s;
+      return s + Math.max(0, (r.volumeCY || 0) - deliveredCYForRequest(r));
+    }, 0);
+    const totalHours = reqs.reduce((s, r) => s + totalBilledHoursForRequest(r), 0);
+    const totalRevenue = reqs.reduce((s, r) => s + dollarsForRequest(r, db), 0);
     // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
     const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
     const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
@@ -4043,7 +4101,7 @@ function AdminProjects({ db, setDb, navigate }) {
     const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
     const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
     const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
-    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, legacyCYCompleted, legacyCYPending, legacyTotalHours, legacyTotalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
     enriched.healthStatus = healthFor(enriched);
     return enriched;
   });
@@ -4212,20 +4270,14 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: S[2], alignItems: 'flex-end' }}>
-            {/* v27: Total billed hours summed across every haul request
-                for this project. Sits alongside legacy `totalHours`
-                (which sums db.hours — the per-truck log) so admins can
-                compare what was *logged* vs what's been *billed*. */}
-            {(() => {
-              const billed = (db.haulRequests || [])
-                .filter(r => r.projectId === p.id)
-                .reduce((s, r) => s + totalBilledHoursForRequest(r), 0);
-              return (
-                <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>
-                  {fmtHours(p.totalHours)} hrs <span style={{ color: C.inkFaint }}>·</span> {fmtHours(billed)} billed <span style={{ color: C.inkFaint }}>·</span> {fmtMoney(p.totalRevenue)}
-                </div>
-              );
-            })()}
+            {/* v30: p.totalHours and p.totalRevenue are now both
+                canonical assignment-derived rollups — same formula as the
+                haul detail. The legacy log-clock comparison is dropped
+                because it conflated two different concepts (clock-in vs
+                billed). Single line: billed hours · total dollars. */}
+            <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>
+              {fmtHours(p.totalHours)} hrs billed <span style={{ color: C.inkFaint }}>·</span> {fmtMoney(p.totalRevenue)}
+            </div>
           </div>
         </div>
       </Card>
@@ -7277,8 +7329,13 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ ...T.bodySm, color: C.inkDim }}>of</span>
             <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{e.material ? e.material.label : e.r.materialCode}</span>
           </div>
+          {/* v30: was "X/N trucks" but N = ceil(volumeCY/18) is loads-needed,
+              not trucks-needed. Split into two honest lines: delivered/target
+              CY (matches detail page) and trucks assigned / distance / time. */}
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
-            <span style={{ color: C.ink, fontWeight: 600 }}>{e.trucksAssigned}/{e.trucksNeeded}</span> trucks
+            <span style={{ color: C.ink, fontWeight: 600 }}>{deliveredCYForRequest(e.r)}/{e.r.volumeCY || 0}</span> CY
+            <span style={{ color: C.inkFaint }}> · </span>
+            <span>{assignedTruckCountForRequest(e.r)} truck{assignedTruckCountForRequest(e.r) === 1 ? '' : 's'}</span>
             <span style={{ color: C.inkFaint }}> · </span>
             <span>~{e.distance} mi</span>
             <span style={{ color: C.inkFaint }}> · </span>
@@ -7292,10 +7349,20 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ color: C.inkFaint }}> · </span>
             <span style={{ color: C.ink, fontWeight: 600 }}>{fmtHours(totalBilledHoursForRequest(e.r))}</span> hrs
           </div>
-          {/* Mini fulfillment bar */}
-          <div style={{ marginTop: 6, height: 4, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
-            <div style={{ width: Math.min(100, (e.trucksAssigned / Math.max(1, e.trucksNeeded)) * 100) + '%', height: '100%', background: e.priority === 'critical' ? (C.danger || C.warn) : C.accent, borderRadius: 999 }} />
-          </div>
+          {/* v30: Mini fulfillment bar tracks delivered CY / target CY, so it
+              matches the number above the bar and the detail page progress
+              ring. Was previously trucksAssigned/trucksNeeded which read as
+              0% even when half the volume was delivered. */}
+          {(() => {
+            const delivered = deliveredCYForRequest(e.r);
+            const target = e.r.volumeCY || 0;
+            const pct = target > 0 ? (delivered / target) * 100 : 0;
+            return (
+              <div style={{ marginTop: 6, height: 4, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
+                <div style={{ width: Math.min(100, pct) + '%', height: '100%', background: e.priority === 'critical' ? (C.danger || C.warn) : C.accent, borderRadius: 999 }} />
+              </div>
+            );
+          })()}
         </div>
       </div>
     );
