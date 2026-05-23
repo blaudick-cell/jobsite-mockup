@@ -8014,6 +8014,17 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const totalDeliveredCY = assignments.reduce((s, a) =>
     s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
   const overallPct = req.volumeCY > 0 ? (totalDeliveredCY / req.volumeCY) * 100 : 0;
+  // v28: aggregate dollar total across all assignments — mirrors the same
+  // INVOICE_CY_RATE lookup used by generateHaulInvoice so the TOTAL chip
+  // matches an interim invoice exactly.
+  const totalDollarsForHaul = (req.assignments || []).reduce((sum, a) => {
+    const truck = db.trucks.find(t => t.id === a.truckId);
+    const rate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
+    const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
+    return sum + cy * rate;
+  }, 0);
+  const totalHoursBilledForHaul = totalBilledHoursForRequest(req);
+  const fmtTotalDollars = '$' + totalDollarsForHaul.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Suggested haulers (legacy picker, kept for grouped browse) — exclude haulers whose trucks are all assigned
   const suggestedHaulers = db.haulers.filter(op => {
@@ -8422,249 +8433,284 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             </div>
           </div>
 
-          {/* Hauler(s) — only rendered when at least one is matched or assigned */}
-          {(() => {
-            const haulerIds = new Set();
-            if (req.matchedHaulerId) haulerIds.add(req.matchedHaulerId);
-            for (const a of assignments) if (a.haulerId) haulerIds.add(a.haulerId);
-            if (haulerIds.size === 0) return null;
-            const haulers = Array.from(haulerIds).map(id => db.haulers.find(h => h.id === id)).filter(Boolean);
-            if (haulers.length === 0) return null;
-            return (
-              <div>
-                <Label color={C.inkDim}>Hauler{haulers.length > 1 ? 's' : ''}</Label>
-                <div style={{ marginTop: 4 }}>
-                  {haulers.map((h, i) => (
-                    <div key={h.id} style={{ marginTop: i === 0 ? 0 : 6 }}>
-                      <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{h.name}</div>
-                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-                        <span>{h.contact || '—'}</span>
-                        {h.phone ? (
-                          <a href={'tel:' + h.phone}
-                            style={{ color: C.inkDim, textDecoration: 'none' }}
-                            onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {h.phone}</a>
-                        ) : null}
-                        {h.email ? (
-                          <a href={'mailto:' + h.email}
-                            style={{ color: C.inkDim, textDecoration: 'none' }}
-                            onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {h.email}</a>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            );
-          })()}
+          {/* v28: Hauler block removed from top metadata row — it duplicated
+              info shown in the Assignments section below. Keeps the header
+              focused on Project + Contractor only, matching the operational
+              dispatch reference. */}
         </div>
 
-        {/* ── HAUL — title + status grouped horizontally, progress collapsed
-            to a thin inline bar with metrics on a single row. Replaces the
-            88px donut + multi-line "Total delivered / N trucks" block, which
-            was ~120px tall on its own. Now sits at ~56px including bar. ── */}
+        {/* ── v28-HAUL-HERO: title + route + progress + stat cards on left,
+            donut on the right. Promotes hours-billed and total dollar value
+            to live next to the % donut, matching the reference mockup. Stacks
+            cleanly on mobile via flex-wrap. MARKER: v28-haul-hero ── */}
         <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-              {/* v22: HAS/NEEDS pill leads the line. Clickable in edit mode
-                  (toggles project.haulType); static otherwise. Green for
-                  NEEDS, orange for HAS -- same palette as the existing pills.
-                  v22.1: fontSize 22 to match the qty headline next to it. */}
-              <HasNeedsPill type={projectHaulType} fontSize={22} onClick={isEditing ? toggleProjectHaulType : undefined} />
-              {isEditing ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
-                  <input type="number" min="1" step="1"
-                    value={req.volumeCY == null ? '' : req.volumeCY}
-                    onChange={e => {
-                      const raw = e.target.value;
-                      if (raw === '') return;
-                      const n = parseFloat(raw);
-                      if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
-                        updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
-                      }
-                    }}
-                    aria-label="Quantity in cubic yards"
-                    title="Click to edit quantity"
-                    style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 84, textAlign: 'center', boxSizing: 'border-box' }} />
-                  <span style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
-                  <MaterialField value={req.materialCode}
-                    onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
-                    style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
-                </div>
-              ) : (
-                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, margin: 0 }}>
-                  {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
-                </div>
-              )}
-            </div>
-            <StatusPill status={req.status} />
-          </div>
-
-          {/* Inline route + request metadata strip — single dense line, mono
-              metrics. Falls back gracefully when the OSRM cache is cold. */}
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 6, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-            {(pickup.name || pickup.address) && (dropoff.name || dropoff.address) ? (
-              <>
-                <span style={{ color: C.ink }}>{pickup.name || pickup.address || '—'}</span>
-                <span style={{ color: C.inkFaint }}>→</span>
-                <span style={{ color: C.ink }}>{dropoff.name || dropoff.address || '—'}</span>
-                {(routeMiles != null || routeMin != null) && <span style={{ color: C.inkFaint }}>·</span>}
-                {routeMiles != null && (
-                  <span style={{ fontFamily: F.mono }}>{routeMiles.toFixed(1)} mi</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[4], flexWrap: 'wrap' }}>
+            {/* LEFT — title, route, progress + metrics + stat-card pair */}
+            <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                <HasNeedsPill type={projectHaulType} fontSize={20} onClick={isEditing ? toggleProjectHaulType : undefined} />
+                {isEditing ? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
+                    <input type="number" min="1" step="1"
+                      value={req.volumeCY == null ? '' : req.volumeCY}
+                      onChange={e => {
+                        const raw = e.target.value;
+                        if (raw === '') return;
+                        const n = parseFloat(raw);
+                        if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                          updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                        }
+                      }}
+                      aria-label="Quantity in cubic yards"
+                      title="Click to edit quantity"
+                      style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 80, textAlign: 'center', boxSizing: 'border-box' }} />
+                    <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
+                    <MaterialField value={req.materialCode}
+                      onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
+                      style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, margin: 0 }}>
+                    {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
+                  </div>
                 )}
-                {routeMiles != null && routeMin != null && <span style={{ color: C.inkFaint }}>•</span>}
-                {routeMin != null && (
-                  <span style={{ fontFamily: F.mono }}>{routeMin} min</span>
-                )}
-                <span style={{ color: C.inkFaint }}>·</span>
-              </>
-            ) : null}
-            <span>req {req.requestedAt}</span>
-          </div>
+                <div style={{ marginLeft: 'auto' }}><StatusPill status={req.status} /></div>
+              </div>
 
-          {/* Horizontal progress strip — replaces the 88px Donut. Thin bar
-              + inline counts on one row. Mobile: bar still spans full width
-              because metrics wrap below it via flexWrap. */}
-          <div style={{ marginTop: S[3], display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 160, height: 4, background: C.ruleHi, borderRadius: R.pill, overflow: 'hidden' }}>
-              <div style={{
-                width: Math.max(0, Math.min(100, overallPct)) + '%',
-                height: '100%',
-                background: overallPct >= 100 ? C.ok : C.accent,
-                transition: 'width 240ms ease-out',
-              }} />
+              {/* Inline route + request metadata — derives endpoint from
+                  project address when pickup/dropoff are empty (per HAS/NEEDS). */}
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 6, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
+                {(() => {
+                  const projAddr = (project && project.address) || '';
+                  const projName = (project && project.name) || '';
+                  const isNeeds = projectHaulType === 'NEEDS';
+                  const pick = isNeeds
+                    ? (pickup.name || pickup.address || '—')
+                    : (pickup.name || pickup.address || projName || projAddr || '—');
+                  const drop = isNeeds
+                    ? (dropoff.name || dropoff.address || projName || projAddr || '—')
+                    : (dropoff.name || dropoff.address || '—');
+                  return (
+                    <>
+                      <span style={{ color: C.ink }}>{pick}</span>
+                      <span style={{ color: C.inkFaint }}>→</span>
+                      <span style={{ color: C.ink }}>{drop}</span>
+                      {(routeMiles != null || routeMin != null) && <span style={{ color: C.inkFaint }}>·</span>}
+                      {routeMiles != null && <span style={{ fontFamily: F.mono }}>{routeMiles.toFixed(1)} mi</span>}
+                      {routeMiles != null && routeMin != null && <span style={{ color: C.inkFaint }}>•</span>}
+                      {routeMin != null && <span style={{ fontFamily: F.mono }}>{routeMin} min</span>}
+                      <span style={{ color: C.inkFaint }}>·</span>
+                      <span>req {req.requestedAt}</span>
+                    </>
+                  );
+                })()}
+              </div>
+
+              {/* Thin progress bar */}
+              <div style={{ marginTop: S[3], height: 3, background: C.ruleHi, borderRadius: R.pill, overflow: 'hidden' }}>
+                <div style={{
+                  width: Math.max(0, Math.min(100, overallPct)) + '%',
+                  height: '100%',
+                  background: overallPct >= 100 ? C.ok : C.accent,
+                  transition: 'width 240ms ease-out',
+                }} />
+              </div>
+
+              {/* Compact inline metrics */}
+              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 700 }}>
+                  {totalDeliveredCY}<span style={{ color: C.inkFaint, fontWeight: 400 }}> /{req.volumeCY}</span> CY
+                </span>
+                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>{Math.round(overallPct)}%</span>
+                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
+                  {assignments.length === 0 ? 'no trucks' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's')}
+                </span>
+                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
+                  {fmtHours(totalHoursBilledForHaul)} hrs billed
+                </span>
+              </div>
+
+              {/* HRS BILLED + TOTAL stat-card pair — mockup hierarchy */}
+              <div style={{ marginTop: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: S[2] }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '10px 12px', background: C.surfaceHi, borderRadius: R.sm, border: `1px solid ${C.rule}` }}>
+                  <span aria-hidden="true" style={{
+                    width: 22, height: 22, borderRadius: '50%', border: `1.5px solid ${C.accent}`,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    fontSize: 12, color: C.accent, fontFamily: F.mono, lineHeight: 1,
+                  }}>◷</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtHours(totalHoursBilledForHaul)}</div>
+                    <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Hrs billed</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '10px 12px', background: C.surfaceHi, borderRadius: R.sm, border: `1px solid ${C.rule}` }}>
+                  <span aria-hidden="true" style={{
+                    width: 22, height: 22, borderRadius: '50%', border: `1.5px solid ${C.accent}`,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    fontSize: 12, color: C.accent, fontFamily: F.mono, fontWeight: 700, lineHeight: 1,
+                  }}>$</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtTotalDollars}</div>
+                    <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total</div>
+                  </div>
+                </div>
+              </div>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
-              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 700 }}>
-                {totalDeliveredCY}<span style={{ color: C.inkFaint, fontWeight: 400 }}>/{req.volumeCY}</span> CY
-              </span>
-              <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>{Math.round(overallPct)}%</span>
-              <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
-                {assignments.length === 0 ? 'no trucks' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's')}
-              </span>
-              <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-              {/* v27: Total billed hours summed from day.hours on each
-                  assignment's days. Matches the value rendered in DispatchRow. */}
-              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
-                {fmtHours(totalBilledHoursForRequest(req))} hrs billed
-              </span>
+
+            {/* RIGHT — donut. Center reads pct + "CY HAULED" label. */}
+            <div style={{ flexShrink: 0, alignSelf: 'center' }}>
+              <Donut pct={overallPct} size={108} stroke={8} label="CY HAULED" />
             </div>
           </div>
 
           {req.notes && (
-            <div style={{ ...T.caption, marginTop: S[2], padding: S[2], background: C.surfaceHi, borderRadius: R.sm, color: C.ink, lineHeight: 1.45 }}>
+            <div style={{ ...T.caption, marginTop: S[3], padding: S[2], background: C.surfaceHi, borderRadius: R.sm, color: C.ink, lineHeight: 1.45 }}>
               {req.notes}
             </div>
           )}
         </div>
 
-        {/* ── PICKUP + DROPOFF + TIMING — single 3-col grid on desktop;
-            auto-stacks on mobile. Folding TIMING into the same row eliminates
-            one more S[5]+S[5] divider (~48px) since timing is short enough
-            to live next to the location cells. ── */}
+        {/* ── v28-PICKUP-DROPOFF: conditional based on HAS/NEEDS direction.
+            NEEDS → project site is DROPOFF (auto-derived from project.address
+                    if dropoff is empty); PICKUP shows "Not applicable".
+            HAS   → project site is PICKUP; DROPOFF shows "Not applicable".
+            Edit mode keeps both sides fully editable. ── */}
         <div style={{
           marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`,
           display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3],
         }}>
-        {/* ── PICKUP LOCATION ── */}
-        <div>
-          <Label color={C.inkDim}>Pickup</Label>
-          <div style={{ marginTop: 4 }}>
-            {isEditing ? (
-              <>
-                <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
-                  <EditableText value={pickup.name}
-                    placeholder="Site or yard name…"
-                    onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
+        {(() => {
+          const isNeeds = projectHaulType === 'NEEDS';
+          const projAddr = (project && project.address) || '';
+          const projName = (project && project.name) || '';
+          const pickupDisplayName    = pickup.name    || (isNeeds ? '' : projName);
+          const pickupDisplayAddress = pickup.address || (isNeeds ? '' : projAddr);
+          const dropoffDisplayName   = dropoff.name   || (isNeeds ? projName : '');
+          const dropoffDisplayAddress= dropoff.address|| (isNeeds ? projAddr : '');
+          const pickupOptional  = isNeeds && !pickup.name && !pickup.address;
+          const dropoffOptional = !isNeeds && !dropoff.name && !dropoff.address;
+          return (
+            <>
+              {/* PICKUP */}
+              <div>
+                <Label color={C.inkDim}>
+                  <span aria-hidden="true" style={{ color: C.info, fontSize: 11, marginRight: 4 }}>⚑</span>
+                  Pickup
+                </Label>
+                <div style={{ marginTop: 4 }}>
+                  {isEditing ? (
+                    <>
+                      <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
+                        <EditableText value={pickup.name}
+                          placeholder={isNeeds ? 'Optional — pickup yard' : 'Site or yard name…'}
+                          onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
+                      </div>
+                      <div style={{ ...T.caption, color: C.inkDim }}>
+                        <AddressAutocomplete value={pickup.address}
+                          placeholder={isNeeds ? 'Optional — pickup address' : 'Start typing a street address…'}
+                          db={db} setDb={setDb}
+                          onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
+                      </div>
+                    </>
+                  ) : pickupOptional ? (
+                    <>
+                      <div style={{ ...T.bodySm, color: C.inkFaint, fontWeight: 600 }}>—</div>
+                      <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>Not applicable</div>
+                    </>
+                  ) : (() => {
+                    const cached = (db && db.geocode && db.geocode[pickupDisplayAddress]) || null;
+                    const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
+                    return (
+                      <>
+                        <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{pickupDisplayName || '—'}</div>
+                        <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
+                          <span>{pickupDisplayAddress || '—'}</span>
+                          {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
-                <div style={{ ...T.caption, color: C.inkDim }}>
-                  <AddressAutocomplete value={pickup.address}
-                    placeholder="Start typing a street address…"
-                    db={db} setDb={setDb}
-                    onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, address: v } }), 'pickup location')} />
-                </div>
-              </>
-            ) : (() => {
-              const cached = (db && db.geocode && db.geocode[pickup.address]) || null;
-              const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
-              return (
-                <>
-                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{pickup.name || '—'}</div>
-                  <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
-                    <span>{pickup.address || '—'}</span>
-                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* ── DROPOFF LOCATION ── */}
-        <div>
-          <Label color={C.inkDim}>Dropoff</Label>
-          <div style={{ marginTop: 4 }}>
-            {isEditing ? (
-              <>
-                <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
-                  <EditableText value={dropoff.name}
-                    placeholder="Site or yard name…"
-                    onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
-                </div>
-                <div style={{ ...T.caption, color: C.inkDim }}>
-                  <AddressAutocomplete value={dropoff.address}
-                    placeholder="Start typing a street address…"
-                    db={db} setDb={setDb}
-                    onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
-                </div>
-              </>
-            ) : (() => {
-              const cached = (db && db.geocode && db.geocode[dropoff.address]) || null;
-              const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
-              return (
-                <>
-                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{dropoff.name || '—'}</div>
-                  <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
-                    <span>{dropoff.address || '—'}</span>
-                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
-                  </div>
-                </>
-              );
-            })()}
-          </div>
-        </div>
-
-        {/* ── TIMING (folded into the same row) ── */}
-        <div>
-          <Label color={C.inkDim}>Timing</Label>
-          <div style={{ marginTop: 4 }}>
-            {isEditing ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
-                <input type="date" value={timing.startDate}
-                  onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
-                  style={dateInputStyle} />
-                <span style={{ ...T.caption, color: C.inkFaint }}>→</span>
-                <input type="date" value={timing.endDate}
-                  onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
-                  min={timing.startDate || undefined}
-                  style={dateInputStyle} />
               </div>
-            ) : (
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
-                {timing.startDate
-                  ? (timing.endDate
-                      ? `${fmtTimingISO(timing.startDate)} → ${fmtTimingISO(timing.endDate)}`
-                      : fmtTimingISO(timing.startDate))
-                  : <span style={{ color: C.inkFaint, fontWeight: 400 }}>Not set</span>}
-              </div>
-            )}
-          </div>
-        </div>
 
-        </div>{/* end PICKUP+DROPOFF+TIMING grid */}
+              {/* DROPOFF */}
+              <div>
+                <Label color={C.inkDim}>
+                  <span aria-hidden="true" style={{ color: C.accent, fontSize: 11, marginRight: 4 }}>⚑</span>
+                  Dropoff
+                </Label>
+                <div style={{ marginTop: 4 }}>
+                  {isEditing ? (
+                    <>
+                      <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
+                        <EditableText value={dropoff.name}
+                          placeholder={!isNeeds ? 'Optional — dropoff site' : 'Site or yard name…'}
+                          onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
+                      </div>
+                      <div style={{ ...T.caption, color: C.inkDim }}>
+                        <AddressAutocomplete value={dropoff.address}
+                          placeholder={!isNeeds ? 'Optional — dropoff address' : 'Start typing a street address…'}
+                          db={db} setDb={setDb}
+                          onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, address: v } }), 'dropoff location')} />
+                      </div>
+                    </>
+                  ) : dropoffOptional ? (
+                    <>
+                      <div style={{ ...T.bodySm, color: C.inkFaint, fontWeight: 600 }}>—</div>
+                      <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>Not applicable</div>
+                    </>
+                  ) : (() => {
+                    const cached = (db && db.geocode && db.geocode[dropoffDisplayAddress]) || null;
+                    const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
+                    return (
+                      <>
+                        <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{dropoffDisplayName || '—'}</div>
+                        <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
+                          <span>{dropoffDisplayAddress || '—'}</span>
+                          {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+
+              {/* TIMING */}
+              <div>
+                <Label color={C.inkDim}>
+                  <span aria-hidden="true" style={{ color: C.warn, fontSize: 11, marginRight: 4 }}>◷</span>
+                  Timing
+                </Label>
+                <div style={{ marginTop: 4 }}>
+                  {isEditing ? (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
+                      <input type="date" value={timing.startDate}
+                        onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
+                        style={dateInputStyle} />
+                      <span style={{ ...T.caption, color: C.inkFaint }}>→</span>
+                      <input type="date" value={timing.endDate}
+                        onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
+                        min={timing.startDate || undefined}
+                        style={dateInputStyle} />
+                    </div>
+                  ) : (
+                    <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
+                      {timing.startDate
+                        ? (timing.endDate
+                            ? `${fmtTimingISO(timing.startDate)} → ${fmtTimingISO(timing.endDate)}`
+                            : fmtTimingISO(timing.startDate))
+                        : <span style={{ color: C.inkFaint, fontWeight: 400 }}>Not set</span>}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          );
+        })()}
+        </div>{/* end v28-PICKUP-DROPOFF grid */}
 
         {/* ── SITE ACCESS — loading + dumping side-by-side, view-mode notes
             collapsed inline. Dropped the "What's loading the haul" /
