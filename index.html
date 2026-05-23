@@ -369,6 +369,9 @@
       .hauler-card-collapse-hint { text-align: center; }
       .hauler-card-action-btns { justify-content: stretch !important; }
       .hauler-card-action-btns > * { flex: 1; }
+      /* Top-right dashboard hotspot: drop the label, keep the arrow + hit target. */
+      .hauler-card-open-btn-label { display: none; }
+      .hauler-card-open-btn { padding: 6px 10px !important; }
     }
     @media (max-width: 480px) {
       .hauler-card-stats { grid-template-columns: repeat(2, 1fr) !important; }
@@ -8652,16 +8655,41 @@ function AdminHaulers({ db, setDb, navigate }) {
         }}
       >
         <div style={{ padding: S[4] }}>
-          {/* Header: identity + status pill */}
+          {/* Header: identity + status pill + dashboard hotspot */}
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[3] }}>
             <Avatar name={h.name} color={C.accent} size={40} logo={h.logo} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                 <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
                 <Pill color={stat.tone} soft={stat.soft}>{stat.label}</Pill>
+                <Pill color={C.inkDim} soft="rgba(255,255,255,0.04)">Rating {h.reliability}</Pill>
               </div>
               <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{h.phone} · {h.email}</div>
             </div>
+            {/* Top-right hotspot — jumps to this hauler's dedicated dashboard.
+                stopPropagation so it doesn't toggle the card's expand state. */}
+            <button
+              type="button"
+              className="hauler-card-open-btn"
+              onClick={(e) => { e.stopPropagation(); navigate('/admin/haulers/' + h.id); }}
+              aria-label={'Open ' + h.name + ' dashboard'}
+              title="Open hauler dashboard"
+              style={{
+                ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase',
+                background: 'rgba(0,0,0,0.45)',
+                color: C.accent,
+                border: `1px solid ${C.rule}`,
+                borderRadius: R.pill, padding: '6px 12px', fontWeight: 700, cursor: 'pointer',
+                display: 'inline-flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap',
+                flexShrink: 0, alignSelf: 'flex-start',
+                transition: 'border-color 140ms ease, box-shadow 140ms ease, color 140ms ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.boxShadow = `0 0 12px -4px ${C.accent}`; }}
+              onMouseLeave={(e) => { e.currentTarget.style.borderColor = C.rule; e.currentTarget.style.boxShadow = 'none'; }}
+            >
+              <span className="hauler-card-open-btn-label">Open dashboard</span>
+              <span aria-hidden="true" style={{ fontSize: '1.1em', lineHeight: 1 }}>&rarr;</span>
+            </button>
           </div>
 
           {/* Verification + insurance flags */}
@@ -8670,7 +8698,6 @@ function AdminHaulers({ db, setDb, navigate }) {
               {h.flags.map(f => (
                 <Pill key={f.k} color={f.tone} soft={f.soft}>{f.label}</Pill>
               ))}
-              <Pill color={C.inkDim} soft="rgba(255,255,255,0.04)">Rating {h.reliability}</Pill>
             </div>
           )}
 
@@ -8715,7 +8742,6 @@ function AdminHaulers({ db, setDb, navigate }) {
               {isExpanded ? 'Click again to collapse' : 'Click to open dispatch detail'}
             </div>
             <div className="hauler-card-action-btns" style={{ display: 'flex', gap: 6 }}>
-              <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/haulers/' + h.id); }}>View fleet</Btn>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.alert('TODO: open assign-haul modal for ' + h.name); }}>Assign haul</Btn>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.location.href = 'mailto:' + (h.email || ''); }}>Message</Btn>
             </div>
