@@ -4002,10 +4002,14 @@ function AdminProjects({ db, setDb, navigate }) {
       return m ? m.label : mc;
     });
     const materialType = matLabels[0] || 'Mixed';
-    // v16: project carries an explicit `haulType` (NEEDS=import, HAS=export).
-    // Prefer that when set; fall back to the material-code derivation for
-    // legacy / pre-v16 rows that never had the field stamped.
-    const haulType = p.haulType === 'NEEDS' ? 'Import'
+    // v25: enrich a separate `haulDirection` (the verbose 'Import' /
+    // 'Export' label used by stat-card subtitles). Previously this was
+    // ALSO assigned to `haulType` in the spread below, which shadowed the
+    // raw project.haulType ('NEEDS' / 'HAS') and made HasNeedsPill on the
+    // Hauling Overview render NEEDS for every project regardless of true
+    // direction. Keep both names distinct so each consumer reads what it
+    // expects: pills read raw `haulType`, copy reads `haulDirection`.
+    const haulDirection = p.haulType === 'NEEDS' ? 'Import'
       : p.haulType === 'HAS' ? 'Export'
       : matCodes.includes('EX') ? 'Export'
       : matCodes.includes('CF') ? 'Import'
@@ -4020,7 +4024,7 @@ function AdminProjects({ db, setDb, navigate }) {
     const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
     const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
     const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
-    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulType, pickupLocation, dumpLocation, reqs };
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
     enriched.healthStatus = healthFor(enriched);
     return enriched;
   });
@@ -4133,16 +4137,30 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
-            {/* v22: HAS/NEEDS + qty + material collapsed into one line.
-                Replaces the two pills below (Import/Export + Clean Fill).
-                Qty pulled from project.volumeCYNeeded; falls back to "--"
-                when the project hasn't recorded a target yet. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-              <HasNeedsPill type={p.haulType} fontSize={13} />
-              <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
-                {p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() : '—'} CY of {p.materialType}
-              </span>
-            </div>
+            {/* v25: aggregate qty + material across the project's actual
+                non-completed haul requests, instead of the project-level
+                volumeCYNeeded + material[0]. This keeps the Hauling Overview
+                tile numerically consistent with the per-haul views (Dispatch
+                row, Haul Detail, Map popup) — sum of those rows == this row.
+                Falls back to the project's planned target when there are no
+                live reqs yet. */}
+            {(() => {
+              const liveReqs = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
+              const aggCY = liveReqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+              const matCodes = Array.from(new Set(liveReqs.map(r => r.materialCode).filter(Boolean)));
+              const aggMatLabel = matCodes.length === 0 ? (p.materialType || '—')
+                : matCodes.length === 1 ? materialLabel(matCodes[0])
+                : 'Mixed';
+              const qtyStr = liveReqs.length > 0
+                ? Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel
+                : (p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() + ' CY of ' + (p.materialType || '—') + ' (planned)' : '—');
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                  <HasNeedsPill type={p.haulType} fontSize={13} />
+                  <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{qtyStr}</span>
+                </div>
+              );
+            })()}
           </div>
           <div style={{ minWidth: 0 }}>
             {/* v22: replaces the LOADS + TRUCKS stacked pair with a single CY
@@ -4151,7 +4169,7 @@ function AdminProjects({ db, setDb, navigate }) {
                 jobs). Falls back to a neutral "CY HAULED" label when haulType
                 is unset on legacy rows. */}
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>
-              CY {p.haulType === 'Export' ? 'EXPORTED' : p.haulType === 'Import' ? 'IMPORTED' : 'HAULED'}
+              CY {p.haulDirection === 'Export' ? 'EXPORTED' : p.haulDirection === 'Import' ? 'IMPORTED' : 'HAULED'}
             </div>
             <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
               <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{(p.cyCompleted || 0).toLocaleString()}</span>
