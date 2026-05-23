@@ -4126,66 +4126,6 @@ function AdminProjects({ db, setDb, navigate }) {
     { label: 'Avg cycle time',     value: avgCycle > 0 ? avgCycle + ' min' : '—', tone: C.accent, sub: 'per load · active hauls' },
   ];
 
-  // === Needs-Attention items ===
-  const attentionItems = [];
-  active.forEach(p => {
-    if (p.pendingLoads > 0 && p.trucksActive < p.trucksAssigned) {
-      attentionItems.push({
-        id: 'att-trucks-' + p.id,
-        severity: p.pendingLoads >= 3 ? 'critical' : 'warning',
-        title: p.name,
-        body: `${p.pendingLoads} pending load${p.pendingLoads === 1 ? '' : 's'}, only ${p.trucksActive} of ${p.trucksAssigned} trucks active`,
-        actionLabel: 'Assign trucks',
-        onAction: () => { window.alert('TODO: open assign-trucks modal for ' + p.name); },
-      });
-    }
-  });
-  (db.haulRequests || []).filter(r => r.status === 'pending').forEach(r => {
-    const proj = db.projects.find(pp => pp.id === r.projectId);
-    if (!proj) return;
-    attentionItems.push({
-      id: 'att-req-' + r.id,
-      severity: 'warning',
-      title: proj.name,
-      body: `${r.volumeCY} CY of ${(MATERIALS.find(m => m.code === r.materialCode) || {}).label || r.materialCode} awaiting dispatch`,
-      actionLabel: 'Open dispatch',
-      onAction: () => navigate('/admin/requests/' + r.id),
-    });
-  });
-  upcoming.forEach(p => {
-    attentionItems.push({
-      id: 'att-up-' + p.id,
-      severity: 'info',
-      title: p.name,
-      body: 'Upcoming haul · needs truck assignments before start',
-      actionLabel: 'Review haul',
-      onAction: () => navigate('/admin/requests?projectId=' + p.id),
-    });
-  });
-  // Offline / unassigned trucks (any roster truck with no driver) — surface
-  // as info-severity so dispatchers can spot bench depth.
-  const unassignedTrucks = db.trucks.filter(t => !t.driverId);
-  if (unassignedTrucks.length > 0) {
-    attentionItems.push({
-      id: 'att-bench',
-      severity: 'info',
-      title: 'Driver pool',
-      body: `${unassignedTrucks.length} truck${unassignedTrucks.length === 1 ? '' : 's'} on roster without an assigned driver`,
-      actionLabel: 'Open dispatch',
-      onAction: () => navigate('/admin/trucks/active'),
-    });
-  }
-  attentionItems.sort((a, b) => {
-    const order = { critical: 0, warning: 1, info: 2 };
-    return order[a.severity] - order[b.severity];
-  });
-
-  const sevTone = (sev) => ({
-    critical: { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Critical' },
-    warning:  { c: C.warn,   soft: C.warnSoft, label: 'Warning'  },
-    info:     { c: C.info,   soft: C.infoSoft, label: 'Info'     },
-  }[sev] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: sev });
-
   // === Dispatch queue (pending haul requests, prioritized) ===
   const queueItems = (db.haulRequests || []).filter(r => r.status === 'pending').map(r => {
     const proj = db.projects.find(pp => pp.id === r.projectId);
@@ -4199,14 +4139,22 @@ function AdminProjects({ db, setDb, navigate }) {
   // === Operational haul card — replaces the dense table row ===
   const HaulOperationalCard = ({ p, dim }) => {
     const tone = healthTone(p.healthStatus);
+    // Shortcut: when the project has exactly one in-flight haul, deep-link to
+    // its detail page; otherwise fall back to the project-filtered list so the
+    // user can pick. In-flight = anything not completed/closed (same notion
+    // already used by the qty rollup on this same card).
+    const liveReqsForCard = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
+    const cardHref = liveReqsForCard.length === 1
+      ? '/admin/requests/' + liveReqsForCard[0].id
+      : '/admin/requests?projectId=' + p.id;
     return (
       <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
         <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start', cursor: 'pointer' }}
              className="haul-op-card-grid"
-             onClick={() => navigate('/admin/requests?projectId=' + p.id)}
+             onClick={() => navigate(cardHref)}
              role="link"
              tabIndex={0}
-             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/admin/requests?projectId=' + p.id); } }}>
+             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(cardHref); } }}>
           <div style={{ minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 4, flexWrap: 'wrap' }}>
               <h3 style={{ ...T.h4, fontWeight: 700, margin: 0, color: C.ink, letterSpacing: -0.3 }}>{p.name}</h3>
@@ -5463,120 +5411,9 @@ function AdminProjects({ db, setDb, navigate }) {
         </span>
       </div>
 
-      {/* Needs Attention + Live Map row */}
-      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[6] }}>
-        {/* Needs Attention */}
-        <Card padding={0}>
-          {(() => {
-            const criticalCount = attentionItems.filter(it => it.severity === 'critical').length;
-            const warningCount = attentionItems.filter(it => it.severity === 'warning').length;
-            const infoCount = attentionItems.filter(it => it.severity === 'info').length;
-            return (
-              <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: S[2] }}>
-                <div>
-                  <Label color={C.accent}>Needs attention</Label>
-                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{attentionItems.length} exception{attentionItems.length === 1 ? '' : 's'} to triage</div>
-                </div>
-                <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
-                  <Pill color={criticalCount > 0 ? (C.danger || C.warn) : C.inkDim} soft={criticalCount > 0 ? (C.dangerSoft || C.warnSoft) : 'rgba(255,255,255,0.04)'}>{criticalCount} critical</Pill>
-                  <Pill color={warningCount > 0 ? C.warn : C.inkDim} soft={warningCount > 0 ? C.warnSoft : 'rgba(255,255,255,0.04)'}>{warningCount} warning</Pill>
-                  <Pill color={infoCount > 0 ? C.info : C.inkDim} soft={infoCount > 0 ? C.infoSoft : 'rgba(255,255,255,0.04)'}>{infoCount} info</Pill>
-                </div>
-              </div>
-            );
-          })()}
-          {attentionItems.length === 0 ? (
-            <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>All clear — no exceptions on the board right now.</div>
-          ) : (
-            <div style={{ maxHeight: 420, overflowY: 'auto' }}>
-              {['critical', 'warning', 'info'].map(sev => {
-                const group = attentionItems.filter(it => it.severity === sev);
-                if (group.length === 0) return null;
-                const tone = sevTone(sev);
-                return (
-                  <div key={'sev-' + sev}>
-                    <div style={{ ...T.caption, padding: `${S[2]}px ${S[4]}px`, background: 'rgba(255,255,255,0.025)', color: tone.c, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.8, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span>{tone.label}</span>
-                      <span style={{ ...T.caption, color: C.inkDim, fontWeight: 600 }}>{group.length}</span>
-                    </div>
-                    {group.map((it, i) => (
-                      <div key={it.id} style={{ padding: S[3], borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-                        <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
-                        <div style={{ flex: 1, minWidth: 200 }}>
-                          <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{it.title}</div>
-                          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{it.body}</div>
-                        </div>
-                        <Btn variant="secondary" size="xs" onClick={it.onAction}>{it.actionLabel}</Btn>
-                      </div>
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
+      {/* Live Map + Site Conditions row */}
+      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[6] }}>
         <LiveOperationsTileMap />
-      </div>
-
-      {/* Live truck activity + site conditions row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[5] }} className="hcc-attn-row">
-        {/* Live Truck Activity */}
-        <Card padding={0}>
-          <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-            <div>
-              <Label color={C.accent}>Live truck activity</Label>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{liveTrucksAll} truck{liveTrucksAll === 1 ? '' : 's'} on the clock · realtime cycle state</div>
-            </div>
-            <Pill color={C.ok} soft={C.okSoft}>Live</Pill>
-          </div>
-          {(() => {
-            // Derive per-truck live state from open shifts. Cycle state cycles
-            // through Loading/Hauling/Dumping/Returning based on a deterministic
-            // hash of truckId+now so the demo feels live without random churn.
-            const openShifts = (db.hours || []).filter(h => h.status === 'open');
-            const cycleStates = ['Loading', 'Hauling', 'Dumping', 'Returning'];
-            const stateColor = (s) => s === 'Hauling' ? C.accent : s === 'Loading' ? C.info : s === 'Dumping' ? C.warn : s === 'Returning' ? C.inkDim : C.inkDim;
-            const minutesSinceClockIn = (clockIn) => {
-              const [hh, mm] = (clockIn || '00:00').split(':').map(Number);
-              const now = new Date();
-              return Math.max(0, (now.getHours() * 60 + now.getMinutes()) - (hh * 60 + mm));
-            };
-            const rows = openShifts.map(h => {
-              const t = db.trucks.find(tt => tt.id === h.truckId);
-              const d = db.drivers.find(dd => dd.id === h.driverId);
-              const proj = db.projects.find(pp => pp.id === h.projectId);
-              const mins = minutesSinceClockIn(h.clockIn);
-              // Bucket: every ~12 min the truck moves to next state.
-              const stateIdx = Math.floor(mins / 12) % cycleStates.length;
-              const state = cycleStates[stateIdx];
-              // ETA = remaining minutes in current cycle (12 - mins%12).
-              const etaMin = 12 - (mins % 12);
-              // Last ping: 5-55s ago, deterministic per truck.
-              const ping = 5 + ((t ? t.plate.charCodeAt(0) : 0) % 50);
-              return { h, t, d, proj, state, etaMin, ping };
-            });
-            if (rows.length === 0) return <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No trucks currently on the clock.</div>;
-            return (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead><tr><Th>Truck</Th><Th>Driver</Th><Th>Haul</Th><Th>Status</Th><Th align="right">ETA</Th><Th align="right">Last ping</Th></tr></thead>
-                <tbody>
-                  {rows.map(r => (
-                    <Tr key={r.h.id} onClick={() => r.t && r.proj && r.t.haulerId ? navigate(`/admin/p/${r.proj.id}/o/${r.t.haulerId}/t/${r.t.id}`) : null}>
-                      <Td mono><span style={{ color: C.accent }}>#{r.t ? r.t.plate : '—'}</span></Td>
-                      <Td>{r.d ? r.d.name : <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                      <Td>{r.proj ? r.proj.name : <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                      <Td><Pill color={stateColor(r.state)} soft={r.state === 'Hauling' ? C.accentSoft : r.state === 'Loading' ? C.infoSoft : r.state === 'Dumping' ? C.warnSoft : 'rgba(255,255,255,0.05)'}>{r.state}</Pill></Td>
-                      <Td align="right" mono>{r.etaMin} min</Td>
-                      <Td align="right" mono dim>{r.ping}s ago</Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </table>
-            );
-          })()}
-        </Card>
-
-        {/* Site Conditions — live NWS forecast with today hero + 7-day strip */}
         <SiteConditionsCard />
       </div>
 
