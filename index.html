@@ -9800,6 +9800,14 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const hauler = db.haulers.find(o => o.id === haulerId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: '', phone: '', email: '' });
+  // Attachment upload state: which row is currently uploading, last upload
+  // error message, and the add-category inline form state.
+  const [uploadingType, setUploadingType] = useState(null);
+  const [uploadError, setUploadError] = useState(null);
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCatLabel, setNewCatLabel] = useState('');
+  const [newCatHint, setNewCatHint] = useState('');
+  const fileInputsRef = useRef({});
   if (!hauler) return <NotFound navigate={navigate} />;
   const projects = db.projects.filter(p => hauler.projectIds.includes(p.id));
   const trucks = db.trucks.filter(t => t.haulerId === hauler.id);
@@ -9884,27 +9892,128 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     navigate('/admin/haulers');
   };
 
-  // Attachments: 4 doc categories. Each entry shows current upload state or empty placeholder.
-  // For the mockup we simulate uploads by generating filenames + ISO dates client-side.
+  // Attachments. 4 built-in doc categories + arbitrary user-defined custom
+  // categories. Real file uploads land in Supabase Storage bucket
+  // 'hauler-documents' (public bucket, RLS allows anon — matches the rest
+  // of the demo's wide-open policies). Metadata (path, public URL, size,
+  // mime, uploadedAt, custom flag, label/hint for customs) is persisted
+  // in the existing haulers.attachments jsonb column.
   const DOC_TYPES = [
     { code: 'w9',        label: 'W-9',       hint: 'IRS W-9 tax form' },
     { code: 'insurance', label: 'Insurance', hint: 'Certificate of Insurance' },
     { code: 'msa',       label: 'MSA',       hint: 'Master Service Agreement' },
     { code: 'other',     label: 'Other',     hint: 'Safety certs, licenses, etc.' },
   ];
-  const slug = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'hauler';
-  const uploadAttachment = (typeCode) => {
-    // Suffix disambiguates same-day re-uploads of the same doc type so the
-    // file list reads like distinct versions instead of one filename twice.
-    const suffix = Math.random().toString(36).slice(2, 6);
-    const filename = `${slug(hauler.name)}-${typeCode}-${TODAY_ISO}-${suffix}.pdf`;
-    const newAtt = { id: 'att-' + Math.random().toString(36).substring(2, 7), type: typeCode, filename, uploadedAt: TODAY_ISO };
-    const existing = attachments.filter(a => a.type !== typeCode);
-    updateHauler({ attachments: [...existing, newAtt] });
+  // Bucket name + max upload size (25 MB) live in one place so the lockstep
+  // migration in proposal.md can stay in sync.
+  const ATTACHMENTS_BUCKET = 'hauler-documents';
+  const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+  // Render list = the 4 built-ins + any custom-category entries on the
+  // attachments array. A custom category is an attachments row with
+  // `custom: true` — it can exist as a placeholder (no file yet) or with a
+  // populated file. Dedupe by type code so a stale duplicate doesn't show
+  // two rows.
+  const customCategoryRows = (() => {
+    const seen = new Set();
+    const out = [];
+    for (const a of attachments) {
+      if (!a || !a.custom || !a.type) continue;
+      if (seen.has(a.type)) continue;
+      seen.add(a.type);
+      out.push({ code: a.type, label: a.label || 'Custom document', hint: a.hint || '', custom: true });
+    }
+    return out;
+  })();
+  const allDocTypes = [...DOC_TYPES, ...customCategoryRows];
+  const uploadedCount = attachments.filter(a => a && a.filename).length;
+
+  // Upload a File blob to Supabase Storage and append metadata to
+  // hauler.attachments. Re-uploads replace the existing row for that
+  // typeCode while preserving its custom flag + label/hint.
+  const uploadAttachment = async (typeCode, file) => {
+    if (!file) return;
+    setUploadError(null);
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setUploadError(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB · max 25 MB).`);
+      return;
+    }
+    setUploadingType(typeCode);
+    try {
+      if (!_sb || !_sb.ready || !_sb.client) throw new Error('Supabase client not initialized');
+      const safeName = (file.name || 'upload').replace(/[^a-zA-Z0-9._-]+/g, '_').slice(0, 80);
+      const path = `${hauler.id}/${typeCode}/${Date.now()}-${safeName}`;
+      const { data, error } = await _sb.client.storage
+        .from(ATTACHMENTS_BUCKET)
+        .upload(path, file, { upsert: false, contentType: file.type || 'application/octet-stream' });
+      if (error) throw error;
+      const { data: urlData } = _sb.client.storage.from(ATTACHMENTS_BUCKET).getPublicUrl(data.path);
+      const prev = attachments.find(a => a.type === typeCode) || {};
+      // If the previous attachment had a stored file, delete it now that
+      // we've successfully written the replacement.
+      if (prev.path && prev.path !== data.path) {
+        try { await _sb.client.storage.from(ATTACHMENTS_BUCKET).remove([prev.path]); } catch (e) { /* ignore */ }
+      }
+      const newAtt = {
+        id: prev.id || 'att-' + Math.random().toString(36).substring(2, 7),
+        type: typeCode,
+        filename: file.name,
+        uploadedAt: TODAY_ISO,
+        path: data.path,
+        url: urlData && urlData.publicUrl,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        // Preserve custom-category metadata across a re-upload.
+        ...(prev.custom ? { custom: true, label: prev.label, hint: prev.hint } : {}),
+      };
+      const others = attachments.filter(a => a.type !== typeCode);
+      updateHauler({ attachments: [...others, newAtt] });
+    } catch (e) {
+      setUploadError((e && e.message) || 'Upload failed');
+    } finally {
+      setUploadingType(null);
+    }
   };
-  const removeAttachment = (typeCode) => {
+  // Trigger the hidden file input for a given row.
+  const triggerUpload = (typeCode) => {
+    const inp = fileInputsRef.current && fileInputsRef.current[typeCode];
+    if (inp) { inp.value = ''; inp.click(); }
+  };
+  // Remove a file. For custom categories with a file, leave the row as an
+  // empty placeholder so the user can re-upload to the same category.
+  // For built-ins, fully drop the attachments row.
+  const removeAttachment = async (typeCode) => {
+    const att = attachments.find(a => a.type === typeCode);
+    if (!att) return;
+    if (att.path && _sb && _sb.ready && _sb.client) {
+      try { await _sb.client.storage.from(ATTACHMENTS_BUCKET).remove([att.path]); } catch (e) { /* ignore */ }
+    }
+    if (att.custom) {
+      const placeholder = { id: att.id, type: att.type, custom: true, label: att.label, hint: att.hint, filename: null, uploadedAt: null };
+      updateHauler({ attachments: [...attachments.filter(a => a.type !== typeCode), placeholder] });
+    } else {
+      updateHauler({ attachments: attachments.filter(a => a.type !== typeCode) });
+    }
+  };
+  // Delete an empty custom category entirely.
+  const deleteCategory = (typeCode) => {
+    if (!window.confirm('Remove this category? Any attached file will also be deleted.')) return;
+    const att = attachments.find(a => a.type === typeCode);
+    if (att && att.path && _sb && _sb.ready && _sb.client) {
+      try { _sb.client.storage.from(ATTACHMENTS_BUCKET).remove([att.path]); } catch (e) { /* ignore */ }
+    }
     updateHauler({ attachments: attachments.filter(a => a.type !== typeCode) });
   };
+  // Save the inline 'new category' form.
+  const saveNewCategory = () => {
+    const label = (newCatLabel || '').trim();
+    if (!label) return;
+    const code = 'cust-' + Math.random().toString(36).substring(2, 7);
+    const placeholder = { id: 'att-' + Math.random().toString(36).substring(2, 7), type: code, custom: true, label, hint: (newCatHint || '').trim(), filename: null, uploadedAt: null };
+    updateHauler({ attachments: [...attachments, placeholder] });
+    setNewCatLabel(''); setNewCatHint(''); setAddingCategory(false);
+  };
+  const cancelNewCategory = () => { setNewCatLabel(''); setNewCatHint(''); setAddingCategory(false); };
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -10015,40 +10124,110 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         )}
       </Card>
 
-      {/* Attachments — W-9, Insurance, MSA, Other. Mockup-only upload (generates ISO-named pdf). */}
+      {/* Attachments — W-9, Insurance, MSA, Other + user-defined custom categories.
+          Real uploads write to Supabase Storage bucket 'hauler-documents'. */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
         <div>
           <Label>Attachments</Label>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            {attachments.length === 0 ? 'No documents on file.' : `${attachments.length} of ${DOC_TYPES.length} document${DOC_TYPES.length === 1 ? '' : 's'} on file.`}
+            {uploadedCount === 0
+              ? `No documents on file. ${allDocTypes.length} categor${allDocTypes.length === 1 ? 'y' : 'ies'} configured.`
+              : `${uploadedCount} of ${allDocTypes.length} document${allDocTypes.length === 1 ? '' : 's'} on file.`}
           </div>
         </div>
       </div>
+      {uploadError && (
+        <div style={{ ...T.bodySm, padding: `${S[2]}px ${S[3]}px`, marginBottom: S[3], borderRadius: R.sm, background: C.warnSoft, color: C.warn, border: `1px solid ${C.warn}` }}>
+          {uploadError}
+        </div>
+      )}
       <Card padding={0} style={{ marginBottom: S[6] }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><Th>Document</Th><Th>File</Th><Th>Uploaded</Th><Th></Th></tr></thead>
           <tbody>
-            {DOC_TYPES.map(dt => {
+            {allDocTypes.map(dt => {
               const att = attachments.find(a => a.type === dt.code);
+              const hasFile = !!(att && att.filename);
+              const isUploading = uploadingType === dt.code;
               return (
                 <tr key={dt.code} style={{ borderTop: `1px solid ${C.rule}` }}>
                   <Td>
-                    <div style={{ fontWeight: 600, color: C.ink }}>{dt.label}</div>
-                    <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{dt.hint}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+                      <div>
+                        <div style={{ fontWeight: 600, color: C.ink }}>{dt.label}{dt.custom && <span style={{ ...T.caption, color: C.inkFaint, marginLeft: S[2], fontWeight: 400 }}>custom</span>}</div>
+                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{dt.hint || (dt.custom ? '—' : '')}</div>
+                      </div>
+                    </div>
                   </Td>
-                  <Td mono>{att ? <span style={{ color: C.ink }}>{att.filename}</span> : <span style={{ color: C.inkFaint }}>— not uploaded</span>}</Td>
-                  <Td mono dim>{att ? isoToShortDate(att.uploadedAt) : '—'}</Td>
+                  <Td mono>
+                    {hasFile
+                      ? (att.url
+                          ? <a href={att.url} target="_blank" rel="noopener noreferrer" style={{ color: C.accent, textDecoration: 'none' }} title={`Open ${att.filename}`}>{att.filename}</a>
+                          : <span style={{ color: C.ink }}>{att.filename}</span>)
+                      : <span style={{ color: C.inkFaint }}>— not uploaded</span>}
+                    {hasFile && att.size != null && (
+                      <span style={{ ...T.caption, color: C.inkFaint, marginLeft: S[2] }}>{(att.size / 1024).toFixed(1)} KB</span>
+                    )}
+                  </Td>
+                  <Td mono dim>{hasFile ? isoToShortDate(att.uploadedAt) : '—'}</Td>
                   <Td align="right">
-                    <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
-                      <Btn variant={att ? 'secondary' : 'primary'} size="sm" onClick={() => uploadAttachment(dt.code)}>
-                        {att ? 'Replace' : 'Upload'}
+                    <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end', alignItems: 'center' }}>
+                      <input
+                        ref={el => { fileInputsRef.current[dt.code] = el; }}
+                        type="file"
+                        style={{ display: 'none' }}
+                        onChange={e => {
+                          const f = e.target.files && e.target.files[0];
+                          if (f) uploadAttachment(dt.code, f);
+                        }}
+                      />
+                      <Btn variant={hasFile ? 'secondary' : 'primary'} size="sm"
+                        onClick={() => triggerUpload(dt.code)}
+                        disabled={isUploading}>
+                        {isUploading ? 'Uploading…' : (hasFile ? 'Replace' : 'Upload')}
                       </Btn>
-                      {att && <Btn variant="danger" size="sm" onClick={() => removeAttachment(dt.code)}>Remove</Btn>}
+                      {hasFile && <Btn variant="danger" size="sm" onClick={() => removeAttachment(dt.code)} disabled={isUploading}>Remove</Btn>}
+                      {dt.custom && !hasFile && (
+                        <Btn variant="ghost" size="sm" onClick={() => deleteCategory(dt.code)} disabled={isUploading} title="Delete this category">Delete category</Btn>
+                      )}
                     </div>
                   </Td>
                 </tr>
               );
             })}
+            {addingCategory ? (
+              <tr style={{ borderTop: `1px solid ${C.rule}`, background: C.surfaceHi }}>
+                <td colSpan={4} style={{ padding: `${S[3]}px ${S[4]}px` }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'minmax(180px, 1fr) minmax(220px, 2fr) auto', gap: S[3], alignItems: 'end' }}>
+                    <div>
+                      <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>CATEGORY NAME</div>
+                      <input autoFocus value={newCatLabel} onChange={e => setNewCatLabel(e.target.value)}
+                        placeholder="e.g. Safety Cert"
+                        onKeyDown={e => { if (e.key === 'Enter' && newCatLabel.trim()) saveNewCategory(); if (e.key === 'Escape') cancelNewCategory(); }}
+                        style={{ width: '100%', background: C.bg, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 10px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14 }} />
+                    </div>
+                    <div>
+                      <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>DESCRIPTION (OPTIONAL)</div>
+                      <input value={newCatHint} onChange={e => setNewCatHint(e.target.value)}
+                        placeholder="What kind of document goes here"
+                        onKeyDown={e => { if (e.key === 'Enter' && newCatLabel.trim()) saveNewCategory(); if (e.key === 'Escape') cancelNewCategory(); }}
+                        style={{ width: '100%', background: C.bg, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 10px', borderRadius: R.sm, fontFamily: F.body, fontSize: 14 }} />
+                    </div>
+                    <div style={{ display: 'flex', gap: S[2] }}>
+                      <Btn variant="primary" size="sm" onClick={saveNewCategory} disabled={!newCatLabel.trim()}>Add</Btn>
+                      <Btn variant="secondary" size="sm" onClick={cancelNewCategory}>Cancel</Btn>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              <tr onClick={() => setAddingCategory(true)}
+                style={{ cursor: 'pointer', borderTop: `1px solid ${C.rule}` }}
+                onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
+                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                <td colSpan={4} style={{ ...T.bodySm, padding: '14px 14px', fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add document category</td>
+              </tr>
+            )}
           </tbody>
         </table>
       </Card>
