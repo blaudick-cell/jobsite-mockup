@@ -7441,6 +7441,12 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   // Lifecycle of the two external calls. Lets us distinguish "still loading"
   // from "geocode failed" / "route failed" so the placeholder copy stays honest.
   const [status, setStatus] = useState({ geocode: 'idle', route: 'idle' });
+  // styleLoaded flips true inside map.on('load') after source + layers are
+  // added. The data-apply effect waits for this before calling setData, so
+  // the OSRM polyline reliably replaces the dashed-straight-line fallback
+  // even when OSRM resolves AFTER the load event has already fired (the
+  // previous map.once('load', apply) path never fires for past load events).
+  const [styleLoaded, setStyleLoaded] = useState(false);
 
   const pickAddr = (pickupAddress || '').trim();
   const dropAddr = (dropoffAddress || '').trim();
@@ -7528,6 +7534,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       try { map.addLayer({ id: 'mini-route-glow', type: 'line', source: 'mini-route', paint: { 'line-color': '#B3E635', 'line-width': 8, 'line-opacity': 0.22, 'line-blur': 5 }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
       try { map.addLayer({ id: 'mini-route-line', type: 'line', source: 'mini-route', filter: ['==', ['get', 'isStraight'], false], paint: { 'line-color': '#B3E635', 'line-width': 3, 'line-opacity': 0.9 }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
       try { map.addLayer({ id: 'mini-route-fallback', type: 'line', source: 'mini-route', filter: ['==', ['get', 'isStraight'], true], paint: { 'line-color': '#B3E635', 'line-width': 3, 'line-opacity': 0.45, 'line-dasharray': [2, 2] }, layout: { 'line-cap': 'round', 'line-join': 'round' } }); } catch (e) { /* ignore */ }
+      setStyleLoaded(true);
     });
     let ro = null;
     try { ro = new ResizeObserver(() => { if (mapRef.current) mapRef.current.resize(); }); ro.observe(containerRef.current); } catch (e) { /* ignore */ }
@@ -7535,6 +7542,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       if (ro) ro.disconnect();
       try { map.remove(); } catch (e) { /* ignore */ }
       mapRef.current = null;
+      setStyleLoaded(false);
     };
   }, [mlAvailable, hasAddresses]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -7551,57 +7559,53 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
     + '|' + (dump ? dump.lng.toFixed(4) + ',' + dump.lat.toFixed(4) : '-')
     + '|' + (haveRealRoute ? 'r' : (status.route === 'failed' ? 'f' : 'n'));
   useEffect(() => {
+    if (!styleLoaded) return undefined;
+    const map = mapRef.current;
+    if (!map) return undefined;
     let cancelled = false;
     const t = setTimeout(() => {
       if (cancelled) return;
-      const map = mapRef.current;
-      if (!map) return;
-      const apply = () => {
-        if (cancelled) return;
-        markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
-        markersRef.current = [];
-        const src = map.getSource && map.getSource('mini-route');
-        if (src) {
-          try {
-            const features = routeCoords
-              ? [{ type: 'Feature', properties: { isStraight }, geometry: { type: 'LineString', coordinates: routeCoords } }]
-              : [];
-            src.setData({ type: 'FeatureCollection', features });
-          } catch (e) { /* ignore */ }
-        }
-        const PICKUP_HALO = 'radial-gradient(circle, #f35f5f8c, #f35f5f2e 55%, #f35f5f00 75%)';
-        const DUMP_HALO   = 'radial-gradient(circle, #b3e6358c, #b3e6352e 55%, #b3e63500 75%)';
-        const mkPin = (haloBg, dotColor) => {
-          const el = document.createElement('div');
-          el.className = 'jx-haul-pin';
-          el.style.cursor = 'default';
-          const halo = document.createElement('span');
-          halo.className = 'jx-haul-pin-halo';
-          halo.style.background = haloBg;
-          const dot = document.createElement('span');
-          dot.className = 'jx-haul-pin-dot';
-          dot.style.background = dotColor;
-          el.appendChild(halo);
-          el.appendChild(dot);
-          return el;
-        };
+      markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
+      markersRef.current = [];
+      const src = map.getSource && map.getSource('mini-route');
+      if (src) {
         try {
-          if (pick) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(PICKUP_HALO, '#ef5b5b'), anchor: 'center' }).setLngLat([pick.lng, pick.lat]).addTo(map));
-          if (dump) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(DUMP_HALO, '#B3E635'), anchor: 'center' }).setLngLat([dump.lng, dump.lat]).addTo(map));
+          const features = routeCoords
+            ? [{ type: 'Feature', properties: { isStraight }, geometry: { type: 'LineString', coordinates: routeCoords } }]
+            : [];
+          src.setData({ type: 'FeatureCollection', features });
         } catch (e) { /* ignore */ }
-        const fitPoints = routeCoords && routeCoords.length >= 2
-          ? routeCoords
-          : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
-        if (fitPoints) {
-          try {
-            const bounds = new window.maplibregl.LngLatBounds();
-            fitPoints.forEach(c => bounds.extend(c));
-            map.fitBounds(bounds, { padding: 40, maxZoom: 13, duration: 0 });
-          } catch (e) { /* ignore */ }
-        }
+      }
+      const PICKUP_HALO = 'radial-gradient(circle, #f35f5f8c, #f35f5f2e 55%, #f35f5f00 75%)';
+      const DUMP_HALO   = 'radial-gradient(circle, #b3e6358c, #b3e6352e 55%, #b3e63500 75%)';
+      const mkPin = (haloBg, dotColor) => {
+        const el = document.createElement('div');
+        el.className = 'jx-haul-pin';
+        el.style.cursor = 'default';
+        const halo = document.createElement('span');
+        halo.className = 'jx-haul-pin-halo';
+        halo.style.background = haloBg;
+        const dot = document.createElement('span');
+        dot.className = 'jx-haul-pin-dot';
+        dot.style.background = dotColor;
+        el.appendChild(halo);
+        el.appendChild(dot);
+        return el;
       };
-      if (map.loaded && map.loaded()) apply();
-      else if (map.once) map.once('load', apply);
+      try {
+        if (pick) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(PICKUP_HALO, '#ef5b5b'), anchor: 'center' }).setLngLat([pick.lng, pick.lat]).addTo(map));
+        if (dump) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(DUMP_HALO, '#B3E635'), anchor: 'center' }).setLngLat([dump.lng, dump.lat]).addTo(map));
+      } catch (e) { /* ignore */ }
+      const fitPoints = routeCoords && routeCoords.length >= 2
+        ? routeCoords
+        : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
+      if (fitPoints) {
+        try {
+          const bounds = new window.maplibregl.LngLatBounds();
+          fitPoints.forEach(c => bounds.extend(c));
+          map.fitBounds(bounds, { padding: 40, maxZoom: 13, duration: 0 });
+        } catch (e) { /* ignore */ }
+      }
     }, 0);
     return () => {
       cancelled = true;
@@ -7609,7 +7613,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
       markersRef.current = [];
     };
-  }, [coordsSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [coordsSig, styleLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Throughput math: cycle = 10 min load + drive + 5 min dump + drive (one-way
   // drive used both directions). 8-hr productive shift. CY/load = INVOICE_CY_RATE.TAN.
