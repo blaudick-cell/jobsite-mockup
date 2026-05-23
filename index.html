@@ -1370,7 +1370,7 @@ const PROJECTS_SEED = [
 // migration in hydrateDb) so legacy stored payloads keep working.
 const HAULERS_SEED = [
   { id: 'op-001', name: 'Dominguez',         contact: 'Antonio Dominguez', phone: '720-439-1097', email: 'antonguez3187@gmail.com',     address: '391 S. 31st Ave, Brighton, CO 80601',           projectIds: ['RR','RG'],            logo: '/logos/Dominguez_logo.png',       attachments: [] },
-  { id: 'op-002', name: 'Z&Z Hauling LLC',   contact: '',                  phone: '',             email: '',                            address: 'PO Box 357, Fort Lupton, CO',                   projectIds: ['RR','RG','GE'],       logo: '/logos/Z_Z_Hauling_logo.png',     attachments: [] },
+  { id: 'op-002', name: 'Z&Z Hauling LLC',   contact: '',                  phone: '',             email: '',                            address: '811 Rollie Ave, Fort Lupton, CO 80621',                   projectIds: ['RR','RG','GE'],       logo: '/logos/Z_Z_Hauling_logo.png',     attachments: [] },
   { id: 'op-003', name: 'OZ Trucking',       contact: '',                  phone: '720-628-2678', email: 'Jubalin74@gmail.com',         address: '978 S Osceola St, Denver, CO 80219',            projectIds: ['RR','RG','GE'],       logo: '/logos/Oz_Trucking_logo.png',     attachments: [] },
   { id: 'op-004', name: 'Tecos Trucking',    contact: '',                  phone: '720-692-1945', email: 'tecostrucking@gmail.com',     address: '5557 Troy St, Denver, CO 80239',                projectIds: ['RG','GE'],            logo: '/logos/Tecos_Trucking_logo.png',  attachments: [] },
   { id: 'op-005', name: 'Garcia Trucking',   contact: '',                  phone: '303-210-9325', email: 'garciatrucking4891@gmail.com', address: '13565 County Rd 2 1/2, Brighton, CO 80603',    projectIds: ['RR','RG','GE'],       logo: '/logos/Garcia_Trucking_logo.png', attachments: [] },
@@ -1798,6 +1798,17 @@ const GEOCODE_SEED = {
   '88 Greenway Blvd, Boulder, CO 80301':            { lat: 40.0150, lng: -105.2705 },
   '7501 Stuart St, Westminster, CO 80030':          { lat: 39.8284, lng: -105.0413 },
   '12200 E 56th Ave, Denver, CO 80239':             { lat: 39.7910, lng: -104.8439 },
+  // ----- Hauler home-base addresses (HAULERS_SEED.address values, verbatim). -----
+  // Coords sourced from public records / FMCSA SAFER / Zillow + Google for
+  // map-pin placement on the Hauling Overview. Z&Z swapped from the PO box
+  // listed in DOT records to the physical at 811 Rollie Ave (FMCSA SAFER
+  // snapshot, DOT 2824356) and geocoded via Census TIGER.
+  '391 S. 31st Ave, Brighton, CO 80601':            { lat: 39.9743, lng: -104.7988 },
+  '811 Rollie Ave, Fort Lupton, CO 80621':          { lat: 40.0868, lng: -104.8041 },
+  '978 S Osceola St, Denver, CO 80219':             { lat: 39.7050, lng: -105.0420 },
+  '5557 Troy St, Denver, CO 80239':                 { lat: 39.7791, lng: -104.8412 },
+  '13565 County Rd 2 1/2, Brighton, CO 80603':      { lat: 40.0530, lng: -104.7530 },
+  '1500 W. Thornton Pkwy #252, Thornton, CO 80260': { lat: 39.8709, lng: -105.0078 },
 };
 // Per-CY billing rates by truck type. Used by the per-hauler / per-haul
 // invoice generator in the Reports tab — hauls track volume, not shift
@@ -4072,6 +4083,20 @@ function AdminProjects({ db, setDb, navigate }) {
     // DOM elements so we don't rely on the one-shot `map.on('load')` capture.
     const endpointsSignature = projectEndpoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5) + ':' + p.type + ':' + (p.status || '')).join('|');
 
+    // Hauler home-base pins. Resolved via the same geocode cache used by
+    // project/endpoint markers — `db.haulers[*].address` is keyed into
+    // GEOCODE_SEED in Block 2. Rendered as gray dots (separate from the
+    // red/accent project pickup/dump pins) so a dispatcher can see at a
+    // glance where each hauler is based. Skips haulers whose address
+    // hasn't been geocoded yet (Nominatim falls through for any address
+    // edited via EditableText but not yet resolved).
+    const haulerPoints = (db.haulers || []).map(h => {
+      const c = resolveCoord(h.address);
+      if (!c) return null;
+      return { id: 'hauler-' + h.id, type: 'hauler', coord: c, label: h.name + (h.address ? ' · ' + h.address : '') };
+    }).filter(Boolean);
+    const haulersSignature = haulerPoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5)).join('|');
+
     // Pending-route signature for the ASYNC-FETCH effect: changes when the set
     // of un-cached project routes changes. Used as a deps array so the effect
     // doesn't loop after a successful fetch.
@@ -4199,8 +4224,13 @@ function AdminProjects({ db, setDb, navigate }) {
         };
         const haloFor = (type) => type === 'pickup' ? PICKUP_HALO : DUMP_HALO;
         const dotFor  = (type) => type === 'pickup' ? '#ef5b5b'    : '#B3E635';
+        // Hauler home-base halo + dot — gray, slightly lower visual weight
+        // than pickup/dump so they don't compete with the live operational
+        // pins. C.inkDim = #9A9A9A.
+        const HAULER_HALO = 'radial-gradient(circle, #9a9a9a66, #9a9a9a22 55%, #9a9a9a00 75%)';
+        const HAULER_DOT  = '#9A9A9A';
         // Remove any previously-added markers so we don't accumulate duplicates
-        // when projectEndpoints changes.
+        // when projectEndpoints or haulerPoints changes.
         markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
         markersRef.current = [];
         const addAll = () => {
@@ -4208,6 +4238,15 @@ function AdminProjects({ db, setDb, navigate }) {
           try {
             projectEndpoints.forEach(pt => {
               const el = mkHaloDotEl(haloFor(pt.type), dotFor(pt.type));
+              const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
+                .setLngLat([pt.coord.lng, pt.coord.lat])
+                .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
+                .addTo(map);
+              markersRef.current.push(marker);
+            });
+            haulerPoints.forEach(pt => {
+              const el = mkHaloDotEl(HAULER_HALO, HAULER_DOT);
+              el.classList.add('jx-haul-pin-hauler');
               const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
                 .setLngLat([pt.coord.lng, pt.coord.lat])
                 .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
@@ -4229,7 +4268,7 @@ function AdminProjects({ db, setDb, navigate }) {
         markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
         markersRef.current = [];
       };
-    }, [endpointsSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [endpointsSignature, haulersSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
       if (!mlAvailable || !containerRef.current) return;
@@ -4338,7 +4377,7 @@ function AdminProjects({ db, setDb, navigate }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
           <Label color={C.accent}>Live operations map</Label>
           <span style={{ ...T.caption, color: C.inkDim }}>
-            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {projectRoutes.length} route{projectRoutes.length === 1 ? '' : 's'} {(() => {
+            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {projectRoutes.length} route{projectRoutes.length === 1 ? '' : 's'} {(() => {
               const osrm = projectRoutes.filter(r => !r.isStraight).length;
               const totalMeters = projectRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
               const totalMinutes = projectRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
@@ -8695,6 +8734,9 @@ function AdminHaulers({ db, setDb, navigate }) {
                 <Pill color={C.inkDim} soft="rgba(255,255,255,0.04)">Rating {h.reliability}</Pill>
               </div>
               <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{h.phone} · {h.email}</div>
+              {h.address && (
+                <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{h.address}</div>
+              )}
             </div>
             {/* Top-right hotspot — jumps to this hauler's dedicated dashboard.
                 stopPropagation so it doesn't toggle the card's expand state. */}
@@ -8968,6 +9010,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, fontFamily: F.mono }}>
               {hauler.phone} <span style={{ color: C.inkFaint }}>·</span> {hauler.email}
             </div>
+            {hauler.address && (
+              <div style={{ ...T.bodySm, color: C.inkFaint, marginTop: 2 }}>{hauler.address}</div>
+            )}
           </div>
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
