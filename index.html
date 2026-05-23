@@ -1955,11 +1955,11 @@ const GEOCODE_SEED = {
   '13565 County Rd 2 1/2, Brighton, CO 80603':      { lat: 40.0530, lng: -104.7530 },
   '1500 W. Thornton Pkwy #252, Thornton, CO 80260': { lat: 39.8709, lng: -105.0078 },
 };
-// Per-CY billing rates by truck type. Used by the per-hauler / per-haul
-// invoice generator in the Reports tab — hauls track volume, not shift
-// hours, so we bill the delivered CY directly. Hours-based billing on
-// db.rates is preserved for legacy/project-scoped invoices.
-const INVOICE_CY_RATE = { TAN: 18, SD: 22, ED: 22, BD: 22, HS: 26 };
+// v23: hourly-only billing. Every dollar value in the app is hours × rate
+// (truck.ratePerHour ?? db.rates[truck.type]). CY is reported alongside as
+// an informational column but never multiplied into money. The former
+// INVOICE_CY_RATE table is gone — see `dollarsForRequest(req, db)` for the
+// single source of truth for haul-request dollar rollups.
 
 // v18: issuer block stamped on JSE-issued haul-request invoices (interim +
 // final). Hard-coded so the printable invoice always carries Robert's
@@ -7976,12 +7976,13 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   }, [coordsSig, styleLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Throughput math: cycle = 10 min load + drive + 5 min dump + drive (one-way
-  // drive used both directions). 8-hr productive shift. CY/load = INVOICE_CY_RATE.TAN.
+  // drive used both directions). 8-hr productive shift. CY/load = 18 (tandem capacity).
   const durSec = route && Number.isFinite(route.durationSeconds) ? route.durationSeconds : null;
   const driveMin = durSec != null ? Math.max(1, Math.round(durSec / 60)) : null;
   const cycleMin = driveMin != null ? 15 + 2 * driveMin : null;
   const loadsPerShift = cycleMin != null ? Math.floor(480 / cycleMin) : null;
-  const cyPerDay = loadsPerShift != null ? loadsPerShift * (INVOICE_CY_RATE.TAN || 18) : null;
+  const TANDEM_CY_PER_LOAD = 18;
+  const cyPerDay = loadsPerShift != null ? loadsPerShift * TANDEM_CY_PER_LOAD : null;
 
   // Subtitle copy reflects whichever state the widget is currently in.
   const subtitle = !hasAddresses
@@ -8081,15 +8082,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const totalDeliveredCY = assignments.reduce((s, a) =>
     s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
   const overallPct = req.volumeCY > 0 ? (totalDeliveredCY / req.volumeCY) * 100 : 0;
-  // v28: aggregate dollar total across all assignments — mirrors the same
-  // INVOICE_CY_RATE lookup used by generateHaulInvoice so the TOTAL chip
-  // matches an interim invoice exactly.
-  const totalDollarsForHaul = (req.assignments || []).reduce((sum, a) => {
-    const truck = db.trucks.find(t => t.id === a.truckId);
-    const rate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
-    const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
-    return sum + cy * rate;
-  }, 0);
+  // v23: TOTAL chip = hours × hourly rate, matching `dollarsForRequest` —
+  // the single source of truth used by the invoice generator and every other
+  // dollar rollup on this haul.
+  const totalDollarsForHaul = dollarsForRequest(req, db);
   const totalHoursBilledForHaul = totalBilledHoursForRequest(req);
   const fmtTotalDollars = '$' + totalDollarsForHaul.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -8319,29 +8315,32 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   // Legacy assign (suggested-haulers list) — now routes through assignTruck for parity
   const assign = (haulerId, truckId) => assignTruck(haulerId, truckId);
 
-  // v18: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
-  // invoices keyed off this haul request. Line items derive from delivered CY
-  // per truck-assignment × INVOICE_CY_RATE[truckType]. `kind` distinguishes
-  // interim from final; encoded redundantly in number prefix so cross-tab
-  // Realtime broadcasts survive even before the optional `kind` column
-  // migration is applied (see outputs/supabase-migrations-needed.md v18 section).
+  // v23: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
+  // invoices keyed off this haul request. Line items bill HOURS × hourly rate
+  // (truck.ratePerHour ?? db.rates[truck.type]). `deliveredCY` is carried on
+  // each line for reporting only — it is not multiplied into the amount.
+  // `kind` distinguishes interim from final and is also encoded into the
+  // number prefix so cross-tab Realtime survives missing-column migrations.
   const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
   const generateHaulInvoice = (kind) => {
     const today = new Date().toISOString().slice(0, 10);
     const lineItems = (req.assignments || []).map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
-      const cy = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
-      const cyRate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
       const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (Number(l.cy) || 0), 0), 0);
+      const hours = (a.days || []).reduce((s, d) => s + (typeof d.hours === 'number' ? d.hours : 0), 0);
+      const ratePerHour = (truck && truck.ratePerHour != null)
+        ? truck.ratePerHour
+        : ((truck && db.rates && db.rates[truck.type]) || 0);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
         truckType: truck ? truck.type : '',
         driverName: driver ? driver.name : '—',
-        deliveredCY: cy,
-        cyRate,
-        hours: 0, rate: cyRate,
-        amount: parseFloat((cy * cyRate).toFixed(2)),
+        deliveredCY: cy,        // informational; not used in amount
+        hours,
+        rate: ratePerHour,      // $/hr (kept on shape `rate` to match legacy seed invoices)
+        amount: parseFloat((hours * ratePerHour).toFixed(2)),
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
@@ -10146,7 +10145,8 @@ function AdminReporting({ db, setDb, navigate }) {
   // ===== Per-hauler / per-haul invoicing =====
   // Each hauler gets a section. Inside each, one row per haul-request the
   // hauler is assigned to, with status + actions for the haul-scoped invoice
-  // (auto-generated from delivered loads via INVOICE_CY_RATE). Status flow
+  // (auto-generated from billed hours × the truck's hourly rate; CY is
+  // reported alongside but never multiplied into the amount). Status flow
   // reuses the v11 invoice state machine (draft → sent → paid).
   const haulRequests = db.haulRequests || [];
   const haulsForHauler = (haulerId) => haulRequests
@@ -10166,25 +10166,26 @@ function AdminReporting({ db, setDb, navigate }) {
     const project = db.projects.find(p => p.id === req.projectId);
     const myAssignments = (req.assignments || []).filter(a => a.haulerId === haulerId);
     const today = new Date().toISOString().slice(0, 10);
-    // CY-based line item per truck assigned to this haul. We tuck deliveredCY
-    // into the existing line item shape; hours/rate are kept (set to 0/CY-rate)
-    // so legacy print views don't trip on missing fields.
+    // v23: hours × hourly rate per truck assignment. deliveredCY rides
+    // along for the CY column on the printable invoice but does NOT flow
+    // into the amount.
     const lineItems = myAssignments.map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
-      const cy = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
-      const cyRate = (truck && INVOICE_CY_RATE[truck.type]) || 20;
       const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (Number(l.cy) || 0), 0), 0);
+      const hours = (a.days || []).reduce((s, d) => s + (typeof d.hours === 'number' ? d.hours : 0), 0);
+      const ratePerHour = (truck && truck.ratePerHour != null)
+        ? truck.ratePerHour
+        : ((truck && db.rates && db.rates[truck.type]) || 0);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
         truckType: truck ? truck.type : '',
         driverName: driver ? driver.name : '—',
-        deliveredCY: cy,
-        cyRate,
-        // Preserve hours/rate shape for compatibility with the AdminPayments
-        // print view — we just zero hours and put CY × cyRate into amount.
-        hours: 0, rate: cyRate,
-        amount: parseFloat((cy * cyRate).toFixed(2)),
+        deliveredCY: cy,        // informational; not in amount
+        hours,
+        rate: ratePerHour,      // $/hr
+        amount: parseFloat((hours * ratePerHour).toFixed(2)),
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
@@ -10295,15 +10296,17 @@ function AdminReporting({ db, setDb, navigate }) {
 
       {/* ===== Per-hauler invoicing =====
           One section per hauler. Inside each section, a row per haul the
-          hauler is assigned to. Invoices auto-generate from delivered loads
-          (CY × INVOICE_CY_RATE). Admin then steps each invoice through
-          draft → sent → paid. State persists via db.invoices (schema v12+).
+          hauler is assigned to. Invoices auto-generate from billed hours at
+          the truck's hourly rate (truck.ratePerHour ?? db.rates[type]); CY
+          is reported alongside but never multiplied into the amount. Admin
+          then steps each invoice through draft → sent → paid. State
+          persists via db.invoices (schema v12+).
       */}
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
         <div>
           <Label>Per-hauler invoicing</Label>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            One section per hauler. Sub-row per haul they're on. Auto-generates an invoice from delivered loads at the truck-type CY rate.
+            One section per hauler. Sub-row per haul they're on. Auto-generates an invoice from billed hours at the truck's hourly rate.
           </div>
         </div>
       </div>
@@ -11069,28 +11072,36 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
               <tr style={{ background: C.surfaceHi }}>
                 <Th>Description</Th>
                 <Th align="right">CY delivered</Th>
-                <Th align="right">Rate / CY</Th>
+                <Th align="right">Hours</Th>
+                <Th align="right">Rate / hr</Th>
                 <Th align="right">Line total</Th>
               </tr>
             </thead>
             <tbody>
               {lineItems.length === 0 ? (
                 <tr>
-                  <td colSpan="4" style={{ ...T.bodySm, textAlign: 'center', padding: S[4], color: C.inkDim }}>
-                    No deliveries logged yet for this haul.
+                  <td colSpan="5" style={{ ...T.bodySm, textAlign: 'center', padding: S[4], color: C.inkDim }}>
+                    No hours logged yet for this haul.
                   </td>
                 </tr>
-              ) : lineItems.map(li => (
-                <tr key={li.id} className="invoice-print-line" style={{ borderBottom: '1px solid ' + C.rule }}>
-                  <Td>
-                    <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Truck #{li.truckPlate} ({li.truckType})</div>
-                    <div style={{ ...T.caption, color: C.inkDim }}>{li.driverName || '—'}</div>
-                  </Td>
-                  <Td align="right" mono>{li.deliveredCY || 0}</Td>
-                  <Td align="right" mono>{fmtMoney(li.cyRate || li.rate || 0)}</Td>
-                  <Td align="right" mono>{fmtMoney(li.amount || 0)}</Td>
-                </tr>
-              ))}
+              ) : lineItems.map(li => {
+                // v23: hourly billing — amount = hours × rate. CY is informational.
+                const liHours = typeof li.hours === 'number' ? li.hours : 0;
+                const liRate  = typeof li.rate  === 'number' ? li.rate  : 0;
+                const cyCell  = (li.deliveredCY != null && li.deliveredCY !== '') ? li.deliveredCY.toLocaleString() : '—';
+                return (
+                  <tr key={li.id} className="invoice-print-line" style={{ borderBottom: '1px solid ' + C.rule }}>
+                    <Td>
+                      <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Truck #{li.truckPlate} ({li.truckType})</div>
+                      <div style={{ ...T.caption, color: C.inkDim }}>{li.driverName || '—'}</div>
+                    </Td>
+                    <Td align="right" mono>{cyCell}</Td>
+                    <Td align="right" mono>{liHours.toFixed(2)}</Td>
+                    <Td align="right" mono>{fmtMoney(liRate)}</Td>
+                    <Td align="right" mono>{fmtMoney(li.amount || 0)}</Td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
