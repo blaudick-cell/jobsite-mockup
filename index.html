@@ -2831,7 +2831,7 @@ const SB_FIELDS_JS = {
   projects:     ['id','code','name','gc','address','startDate','status','material','haulType','contactName','contactPhone','contactEmail','volumeCYNeeded','volumeCYKnown','pickupLocation','dumpLocation'],
   haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
   drivers:      ['id','name','phone'],
-  trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId'],
+  trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
   loads:        ['id','driverId','truckId','projectId','material','cy','ticketNo','time','date','status','photo','notes'],
   hours:        ['id','driverId','truckId','projectId','clockIn','clockOut','breakMin','status','date'],
   invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','notes'],
@@ -11540,7 +11540,16 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   ];
   const todayCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  const rate = db.rates[truck.type];
+  // Per-truck rate override — falls back to the type-level rate from db.rates.
+  // Same fallback rule applies anywhere rate matters (revenue calc below).
+  const effectiveRate = truck.ratePerHour != null ? truck.ratePerHour : db.rates[truck.type];
+  const rate = effectiveRate;
+  // Admin-only edit helpers. Hauler viewer still gets the read-only layout
+  // we shipped before — type/rate/make/model are business-config concerns,
+  // not day-of-haul data the driver/hauler should mutate.
+  const updateTruck = (patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === truck.id ? { ...t, ...patch } : t) }));
+  const truckTypeOptions = TRUCK_TYPES.map(tt => ({ value: tt.code, label: tt.label }));
+  const haulerOptions = db.haulers.map(h => ({ value: h.id, label: h.name }));
 
   const crumbs = isAdmin
     ? [
@@ -11563,13 +11572,66 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[5], marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
-          <Label color={C.accent}>{truck.hauler}</Label>
-          <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>
-            Truck <span style={{ color: C.accent }}>#{truck.plate}</span>
-          </h1>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>
-            {truckType.label} · {truckType.cap} · ${rate}/hr
-          </div>
+          {isAdmin ? (
+            <>
+              <Label color={C.accent}>
+                <EditableSelect
+                  value={truck.haulerId}
+                  options={haulerOptions}
+                  onSave={(v) => {
+                    const h = db.haulers.find(x => x.id === v);
+                    updateTruck({ haulerId: v, hauler: h ? h.name : truck.hauler });
+                  }}
+                />
+              </Label>
+              <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>
+                Truck <span style={{ color: C.accent }}>
+                  #<EditableText value={truck.plate} onSave={(v) => updateTruck({ plate: v })} />
+                </span>
+              </h1>
+              <div style={{ ...T.bodySm, color: C.inkDim, display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                <EditableSelect value={truck.type} options={truckTypeOptions} onSave={(v) => updateTruck({ type: v })} />
+                <span style={{ color: C.inkFaint }}>·</span>
+                <span>
+                  <EditableText
+                    value={truck.capacityCy != null ? String(truck.capacityCy) : ''}
+                    onSave={(v) => updateTruck({ capacityCy: v ? (parseInt(v, 10) || null) : null })}
+                    placeholder={truckType.cap}
+                    mono
+                  />
+                  {truck.capacityCy != null && <span style={{ marginLeft: 2 }}>CY</span>}
+                </span>
+                <span style={{ color: C.inkFaint }}>·</span>
+                <span>$<EditableText
+                  value={String(effectiveRate != null ? effectiveRate : 0)}
+                  onSave={(v) => {
+                    const n = parseFloat(v);
+                    updateTruck({ ratePerHour: (v && !isNaN(n)) ? n : null });
+                  }}
+                  mono
+                />/hr{truck.ratePerHour != null && <span style={{ color: C.accent, marginLeft: 4, fontFamily: F.mono, fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.4 }} title="Per-truck override; clears to use the type rate">override</span>}</span>
+              </div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, display: 'flex', gap: S[3], flexWrap: 'wrap' }}>
+                <span>Make: <EditableText value={truck.make || ''} onSave={(v) => updateTruck({ make: v || null })} placeholder="—" /></span>
+                <span>Model: <EditableText value={truck.model || ''} onSave={(v) => updateTruck({ model: v || null })} placeholder="—" /></span>
+              </div>
+            </>
+          ) : (
+            <>
+              <Label color={C.accent}>{truck.hauler}</Label>
+              <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 6px', color: C.ink }}>
+                Truck <span style={{ color: C.accent }}>#{truck.plate}</span>
+              </h1>
+              <div style={{ ...T.bodySm, color: C.inkDim }}>
+                {truckType.label} · {truck.capacityCy != null ? truck.capacityCy + ' CY' : truckType.cap} · ${effectiveRate}/hr
+              </div>
+              {(truck.make || truck.model) && (
+                <div style={{ ...T.caption, color: C.inkFaint, marginTop: 4 }}>
+                  {[truck.make, truck.model].filter(Boolean).join(' ')}
+                </div>
+              )}
+            </>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
           {driver ? (
