@@ -1125,6 +1125,59 @@ function EditableMaterial({ value, onSave, style = {} }) {
   );
 }
 
+// Permanent-edit-mode material picker. Renders as a dropdown by default;
+// picking "Other…" swaps to a text input for a custom material name.
+// Unknown values (custom strings) survive as a "(custom)" option so they
+// stay selectable.
+function MaterialField({ value, onSave }) {
+  const knownMat = MATERIALS.find(m => m.code === value);
+  const [isEditingCustom, setIsEditingCustom] = useState(false);
+  const [draftText, setDraftText] = useState(value || '');
+  const fieldStyle = { ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box' };
+
+  if (isEditingCustom) {
+    const commit = () => {
+      const next = (draftText || '').trim();
+      if (next && next !== value) onSave(next);
+      setIsEditingCustom(false);
+    };
+    return (
+      <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
+        <input autoFocus value={draftText}
+          onChange={e => setDraftText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+            if (e.key === 'Escape') { setDraftText(value || ''); setIsEditingCustom(false); }
+          }}
+          placeholder="Custom material name…"
+          style={fieldStyle} />
+        <button type="button" onMouseDown={e => e.preventDefault()}
+          onClick={() => { setDraftText(value || ''); setIsEditingCustom(false); }}
+          style={{ ...T.caption, background: 'transparent', border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '4px 10px', color: C.inkDim, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+          cancel
+        </button>
+      </div>
+    );
+  }
+
+  const isCustom = !knownMat && value;
+  return (
+    <select value={isCustom ? '__current__' : (value || '')}
+      onChange={e => {
+        const v = e.target.value;
+        if (v === '__other__') { setDraftText(isCustom ? value : ''); setIsEditingCustom(true); return; }
+        if (v === '__current__') return;
+        if (v !== value) onSave(v);
+      }}
+      style={{ ...fieldStyle, cursor: 'pointer' }}>
+      {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+      {isCustom && <option value="__current__">{value} (custom)</option>}
+      <option value="__other__">Other…</option>
+    </select>
+  );
+}
+
 function PhonePreview({ children, label = 'Driver view', scale = 0.78 }) {
   const W = 360 * scale, H = 740 * scale;
   return (
@@ -7944,23 +7997,33 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <Label color={C.accent} style={{ marginBottom: 6 }}>Haul Request</Label>
+            <Label color={C.accent} style={{ marginBottom: S[3] }}>Haul Request</Label>
+            <div style={{ display: 'flex', gap: S[5], flexWrap: 'wrap', marginBottom: S[4] }}>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Quantity (CY)</Label>
+                <input type="number" min="1" step="1"
+                  value={req.volumeCY == null ? '' : req.volumeCY}
+                  onChange={e => {
+                    const raw = e.target.value;
+                    if (raw === '') return;
+                    const n = parseFloat(raw);
+                    if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                      updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                    }
+                  }}
+                  style={{ ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono, fontWeight: 700, width: 140, boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Material</Label>
+                <MaterialField value={req.materialCode}
+                  onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }} />
+              </div>
+            </div>
             <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>
-              <EditableText value={String(req.volumeCY == null ? '' : req.volumeCY)}
-                onSave={(v) => {
-                  const n = parseFloat((v || '').trim());
-                  if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
-                    updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
-                  }
-                }}
-                placeholder="0" mono />
-              {' CY of '}
-              <EditableMaterial value={req.materialCode}
-                onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }} />
+              {req.volumeCY == null ? '—' : req.volumeCY} CY of {material ? material.label : (req.materialCode || '—')}
             </h1>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
               {project ? project.name : '—'} · requested at {req.requestedAt}
-              <span style={{ color: C.inkFaint }}> · click amount or material to edit</span>
             </div>
             {req.notes && (
               <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
