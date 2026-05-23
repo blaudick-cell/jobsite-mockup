@@ -995,8 +995,8 @@ function AddressAutocomplete({ value, onSave, placeholder, db, setDb, style = {}
               style={{ padding: '8px 10px', cursor: 'pointer', background: highlightIdx === i ? 'rgba(179,230,53,0.14)' : 'transparent', borderTop: i > 0 ? `1px solid ${C.rule}` : 'none', ...T.bodySm, color: C.ink, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}
             >
               <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.displayName}</span>
-              <span style={{ ...T.caption, color: s.source === 'census' ? C.ok : C.inkFaint, fontSize: 10, letterSpacing: 0.4, textTransform: 'uppercase', flexShrink: 0 }}>
-                {s.source === 'census' ? 'USPS' : s.source}
+              <span style={{ ...T.caption, color: (s.source === 'mapbox' || s.source === 'census') ? C.ok : C.inkFaint, fontSize: 10, letterSpacing: 0.4, textTransform: 'uppercase', flexShrink: 0 }}>
+                {s.source === 'mapbox' ? 'MAPBOX' : s.source === 'census' ? 'USPS' : 'PHOTON'}
               </span>
             </div>
           ))}
@@ -1769,30 +1769,44 @@ const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', '
 // project route not in the cache, then writes the result back via setDb.
 const ROUTES_SEED = {};
 
-// === v19: Cascade geocoder + autocomplete suggestions, plus OSRM router.
-// Browser fetches, no API key. Wrapped in try/catch — callers fall back to
-// straight-line rendering if everything fails (CDN down, rate-limited, etc.).
+// === v20: Cascade geocoder + autocomplete suggestions, plus OSRM router.
+// Browser fetches via the /api/geocode Netlify Function proxy. Wrapped in
+// try/catch — callers fall back to straight-line rendering if everything
+// fails (CDN down, rate-limited, etc.).
 //
 // Cascade order (geocodeAddress):
-//   1. US Census Bureau (authoritative for US street addresses; TIGER-line
-//      matches return canonical text + accurate coords). Empirically the only
-//      service that resolves things like "1105 Rogers Street, Golden Colorado"
-//      to its real zip 80401 — Photon and Nominatim both miss it.
+//   1. Mapbox Geocoding (primary) — best-in-class US street-level coverage,
+//      autocomplete-optimized, IP-proximity-biased. Token is held server-side
+//      in the MAPBOX_TOKEN Netlify env var; the function returns a graceful
+//      empty `{ matches: [], error: ... }` when the token isn't configured,
+//      so the cascade silently falls through to Census on un-tokened deploys.
+//   2. US Census Bureau (secondary, US-only) — authoritative TIGER-line for
+//      US street addresses. The only service that resolves things like
+//      "1105 Rogers Street, Golden Colorado" to its real zip 80401 when
+//      Mapbox is unavailable.
 //      ⚠ Census does NOT send CORS headers — direct browser fetches are
-//      silently blocked. We route through our own Netlify Function at
-//      /api/geocode (same-origin, edge-cached 24h). Photon goes through the
-//      same proxy so the network path is uniform and we don't depend on any
-//      third-party CORS forwarder.
-//   2. Photon (komoot) — great fuzzy / partial matching; non-US fallback.
-//   3. Nominatim — last resort.
+//      silently blocked. The Netlify Function proxies it (same-origin,
+//      edge-cached 24h). Photon and Mapbox use the same proxy for a uniform
+//      network path.
+//   3. Photon (komoot) (tertiary) — global OSM-based fuzzy matcher. Used
+//      only when Mapbox AND Census both return empty. Filtered by a
+//      housenumber guard for queries that start with a digit (see
+//      suggestAddresses below) to keep city-level garbage out of the list.
+//   4. Nominatim — last resort for geocodeAddress (not in autocomplete).
 // Returns { lat, lng, displayName, source } or null.
 //
-// Autocomplete suggestions (suggestAddresses) query Census + Photon in
-// parallel and merge Census-first. For US-shaped queries with a house number
-// we also filter Photon's results to those whose street name overlaps with
-// the typed one — keeps "1105 12th Street" from winning when the user
-// typed "1105 Rogers" but Photon's index doesn't know Rogers St.
+// Autocomplete suggestions (suggestAddresses) fire all three sources in
+// parallel through the proxy, then pick the highest-tier non-empty list:
+// Mapbox-exclusive if Mapbox has results, else Census-exclusive, else
+// Photon (filtered).
 const GEOCODE_PROXY = '/api/geocode';
+async function fetchMapboxJson(query) {
+  try {
+    const resp = await fetch(GEOCODE_PROXY + '?source=mapbox&q=' + encodeURIComponent(query));
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (e) { return null; }
+}
 async function fetchCensusJson(address) {
   try {
     const resp = await fetch(GEOCODE_PROXY + '?source=census&q=' + encodeURIComponent(address));
@@ -1898,6 +1912,21 @@ function photonStreetMatchesQuery(displayName, queryTokens) {
   const streetText = m ? m[1] : dn;
   return queryTokens.some(t => streetText.includes(t));
 }
+// Mapbox returns GeoJSON-style features. `place_name` is the prettified
+// canonical address; `center` and `geometry.coordinates` are both [lng, lat].
+async function geocodeViaMapbox(address) {
+  const raw = String(address || '').trim();
+  if (!raw) return null;
+  const data = await fetchMapboxJson(raw);
+  if (!data || !Array.isArray(data.features) || data.features.length === 0) return null;
+  const f = data.features[0];
+  const coords = (f.geometry && f.geometry.coordinates) || f.center;
+  if (!Array.isArray(coords) || coords.length < 2) return null;
+  const lng = parseFloat(coords[0]);
+  const lat = parseFloat(coords[1]);
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  return { lat, lng, displayName: f.place_name || raw, source: 'mapbox' };
+}
 async function geocodeViaCensus(address) {
   const raw = String(address || '').trim();
   if (!raw) return null;
@@ -1948,7 +1977,8 @@ async function geocodeViaNominatim(address) {
 }
 async function geocodeAddress(address) {
   if (!address || !String(address).trim()) return null;
-  return (await geocodeViaCensus(address))
+  return (await geocodeViaMapbox(address))
+      || (await geocodeViaCensus(address))
       || (await geocodeViaPhoton(address))
       || (await geocodeViaNominatim(address));
 }
@@ -1958,6 +1988,24 @@ async function geocodeAddress(address) {
 // Census and Photon in parallel and merge Census-first. Photon stays in the
 // list because it's the only source that handles POI/business names ("Home
 // Depot Lakewood CO") and partial input as the user types. Returns up to 6.
+async function suggestViaMapbox(query) {
+  const q = String(query || '').trim();
+  if (q.length < 3) return [];
+  const data = await fetchMapboxJson(q);
+  if (!data || !Array.isArray(data.features)) return [];
+  const out = [];
+  for (const f of data.features) {
+    const coords = (f.geometry && f.geometry.coordinates) || f.center;
+    if (!Array.isArray(coords) || coords.length < 2) continue;
+    const lng = parseFloat(coords[0]);
+    const lat = parseFloat(coords[1]);
+    if (!isFinite(lat) || !isFinite(lng)) continue;
+    const displayName = f.place_name || '';
+    if (!displayName) continue;
+    out.push({ displayName, lat, lng, source: 'mapbox' });
+  }
+  return out;
+}
 async function suggestViaCensus(query) {
   const raw = String(query || '').trim();
   // Census wants something street-shaped — skip when input is too short or has
@@ -2001,10 +2049,18 @@ async function suggestViaPhoton(query) {
       const props = f.properties || {};
       const displayName = formatPhotonProps(props) || props.name || '';
       if (!displayName) continue;
-      // Carry the raw Photon "name" so suggestAddresses can apply the
-      // house-number guard from the spec ("reject any Photon result whose
-      // properties.name doesn't start with the leading number in the query").
-      out.push({ displayName, lat, lng, source: 'photon', _photonName: String(props.name || '') });
+      // Carry the raw Photon "name" AND a flag for whether Photon attached
+      // a housenumber. suggestAddresses' leading-digit guard (below) accepts
+      // any of: housenumber present, name starts with the typed digits, or
+      // displayName starts with the typed digits. The housenumber check
+      // matters because Photon's city-level fallback results
+      // ("Tulsa, Oklahoma 74132") lack a housenumber AND have a city name
+      // (not a digit) up front — under the old guard they slipped through.
+      out.push({
+        displayName, lat, lng, source: 'photon',
+        _photonName: String(props.name || ''),
+        _photonHasHousenumber: !!(props.housenumber && String(props.housenumber).trim()),
+      });
     }
     return out;
   } catch (e) { return []; }
@@ -2012,40 +2068,54 @@ async function suggestViaPhoton(query) {
 async function suggestAddresses(query) {
   const q = String(query || '').trim();
   if (q.length < 3) return [];
-  const [census, photon] = await Promise.all([suggestViaCensus(q), suggestViaPhoton(q)]);
-  // When the user typed a US-shaped address with a house number, drop Photon
-  // results whose street name doesn't overlap with the typed one. This
-  // protects against Photon's "1105 12th Street" trap when its index doesn't
-  // know the real street (Rogers St) and Census hasn't returned yet.
+  // Fire all three sources in parallel — total latency is max(mapbox, census,
+  // photon) ≈ Mapbox's ~150ms when the token is configured. Then pick the
+  // highest-tier non-empty list. We don't merge tiers: per spec, if Mapbox
+  // has matches they're used exclusively (top quality, autocomplete-optimized).
+  const [mapbox, census, photon] = await Promise.all([
+    suggestViaMapbox(q),
+    suggestViaCensus(q),
+    suggestViaPhoton(q),
+  ]);
+  const dedupe = (arr) => {
+    const seen = new Set();
+    const out  = [];
+    for (const s of arr) {
+      if (!s || !s.displayName) continue;
+      const key = s.displayName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(s);
+      if (out.length >= 6) break;
+    }
+    return out;
+  };
+  if (mapbox.length > 0) return dedupe(mapbox);
+  if (census.length > 0) return dedupe(census);
+  // Photon fallback — apply the strict housenumber guard for queries that
+  // start with a digit. The guard accepts the result iff:
+  //   - Photon attached a `housenumber` property (real street-level match), OR
+  //   - the result's name or displayName starts with the typed digit string.
+  // Anything else (e.g. "Tulsa, Oklahoma 74132" for query "15185 …") is a
+  // city/zip-level fallback dressed up as an address and gets rejected. We
+  // also keep the existing US-shape street-token overlap check so Photon
+  // can't slip "1105 12th Street" past us when the user typed "1105 Rogers".
   const usShape   = isUsShapedQuery(q);
   const hasNumber = /\d/.test(q);
   const streetTokens = (usShape && hasNumber) ? extractQueryStreetTokens(q) : [];
-  // Leading-number guard. Caught the bogus "Arvada, Colorado 80003" results
-  // Photon was returning for queries like "15185" — none of those Photon
-  // names started with the typed number. Applied alongside the street-token
-  // filter; either rejection drops the result.
   const leadNumMatch = q.match(/^\s*(\d+)\b/);
   const leadNumber   = leadNumMatch ? leadNumMatch[1] : null;
   const photonKept = photon.filter(p => {
     if (streetTokens.length && !photonStreetMatchesQuery(p.displayName, streetTokens)) return false;
     if (leadNumber) {
+      if (p._photonHasHousenumber) return true;
       const name = String(p._photonName || '').trim();
       const dn   = String(p.displayName || '').trim();
       if (!name.startsWith(leadNumber) && !dn.startsWith(leadNumber)) return false;
     }
     return true;
   });
-  const seen = new Set();
-  const out  = [];
-  for (const s of [...census, ...photonKept]) {
-    if (!s || !s.displayName) continue;
-    const key = s.displayName.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(s);
-    if (out.length >= 6) break;
-  }
-  return out;
+  return dedupe(photonKept);
 }
 // Backwards-compat alias — kept so any forgotten call sites still resolve.
 const geocodeAddressViaNominatim = geocodeAddress;

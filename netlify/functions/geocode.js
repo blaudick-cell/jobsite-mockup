@@ -5,11 +5,14 @@
 // coordinate mapping is stable.
 //
 // Usage:
-//   GET /api/geocode?source=census&q=<address>
-//   GET /api/geocode?source=photon&q=<address>
+//   GET /api/geocode?source=mapbox&q=<address>   (primary — needs MAPBOX_TOKEN)
+//   GET /api/geocode?source=census&q=<address>   (US fallback — TIGER-line)
+//   GET /api/geocode?source=photon&q=<address>   (global fallback — OSM)
 //
 // Returns the upstream JSON body verbatim so the frontend can parse it the
-// same way it would a direct call.
+// same way it would a direct call. If MAPBOX_TOKEN isn't set, the mapbox
+// source returns { matches: [], error: "MAPBOX_TOKEN not configured" } at
+// HTTP 200 so the frontend can fall through to Census without an error.
 
 export default async (request) => {
   const url = new URL(request.url);
@@ -27,7 +30,33 @@ export default async (request) => {
 
   try {
     let upstream;
-    if (source === 'census') {
+    if (source === 'mapbox') {
+      const token = process.env.MAPBOX_TOKEN;
+      if (!token) {
+        // Graceful empty — frontend cascades to Census/Photon. Status 200 so
+        // the fetch path stays on the happy branch; the body carries the
+        // explanation for anyone curl-ing the endpoint directly.
+        return new Response(
+          JSON.stringify({ matches: [], error: 'MAPBOX_TOKEN not configured' }),
+          {
+            headers: {
+              'content-type': 'application/json',
+              'access-control-allow-origin': '*',
+              'cache-control': 'no-store',
+            },
+          }
+        );
+      }
+      // proximity=ip biases by the requester's IP region — perfect for the
+      // autocomplete UX. autocomplete=true tells Mapbox to optimize for
+      // partial / in-flight typing. country=us keeps results scoped to the
+      // US (matches our Census + Nominatim countrycodes filter).
+      upstream =
+        'https://api.mapbox.com/geocoding/v5/mapbox.places/' +
+        encodeURIComponent(q) +
+        '.json?access_token=' + encodeURIComponent(token) +
+        '&country=us&autocomplete=true&limit=6&proximity=ip';
+    } else if (source === 'census') {
       upstream =
         'https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address=' +
         encodeURIComponent(q) +
