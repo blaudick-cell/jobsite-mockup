@@ -2413,11 +2413,20 @@ function haulTypeForReq(state, req) {
 // HAS/NEEDS pill — green for NEEDS, orange for HAS. Optional onClick makes
 // it a toggle (used in haul-request edit mode); without onClick it renders
 // as a static badge with the same visual style.
-function HasNeedsPill({ type, onClick, style = {} }) {
+// `fontSize` lets the call site match the surrounding qty text. Padding and
+// the toggle glyph scale proportionally so the pill stays in the same
+// visual family at any size (default ~10px chip / large ~22px display).
+function HasNeedsPill({ type, onClick, fontSize = 10, style = {} }) {
   const isNeeds = type !== 'HAS';
   const color = isNeeds ? C.accent : C.warn;
   const soft  = isNeeds ? C.accentSoft : C.warnSoft;
   const label = isNeeds ? 'NEEDS' : 'HAS';
+  // Vertical padding ~= 40% of font (rounded), horizontal ~= font size, so
+  // the pill's inner height stays close to ~1.8x the cap height.
+  const padY = Math.max(2, Math.round(fontSize * 0.4));
+  const padX = Math.max(8, Math.round(fontSize * 0.95));
+  const glyphSize = Math.max(8, Math.round(fontSize * 0.85));
+  const letterSpacing = fontSize >= 16 ? 0.4 : 0.8;
   if (onClick) {
     return (
       <button onClick={(e) => { e.stopPropagation(); onClick(); }}
@@ -2425,20 +2434,22 @@ function HasNeedsPill({ type, onClick, style = {} }) {
         title="Click to toggle HAS/NEEDS"
         style={{
           display: 'inline-flex', alignItems: 'center', gap: S[1],
-          padding: '4px 10px', borderRadius: R.pill,
+          padding: `${padY}px ${padX}px`, borderRadius: R.pill,
           background: soft, color, border: `1px solid ${color}`,
-          fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+          fontFamily: F.mono, fontSize, fontWeight: 700, letterSpacing, textTransform: 'uppercase',
+          lineHeight: 1.1,
           cursor: 'pointer',
           ...style,
-        }}>{label} <span style={{ fontSize: 9, opacity: 0.7 }}>⇄</span></button>
+        }}>{label} <span style={{ fontSize: glyphSize, opacity: 0.7 }}>⇄</span></button>
     );
   }
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: S[1],
-      padding: '4px 10px', borderRadius: R.pill,
+      padding: `${padY}px ${padX}px`, borderRadius: R.pill,
       background: soft, color,
-      fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.8, textTransform: 'uppercase',
+      fontFamily: F.mono, fontSize, fontWeight: 700, letterSpacing, textTransform: 'uppercase',
+      lineHeight: 1.1,
       ...style,
     }}>{label}</span>
   );
@@ -4105,7 +4116,7 @@ function AdminProjects({ db, setDb, navigate }) {
                 Qty pulled from project.volumeCYNeeded; falls back to "--"
                 when the project hasn't recorded a target yet. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-              <HasNeedsPill type={p.haulType} />
+              <HasNeedsPill type={p.haulType} fontSize={13} />
               <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
                 {p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() : '—'} CY of {p.materialType}
               </span>
@@ -7071,7 +7082,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
               the previous matFlow pill ("Import -- Clean Fill", derived from
               material code) AND the separate VOLUME label/value row. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 6 }}>
-            <HasNeedsPill type={haulTypeForReq(db, e.r)} />
+            <HasNeedsPill type={haulTypeForReq(db, e.r)} fontSize={18} />
             <span style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{e.r.volumeCY} CY</span>
             <span style={{ ...T.bodySm, color: C.inkDim }}>of</span>
             <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{e.material ? e.material.label : e.r.materialCode}</span>
@@ -8217,8 +8228,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
               {/* v22: HAS/NEEDS pill leads the line. Clickable in edit mode
                   (toggles project.haulType); static otherwise. Green for
-                  NEEDS, orange for HAS -- same palette as the existing pills. */}
-              <HasNeedsPill type={projectHaulType} onClick={isEditing ? toggleProjectHaulType : undefined} />
+                  NEEDS, orange for HAS -- same palette as the existing pills.
+                  v22.1: fontSize 22 to match the qty headline next to it. */}
+              <HasNeedsPill type={projectHaulType} fontSize={22} onClick={isEditing ? toggleProjectHaulType : undefined} />
               {isEditing ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
                   <input type="number" min="1" step="1"
