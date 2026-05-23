@@ -11392,9 +11392,11 @@ function MiniPhone({ children, label, badge, badgeColor = C.accent, onClick }) {
 }
 
 function AdminActiveTrucks({ db, setDb, navigate }) {
-  // Group: every truck that has a driver assigned. Sort by status:
-  // currently clocked-in first, then idle drivers, then no-driver trucks.
-  const all = db.trucks.slice();
+  // Only consider trucks owned by a real hauler. Trucks whose haulerId no
+  // longer resolves (e.g. after a hauler delete cascade-nulls the FK) are
+  // orphans — rendering them produced un-clickable phantom tiles.
+  const haulerById = new Map(db.haulers.map(h => [h.id, h]));
+  const all = db.trucks.filter(t => t.haulerId && haulerById.has(t.haulerId));
   const openShifts = (db.hours || []).filter(h => h.status === 'open');
   const truckHrMap = new Map(openShifts.map(h => [h.truckId, h]));
 
