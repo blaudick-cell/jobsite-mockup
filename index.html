@@ -4051,23 +4051,10 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
-            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[2] }}>
+            <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
               <Pill color={C.accent} soft={C.accentSoft}>{p.haulType}</Pill>
               <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{p.materialType}</Pill>
             </div>
-            {(() => {
-              const remainingLoads = Math.max(0, (p.loadsTarget || 0) - (p.loadsCompleted || 0));
-              const remainingCY = remainingLoads * 12;
-              return (
-                <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, lineHeight: 1.4 }}>
-                  {remainingCY > 0 ? remainingCY.toLocaleString() + ' CY remaining' : 'target hit'}
-                  <span style={{ color: C.inkFaint }}>{' · '}</span>
-                  <span style={{ color: C.ink }}>{p.pickupLocation}</span>
-                  <span style={{ color: C.accent, margin: '0 4px' }}>{'\u2192'}</span>
-                  <span style={{ color: C.ink }}>{p.dumpLocation}</span>
-                </div>
-              );
-            })()}
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>LOADS</div>
