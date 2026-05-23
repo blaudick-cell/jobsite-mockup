@@ -285,3 +285,30 @@ ALTER TABLE invoices ADD COLUMN IF NOT EXISTS kind text;
 After applying, add `'kind'` to `SB_FIELDS_JS.invoices` in `index.html` so writes include the column and reads decode it.
 
 Not load-bearing — demo works without this. Dispatch can apply when convenient.
+
+---
+
+## v19 follow-up — driver shift pause + millisecond clock timestamps (2026-05-22)
+
+Driver shift state on `hours` uses four fields that live only on the JS side today:
+
+- `clockedInAt` (epoch ms) — exact tick of clock-in (the `clock_in` column is `HH:MM` only)
+- `clockedOutAt` (epoch ms) — exact tick of clock-out
+- `pausedAt` (epoch ms or null) — when the current pause started; null = not paused
+- `pausedMs` (int) — total accumulated paused milliseconds since clock-in
+
+`elapsedMs` calc in DriverHome/DriverTruckDetail depends on all four for the live "ON THE CLOCK" timer. `pausedAt` truthiness is what flips the Pause button to Resume. Without them on Supabase, a page reload during an active shift loses pause state and resets the elapsed-time math to the rounded `breakMin` only.
+
+In-tab the Pause button works (commit `fix(driver): Pause button …` round-trips the markLocalWrite snapshot through jsRowToSb+sbRowToJs so the Realtime echo doesn't overwrite the JS-only fields). Cross-tab + cross-reload persistence needs:
+
+```sql
+-- v19: shift pause + ms-precision clock timestamps on hours
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS clocked_in_at  bigint;
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS clocked_out_at bigint;
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS paused_at      bigint;
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS paused_ms      bigint NOT NULL DEFAULT 0;
+```
+
+After applying, add `'clockedInAt', 'clockedOutAt', 'pausedAt', 'pausedMs'` to `SB_FIELDS_JS.hours` in `index.html` so writes include the columns and reads decode them. The camelToSnake adapter already maps them correctly (no overrides needed).
+
+Not load-bearing for the in-tab Pause fix; needed only for cross-reload persistence of pause state.

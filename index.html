@@ -2978,7 +2978,14 @@ async function syncDbToCloud(prev, next) {
     if (oldArr === newArr) continue;
     const { toUpsert, toDelete } = diffArrayById(oldArr, newArr);
     if (toUpsert.length > 0) {
-      toUpsert.forEach(r => markLocalWrite(jsKey, r.id, r));
+      // Store snapshot of what the row will look like AFTER the SB round-trip
+      // (jsRowToSb drops fields not in the whitelist; sbRowToJs reads them
+      // back the same way). Realtime echoes use the same shape, so the
+      // jsonEq compare matches and the echo is dropped — preserving JS-only
+      // fields like hours.pausedAt / hours.pausedMs that aren't on the SB
+      // schema yet. Without this round-trip, the echo would overwrite the
+      // local row, wiping `pausedAt` and snapping Driver Pause back to idle.
+      toUpsert.forEach(r => markLocalWrite(jsKey, r.id, sbRowToJs(jsKey, jsRowToSb(jsKey, r))));
       tasks.push(_sb.upsertRows(jsKey, toUpsert).catch(e => {
         console.warn('[jse] upsert failed on ' + jsKey + ':', e);
       }));
