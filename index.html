@@ -7803,6 +7803,16 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     ? (timing.endDate ? `${fmtTimingISO(timing.startDate)} – ${fmtTimingISO(timing.endDate)}` : fmtTimingISO(timing.startDate))
     : 'Not set';
   const dateInputStyle = { ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono };
+  // v21-condense: Inline route summary pulled from the same db.routes cache
+  // HaulRouteMiniMap populates on first render. Stays null on cold cache so
+  // the inline strip just drops the mi/min until the map below warms it up,
+  // then this re-renders with the metrics on the next setDb.
+  const _routeKey = (pickup.address || '').trim() && (dropoff.address || '').trim()
+    ? (pickup.address || '').trim() + '|' + (dropoff.address || '').trim()
+    : null;
+  const _route = _routeKey ? ((db && db.routes && db.routes[_routeKey]) || null) : null;
+  const routeMiles = _route && Number.isFinite(_route.distanceMeters) ? _route.distanceMeters / 1609.34 : null;
+  const routeMin   = _route && Number.isFinite(_route.durationSeconds) ? Math.max(1, Math.round(_route.durationSeconds / 60)) : null;
 
   const assignTruck = (haulerId, truckId) => {
     const assignedHauler = db.haulers.find(h => h.id === haulerId);
@@ -7993,12 +8003,12 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           affordances simultaneously and surfaces the danger Delete button
           at the bottom. Done exits edit mode (saves are already incremental
           via updateLogistics). MARKER: v20-haul-detail-combined-tile */}
-      <Card style={{ marginBottom: S[5] }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], marginBottom: S[4] }}>
+      <Card padding={S[4]} style={{ marginBottom: S[4] }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], marginBottom: S[3] }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <Label color={C.accent}>Haul Request</Label>
             {isEditing && (
-              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Tap any value to edit. Done keeps changes · Cancel rolls back.</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>Tap any value to edit. Done keeps changes · Cancel rolls back.</div>
             )}
           </div>
           {/* v20.1: Edit ↗ hotspot — mono caps + accent border, matches the
@@ -8049,46 +8059,48 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           )}
         </div>
 
-        {/* ── PROJECT (always read-only) ── */}
-        <div>
-          <Label color={C.inkDim}>Project</Label>
-          <div style={{ marginTop: S[2] }}>
-            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
-              {project ? project.name : '—'}
-            </div>
-            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>
-              {project ? (project.address || '—') : '—'}
+        {/* ── PROJECT + CONTRACTOR + HAULER(S) — horizontal 3-col on desktop,
+            auto-stacks on mobile via auto-fit. Replaces the 3 vertically-stacked
+            sub-sections each with their own 24+24 px divider, saving ~96px of
+            vertical space on desktop and ~48px on mobile (single border now). ── */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: S[3], rowGap: S[3],
+        }}>
+          {/* Project */}
+          <div>
+            <Label color={C.inkDim}>Project</Label>
+            <div style={{ marginTop: 4 }}>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project ? project.name : '—'}</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{project ? (project.address || '—') : '—'}</div>
             </div>
           </div>
-        </div>
 
-        {/* ── CONTRACTOR (always read-only) ── */}
-        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
-          <Label color={C.inkDim}>Contractor (requester)</Label>
-          <div style={{ marginTop: S[2] }}>
-            <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>
-              {project && project.gc ? project.gc : '—'}
-            </div>
-            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
-              <span>{project && project.contactName ? project.contactName : '—'}</span>
-              {project && project.contactPhone ? (
-                <a href={'tel:' + project.contactPhone}
-                  style={{ color: C.inkDim, textDecoration: 'none' }}
-                  onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                  onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                  ☎ {project.contactPhone}
-                </a>
-              ) : null}
-              {project && project.contactEmail ? (
-                <a href={'mailto:' + project.contactEmail}
-                  style={{ color: C.inkDim, textDecoration: 'none' }}
-                  onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                  onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                  ✉ {project.contactEmail}
-                </a>
-              ) : null}
+          {/* Contractor */}
+          <div>
+            <Label color={C.inkDim}>Contractor</Label>
+            <div style={{ marginTop: 4 }}>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project && project.gc ? project.gc : '—'}</div>
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
+                <span>{project && project.contactName ? project.contactName : '—'}</span>
+                {project && project.contactPhone ? (
+                  <a href={'tel:' + project.contactPhone}
+                    style={{ color: C.inkDim, textDecoration: 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {project.contactPhone}</a>
+                ) : null}
+                {project && project.contactEmail ? (
+                  <a href={'mailto:' + project.contactEmail}
+                    style={{ color: C.inkDim, textDecoration: 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {project.contactEmail}</a>
+                ) : null}
+              </div>
             </div>
           </div>
+
+          {/* Hauler(s) — only rendered when at least one is matched or assigned */}
           {(() => {
             const haulerIds = new Set();
             if (req.matchedHaulerId) haulerIds.add(req.matchedHaulerId);
@@ -8097,29 +8109,25 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             const haulers = Array.from(haulerIds).map(id => db.haulers.find(h => h.id === id)).filter(Boolean);
             if (haulers.length === 0) return null;
             return (
-              <div style={{ marginTop: S[4] }}>
-                <Label color={C.inkDim}>Hauler{haulers.length > 1 ? 's' : ''} (fulfilling)</Label>
-                <div style={{ marginTop: S[2] }}>
-                  {haulers.map(h => (
-                    <div key={h.id} style={{ marginBottom: S[3] }}>
-                      <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{h.name}</div>
-                      <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'center' }}>
+              <div>
+                <Label color={C.inkDim}>Hauler{haulers.length > 1 ? 's' : ''}</Label>
+                <div style={{ marginTop: 4 }}>
+                  {haulers.map((h, i) => (
+                    <div key={h.id} style={{ marginTop: i === 0 ? 0 : 6 }}>
+                      <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{h.name}</div>
+                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
                         <span>{h.contact || '—'}</span>
                         {h.phone ? (
                           <a href={'tel:' + h.phone}
                             style={{ color: C.inkDim, textDecoration: 'none' }}
                             onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                            ☎ {h.phone}
-                          </a>
+                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {h.phone}</a>
                         ) : null}
                         {h.email ? (
                           <a href={'mailto:' + h.email}
                             style={{ color: C.inkDim, textDecoration: 'none' }}
                             onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>
-                            ✉ {h.email}
-                          </a>
+                            onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {h.email}</a>
                         ) : null}
                       </div>
                     </div>
@@ -8130,11 +8138,13 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           })()}
         </div>
 
-        {/* ── HAUL (qty + material; edit-mode swaps plain text for inputs) ── */}
-        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
-          <Label color={C.inkDim}>Haul</Label>
-          <div style={{ marginTop: S[2], display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[4], flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 240 }}>
+        {/* ── HAUL — title + status grouped horizontally, progress collapsed
+            to a thin inline bar with metrics on a single row. Replaces the
+            88px donut + multi-line "Total delivered / N trucks" block, which
+            was ~120px tall on its own. Now sits at ~56px including bar. ── */}
+        <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
               {isEditing ? (
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
                   <input type="number" min="1" step="1"
@@ -8149,63 +8159,95 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     }}
                     aria-label="Quantity in cubic yards"
                     title="Click to edit quantity"
-                    style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, fontFamily: F.mono, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 96, textAlign: 'center', boxSizing: 'border-box' }} />
-                  <span style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink }}>CY of</span>
+                    style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 84, textAlign: 'center', boxSizing: 'border-box' }} />
+                  <span style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
                   <MaterialField value={req.materialCode}
                     onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
-                    style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, fontFamily: F.display, padding: '2px 8px', minWidth: 0 }} />
+                    style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
                 </div>
               ) : (
-                <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.5, color: C.ink, margin: 0 }}>
+                <div style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, margin: 0 }}>
                   {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
                 </div>
               )}
-              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-                {project ? project.name : '—'} · requested at {req.requestedAt}
-              </div>
-              {req.notes && (
-                <div style={{ ...T.bodySm, marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, color: C.ink }}>
-                  {req.notes}
-                </div>
-              )}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: S[3] }}>
-              <StatusPill status={req.status} />
-              <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, textTransform: 'uppercase' }}>Total delivered</div>
-                  <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>
-                    {totalDeliveredCY} / {req.volumeCY} CY
-                  </div>
-                  <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
-                    {assignments.length === 0 ? 'No trucks assigned' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's') + ' contributing'}
-                  </div>
-                </div>
-                <Donut pct={overallPct} size={88} stroke={9} />
-              </div>
+            <StatusPill status={req.status} />
+          </div>
+
+          {/* Inline route + request metadata strip — single dense line, mono
+              metrics. Falls back gracefully when the OSRM cache is cold. */}
+          <div style={{ ...T.caption, color: C.inkDim, marginTop: 6, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
+            {(pickup.name || pickup.address) && (dropoff.name || dropoff.address) ? (
+              <>
+                <span style={{ color: C.ink }}>{pickup.name || pickup.address || '—'}</span>
+                <span style={{ color: C.inkFaint }}>→</span>
+                <span style={{ color: C.ink }}>{dropoff.name || dropoff.address || '—'}</span>
+                {(routeMiles != null || routeMin != null) && <span style={{ color: C.inkFaint }}>·</span>}
+                {routeMiles != null && (
+                  <span style={{ fontFamily: F.mono }}>{routeMiles.toFixed(1)} mi</span>
+                )}
+                {routeMiles != null && routeMin != null && <span style={{ color: C.inkFaint }}>•</span>}
+                {routeMin != null && (
+                  <span style={{ fontFamily: F.mono }}>{routeMin} min</span>
+                )}
+                <span style={{ color: C.inkFaint }}>·</span>
+              </>
+            ) : null}
+            <span>req {req.requestedAt}</span>
+          </div>
+
+          {/* Horizontal progress strip — replaces the 88px Donut. Thin bar
+              + inline counts on one row. Mobile: bar still spans full width
+              because metrics wrap below it via flexWrap. */}
+          <div style={{ marginTop: S[3], display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 160, height: 4, background: C.ruleHi, borderRadius: R.pill, overflow: 'hidden' }}>
+              <div style={{
+                width: Math.max(0, Math.min(100, overallPct)) + '%',
+                height: '100%',
+                background: overallPct >= 100 ? C.ok : C.accent,
+                transition: 'width 240ms ease-out',
+              }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
+              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 700 }}>
+                {totalDeliveredCY}<span style={{ color: C.inkFaint, fontWeight: 400 }}>/{req.volumeCY}</span> CY
+              </span>
+              <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
+              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>{Math.round(overallPct)}%</span>
+              <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
+              <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
+                {assignments.length === 0 ? 'no trucks' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's')}
+              </span>
             </div>
           </div>
+
+          {req.notes && (
+            <div style={{ ...T.caption, marginTop: S[2], padding: S[2], background: C.surfaceHi, borderRadius: R.sm, color: C.ink, lineHeight: 1.45 }}>
+              {req.notes}
+            </div>
+          )}
         </div>
 
-        {/* ── PICKUP + DROPOFF — side-by-side on desktop, stacked on mobile via
-            auto-fit minmax (no breakpoint media query needed). Each location is
-            still its own labeled sub-section; the grid just lays them out. ── */}
+        {/* ── PICKUP + DROPOFF + TIMING — single 3-col grid on desktop;
+            auto-stacks on mobile. Folding TIMING into the same row eliminates
+            one more S[5]+S[5] divider (~48px) since timing is short enough
+            to live next to the location cells. ── */}
         <div style={{
-          marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}`,
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5],
+          marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3],
         }}>
         {/* ── PICKUP LOCATION ── */}
         <div>
-          <Label color={C.inkDim}>Pickup location</Label>
-          <div style={{ marginTop: S[2] }}>
+          <Label color={C.inkDim}>Pickup</Label>
+          <div style={{ marginTop: 4 }}>
             {isEditing ? (
               <>
-                <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+                <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
                   <EditableText value={pickup.name}
                     placeholder="Site or yard name…"
                     onSave={(v) => updateLogistics(r => ({ ...r, pickupLocation: { ...pickup, name: v } }), 'pickup location')} />
                 </div>
-                <div style={{ ...T.bodySm, color: C.inkDim }}>
+                <div style={{ ...T.caption, color: C.inkDim }}>
                   <AddressAutocomplete value={pickup.address}
                     placeholder="Start typing a street address…"
                     db={db} setDb={setDb}
@@ -8217,10 +8259,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
               return (
                 <>
-                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{pickup.name || '—'}</div>
-                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{pickup.name || '—'}</div>
+                  <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
                     <span>{pickup.address || '—'}</span>
-                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 11 }}>✓ verified</span>}
+                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
                   </div>
                 </>
               );
@@ -8228,18 +8270,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
-        {/* ── DROPOFF LOCATION (sibling cell in the side-by-side grid) ── */}
+        {/* ── DROPOFF LOCATION ── */}
         <div>
-          <Label color={C.inkDim}>Dropoff location</Label>
-          <div style={{ marginTop: S[2] }}>
+          <Label color={C.inkDim}>Dropoff</Label>
+          <div style={{ marginTop: 4 }}>
             {isEditing ? (
               <>
-                <div style={{ ...T.body, color: C.ink, marginBottom: 4, fontWeight: 600 }}>
+                <div style={{ ...T.bodySm, color: C.ink, marginBottom: 2, fontWeight: 600 }}>
                   <EditableText value={dropoff.name}
                     placeholder="Site or yard name…"
                     onSave={(v) => updateLogistics(r => ({ ...r, dropoffLocation: { ...dropoff, name: v } }), 'dropoff location')} />
                 </div>
-                <div style={{ ...T.bodySm, color: C.inkDim }}>
+                <div style={{ ...T.caption, color: C.inkDim }}>
                   <AddressAutocomplete value={dropoff.address}
                     placeholder="Start typing a street address…"
                     db={db} setDb={setDb}
@@ -8251,10 +8293,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               const verified = !!(cached && isFinite(cached.lat) && isFinite(cached.lng));
               return (
                 <>
-                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{dropoff.name || '—'}</div>
-                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                  <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{dropoff.name || '—'}</div>
+                  <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
                     <span>{dropoff.address || '—'}</span>
-                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 11 }}>✓ verified</span>}
+                    {verified && <span style={{ color: C.ok, fontFamily: F.mono, fontSize: 10 }}>✓</span>}
                   </div>
                 </>
               );
@@ -8262,53 +8304,54 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         </div>
 
-        </div>{/* end PICKUP+DROPOFF grid */}
-
-        {/* ── TIMING ── */}
-        <div style={{ marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}` }}>
+        {/* ── TIMING (folded into the same row) ── */}
+        <div>
           <Label color={C.inkDim}>Timing</Label>
-          <div style={{ marginTop: S[2] }}>
+          <div style={{ marginTop: 4 }}>
             {isEditing ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[1], flexWrap: 'wrap' }}>
                 <input type="date" value={timing.startDate}
                   onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, startDate: e.target.value } }), 'timing')}
                   style={dateInputStyle} />
-                <span style={{ ...T.bodySm, color: C.inkFaint }}>→</span>
+                <span style={{ ...T.caption, color: C.inkFaint }}>→</span>
                 <input type="date" value={timing.endDate}
                   onChange={e => updateLogistics(r => ({ ...r, timing: { ...timing, endDate: e.target.value } }), 'timing')}
                   min={timing.startDate || undefined}
                   style={dateInputStyle} />
-                <span style={{ ...T.bodySm, color: C.inkDim, marginLeft: S[2] }}>{timingDisplay}</span>
               </div>
             ) : (
-              <div style={{ ...T.body, color: C.ink }}>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
                 {timing.startDate
                   ? (timing.endDate
                       ? `${fmtTimingISO(timing.startDate)} → ${fmtTimingISO(timing.endDate)}`
                       : fmtTimingISO(timing.startDate))
-                  : <span style={{ color: C.inkFaint }}>Not set</span>}
+                  : <span style={{ color: C.inkFaint, fontWeight: 400 }}>Not set</span>}
               </div>
             )}
           </div>
         </div>
 
-        {/* ── SITE ACCESS — LOADING + DUMPING — side-by-side on desktop ── */}
+        </div>{/* end PICKUP+DROPOFF+TIMING grid */}
+
+        {/* ── SITE ACCESS — loading + dumping side-by-side, view-mode notes
+            collapsed inline. Dropped the "What's loading the haul" /
+            "What's needed at the dump site" helper lines (edit-mode only)
+            since their intent is already clear from the labels. ── */}
         <div style={{
-          marginTop: S[5], paddingTop: S[5], borderTop: `1px solid ${C.rule}`,
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5],
+          marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`,
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3],
         }}>
         <div>
           <Label color={C.inkDim}>Site access — loading</Label>
-          <div style={{ marginTop: S[2] }}>
+          <div style={{ marginTop: 4 }}>
             {isEditing ? (
               <>
-                <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+                <div style={{ ...T.caption, color: C.ink, marginBottom: 4 }}>
                   <EditableText value={loading.notes} multiline
                     placeholder="Loading site notes…"
                     onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, notes: v }, dumping } }), 'loading site notes')} />
                 </div>
-                <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's loading the haul</div>
-                <div style={{ ...T.bodySm, color: C.ink }}>
+                <div style={{ ...T.caption, color: C.inkDim }}>
                   <EditableText value={loading.equipment}
                     placeholder="Equipment / loader…"
                     onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading: { ...loading, equipment: v }, dumping } }), 'loading equipment')} />
@@ -8316,12 +8359,23 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               </>
             ) : (() => {
               const hasAny = loading.notes || loading.equipment;
-              if (!hasAny) return <div style={{ ...T.bodySm, color: C.inkFaint }}>—</div>;
+              if (!hasAny) return <div style={{ ...T.caption, color: C.inkFaint }}>—</div>;
+              // Inline the equipment after the notes when both exist, with a
+              // mid-dot separator. Keeps the site-access cell to a single
+              // visual block instead of stacking two label-less paragraphs.
+              if (loading.notes && loading.equipment) {
+                return (
+                  <div style={{ ...T.caption, color: C.ink, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                    {loading.notes}
+                    <span style={{ color: C.inkFaint }}> · </span>
+                    <span style={{ color: C.inkDim }}>{loading.equipment}</span>
+                  </div>
+                );
+              }
               return (
-                <>
-                  {loading.notes && <div style={{ ...T.bodySm, color: C.ink, whiteSpace: 'pre-wrap' }}>{loading.notes}</div>}
-                  {loading.equipment && <div style={{ ...T.bodySm, color: C.inkDim, marginTop: loading.notes ? 4 : 0 }}>{loading.equipment}</div>}
-                </>
+                <div style={{ ...T.caption, color: C.ink, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                  {loading.notes || loading.equipment}
+                </div>
               );
             })()}
           </div>
@@ -8330,16 +8384,15 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         {/* sibling cell in the LOADING+DUMPING side-by-side grid */}
         <div>
           <Label color={C.inkDim}>Site access — dumping</Label>
-          <div style={{ marginTop: S[2] }}>
+          <div style={{ marginTop: 4 }}>
             {isEditing ? (
               <>
-                <div style={{ ...T.bodySm, color: C.ink, marginBottom: S[2] }}>
+                <div style={{ ...T.caption, color: C.ink, marginBottom: 4 }}>
                   <EditableText value={dumping.notes} multiline
                     placeholder="Dump site notes…"
                     onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, notes: v } } }), 'dump site notes')} />
                 </div>
-                <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4 }}>What's needed at the dump site</div>
-                <div style={{ ...T.bodySm, color: C.ink }}>
+                <div style={{ ...T.caption, color: C.inkDim }}>
                   <EditableText value={dumping.equipment}
                     placeholder="Equipment / spotter…"
                     onSave={(v) => updateLogistics(r => ({ ...r, siteAccess: { ...(r.siteAccess || {}), loading, dumping: { ...dumping, equipment: v } } }), 'dump site equipment')} />
@@ -8347,12 +8400,20 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               </>
             ) : (() => {
               const hasAny = dumping.notes || dumping.equipment;
-              if (!hasAny) return <div style={{ ...T.bodySm, color: C.inkFaint }}>—</div>;
+              if (!hasAny) return <div style={{ ...T.caption, color: C.inkFaint }}>—</div>;
+              if (dumping.notes && dumping.equipment) {
+                return (
+                  <div style={{ ...T.caption, color: C.ink, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                    {dumping.notes}
+                    <span style={{ color: C.inkFaint }}> · </span>
+                    <span style={{ color: C.inkDim }}>{dumping.equipment}</span>
+                  </div>
+                );
+              }
               return (
-                <>
-                  {dumping.notes && <div style={{ ...T.bodySm, color: C.ink, whiteSpace: 'pre-wrap' }}>{dumping.notes}</div>}
-                  {dumping.equipment && <div style={{ ...T.bodySm, color: C.inkDim, marginTop: dumping.notes ? 4 : 0 }}>{dumping.equipment}</div>}
-                </>
+                <div style={{ ...T.caption, color: C.ink, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                  {dumping.notes || dumping.equipment}
+                </div>
               );
             })()}
           </div>
@@ -8362,7 +8423,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 
         {/* ── DELETE (edit mode only) ── */}
         {isEditing && (
-          <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: S[4], marginTop: S[5] }}>
+          <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: S[3], marginTop: S[3] }}>
             <Btn variant="danger" size="sm" onClick={deleteHaulRequest}>Delete this haul request</Btn>
           </div>
         )}
