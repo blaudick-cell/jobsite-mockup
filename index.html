@@ -3949,6 +3949,11 @@ function AdminProjects({ db, setDb, navigate }) {
     const projLoads = db.loads.filter(l => l.projectId === p.id);
     const loadsCompleted = projLoads.filter(l => l.status === 'approved').length;
     const pendingLoads = projLoads.filter(l => l.status === 'pending').length;
+    // CY moved on this project — sum of approved loads' cubic yards. This is
+    // the top-line "actual dirt moved" metric and replaces the LOADS/TRUCKS
+    // dashboard pair (v22). Pending CY trails behind for the "+N pending" pill.
+    const cyCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+    const cyPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
     // Loads in transit ≈ open shifts on this project's trucks (a load is "in
     // flight" while a driver is clocked-in on it).
     const loadsInTransit = trucksActive;
@@ -3964,6 +3969,13 @@ function AdminProjects({ db, setDb, navigate }) {
     // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
     const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
     const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
+    // CY-based progress (v22): prefer project.volumeCYNeeded; fall back to the
+    // sum of haul-request volumes; final fallback is 0 (renders without a
+    // target, just the running total).
+    const cyTarget = (typeof p.volumeCYNeeded === 'number' && p.volumeCYNeeded > 0)
+      ? p.volumeCYNeeded
+      : targetCY;
+    const cyPct = cyTarget > 0 ? Math.min(100, Math.round((cyCompleted / cyTarget) * 100)) : 0;
     // Demo cycle time: avg(approved-load count × 24 min) / trucksActive. Tweakable.
     const avgCycleTime = trucksActive > 0 && loadsCompleted > 0
       ? Math.max(18, Math.round((totalHours * 60) / Math.max(1, loadsCompleted)))
@@ -3998,7 +4010,7 @@ function AdminProjects({ db, setDb, navigate }) {
     const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
     const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
     const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
-    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulType, pickupLocation, dumpLocation, reqs };
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulType, pickupLocation, dumpLocation, reqs };
     enriched.healthStatus = healthFor(enriched);
     return enriched;
   });
@@ -4123,19 +4135,20 @@ function AdminProjects({ db, setDb, navigate }) {
             </div>
           </div>
           <div style={{ minWidth: 0 }}>
-            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>LOADS</div>
-            <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
-              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{p.loadsCompleted}</span>
-              <span style={{ color: C.inkDim }}> / {p.loadsTarget}</span>
-              {p.pendingLoads > 0 && <span style={{ color: C.warn, marginLeft: S[2], fontWeight: 600 }}>+{p.pendingLoads} pending</span>}
+            {/* v22: replaces the LOADS + TRUCKS stacked pair with a single CY
+                metric — total cubic yards moved on the project, framed as
+                IMPORTED (for NEEDS / fill jobs) or EXPORTED (for HAS / dig
+                jobs). Falls back to a neutral "CY HAULED" label when haulType
+                is unset on legacy rows. */}
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>
+              CY {p.haulType === 'Export' ? 'EXPORTED' : p.haulType === 'Import' ? 'IMPORTED' : 'HAULED'}
             </div>
-            <ProgressBar pct={p.loadPct} color={p.healthStatus === 'critical' ? (C.danger || C.warn) : p.healthStatus === 'atrisk' ? C.warn : C.accent} />
-            <div style={{ ...T.caption, color: C.inkFaint, marginTop: S[3], marginBottom: 4 }}>TRUCKS</div>
             <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
-              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{p.trucksActive}</span>
-              <span style={{ color: C.inkDim }}> / {p.trucksAssigned} active</span>
+              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{(p.cyCompleted || 0).toLocaleString()}</span>
+              {p.cyTarget > 0 && <span style={{ color: C.inkDim }}> / {p.cyTarget.toLocaleString()}</span>}
+              {p.cyPending > 0 && <span style={{ color: C.warn, marginLeft: S[2], fontWeight: 600 }}>+{p.cyPending.toLocaleString()} pending</span>}
             </div>
-            <UtilizationBar active={p.trucksActive} total={p.trucksAssigned} />
+            <ProgressBar pct={p.cyPct} color={p.healthStatus === 'critical' ? (C.danger || C.warn) : p.healthStatus === 'atrisk' ? C.warn : C.accent} />
           </div>
           <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[2] }}>
             <div>
@@ -11314,6 +11327,12 @@ function HaulerHome({ haulerId, db, navigate }) {
             const pHours = myHours.filter(h => pTruckIds.has(h.truckId));
             const pTotalHours = pHours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
             const pPending = pLoads.filter(l => l.status === 'pending').length;
+            // v22: CY (this hauler's trucks, approved loads only). Replaces
+            // the per-project Trucks + Loads counts on the hauler home tile.
+            const pCY = pLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+            const cyLabel = p.haulType === 'HAS' ? 'CY exported'
+              : p.haulType === 'NEEDS' ? 'CY imported'
+              : 'CY hauled';
             return (
               <button key={p.id} onClick={() => navigate(`/hauler/o/${haulerId}/p/${p.id}`)} style={{
                 textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
@@ -11331,8 +11350,7 @@ function HaulerHome({ haulerId, db, navigate }) {
                   <StatusPill status={p.status || 'active'} />
                 </div>
                 <div style={{ display: 'flex', gap: S[4], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-                  <div><Label style={{ marginBottom: S[1] }}>Trucks</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pTrucks.length}</div></div>
-                  <div><Label style={{ marginBottom: S[1] }}>Loads</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pLoads.filter(l => l.status === 'approved').length}</div></div>
+                  <div><Label style={{ marginBottom: S[1] }}>{cyLabel}</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pCY.toLocaleString()}</div></div>
                   <div><Label style={{ marginBottom: S[1] }}>Hours</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{fmtHours(pTotalHours)}</div></div>
                   {pPending > 0 && <div><Label style={{ marginBottom: S[1] }} color={C.warn}>Pending</Label><div style={{ ...T.h4, fontWeight: 700, color: C.warn, lineHeight: 1 }}>{pPending}</div></div>}
                 </div>
