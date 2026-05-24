@@ -12719,23 +12719,170 @@ function HaulerLanding({ db, navigate }) {
   );
 }
 
-function HaulerHome({ haulerId, db, navigate }) {
+// v33: self-serve hauler dashboard. Replaces the prior project-tile grid with
+// four operational sections, all driven off the same `db` already loaded by
+// the App-level Supabase hydrator. Every write goes through setDb (already
+// wrapped with Supabase diff sync at App level).
+//   A. Pending offers  — admin matched this hauler; hauler accepts/declines.
+//   B. Active assignments today — accepted/matched hauls with my trucks.
+//   C. Recent loads logged — last 8 across this hauler's fleet.
+//   D. JSE invoices owed to me — JSE-issued invoices whose haulRequest has
+//      one of my trucks; "my portion" is the sum of line items whose
+//      truckPlate matches one of my fleet.
+function HaulerHome({ haulerId, db, setDb, navigate }) {
+  // The "add truck" picker is gated to a single active haul request at a
+  // time. Stores the haulRequestId being expanded; null means closed.
+  const [addingTruckFor, setAddingTruckFor] = useState(null);
+
   const op = db.haulers.find(o => o.id === haulerId);
   if (!op) return <NotFound navigate={navigate} />;
-  const projects = db.projects.filter(p => op.projectIds.includes(p.id));
+
   const myTrucks = db.trucks.filter(t => t.haulerId === op.id);
   const myTruckIds = new Set(myTrucks.map(t => t.id));
-  const myLoads = db.loads.filter(l => myTruckIds.has(l.truckId));
-  const myHours = db.hours.filter(h => myTruckIds.has(h.truckId));
-  // v31: canonical rollup so the hauler self-serve dash agrees with
-  // Admin's hauler detail page and the per-truck card on AdminHaulRequestDetail.
-  const haulerRollup = haulerRollupV31(op.id, db);
-  const totalHours = haulerRollup.totalHours;
-  const totalLoadsCount = haulerRollup.totalLoads;
-  const totalCYDelivered = haulerRollup.totalCY;
-  const haulsCount = Math.max(haulerRollup.haulsCount, (op.projectIds || []).length);
-  const activeTrucks = myTrucks.filter(t => t.driverId && myHours.some(h => h.truckId === t.id && h.status === 'open')).length;
-  const pendingCount = myLoads.filter(l => l.status === 'pending').length + myHours.filter(h => h.status === 'pending').length;
+  const myPlates = new Set(myTrucks.map(t => t.plate));
+
+  // ---------- Section A: pending offers (admin matched me, awaiting accept)
+  const pendingOffers = (db.haulRequests || []).filter(r =>
+    r && r.matchedHaulerId === op.id && r.status === 'matched'
+  );
+
+  // ---------- Section B: active assignments today
+  // status accepted/matched + I have an assignment. (We don't strictly
+  // require a today day because once a haul is accepted the hauler still
+  // needs visibility even on quiet days.)
+  const myActive = (db.haulRequests || []).filter(r => {
+    // S3 narrowing: accepted only — 'matched' offers belong to Section A,
+    // showing them here as well would render duplicate cards.
+    if (!r || r.status !== 'accepted') return false;
+    return (r.assignments || []).some(a => a && a.haulerId === op.id);
+  });
+
+  // ---------- Section C: recent loads (last 8 across my fleet)
+  const recentLoads = (db.loads || [])
+    .filter(l => l && myTruckIds.has(l.truckId))
+    .slice()
+    .sort((a, b) => {
+      const ka = (a.date || '') + ' ' + (a.time || '');
+      const kb = (b.date || '') + ' ' + (b.time || '');
+      return kb.localeCompare(ka);
+    })
+    .slice(0, 8);
+
+  // ---------- Section D: JSE invoices owed to me
+  // JSE invoices have haulerId === null and link to a haulRequest whose
+  // assignments include one of my trucks. "My portion" = sum of line items
+  // whose truckPlate matches one of my fleet plates.
+  const myJseInvoices = (db.invoices || []).reduce((acc, inv) => {
+    if (!inv || inv.haulerId) return acc;
+    if (!inv.haulRequestId) return acc;
+    const req = (db.haulRequests || []).find(r => r && r.id === inv.haulRequestId);
+    if (!req || !Array.isArray(req.assignments)) return acc;
+    const iAmOn = req.assignments.some(a => a && a.haulerId === op.id);
+    if (!iAmOn) return acc;
+    const myPortion = (inv.lineItems || []).reduce((s, li) => {
+      if (li && myPlates.has(li.truckPlate)) return s + (Number(li.amount) || 0);
+      return s;
+    }, 0);
+    const invTotal = (inv.lineItems || []).reduce((s, li) => s + (Number(li && li.amount) || 0), 0);
+    const totalCY = (inv.lineItems || []).reduce((s, li) => s + (Number(li && (li.deliveredCY || 0)) || 0), 0);
+    acc.push({ inv, req, myPortion, invTotal, totalCY });
+    return acc;
+  }, []);
+
+  // ---------- KPI tile numbers
+  const kpiPendingOffers = pendingOffers.length;
+  const kpiActiveHauls = myActive.length;
+  const kpiOpenInvoices = myJseInvoices.filter(x => x.inv.status !== 'paid').length;
+  const kpiMyPortionOwed = myJseInvoices
+    .filter(x => x.inv.status !== 'paid')
+    .reduce((s, x) => s + x.myPortion, 0);
+
+  // ---------- Accept / decline mutations
+  const acceptOffer = (req) => {
+    const matLabel = materialLabel(req.materialCode);
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === req.id
+          ? { ...r, status: 'accepted' }
+          : r),
+      },
+      {
+        type: 'haulRequest.acceptedByHauler',
+        actorRole: 'hauler',
+        actorId: op.id,
+        summary: `${op.name} accepted ${req.volumeCY} CY of ${matLabel}`,
+        refId: req.id,
+      }
+    ));
+  };
+
+  const declineOffer = (req) => {
+    const matLabel = materialLabel(req.materialCode);
+    if (!confirm(`Decline this haul? It will return to the dispatcher for re-routing.`)) return;
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === req.id ? {
+          ...r,
+          status: 'pending',
+          matchedHaulerId: null,
+          matchedTruckId: null,
+          assignments: (r.assignments || []).filter(a => !(a && a.haulerId === op.id)),
+        } : r),
+        // Drop canonical loads/hours for any of MY trucks on this request,
+        // matching removeAssignment's cascade.
+        loads: (prev.loads || []).filter(l => !(l && l.haulRequestId === req.id && myTruckIds.has(l.truckId))),
+        hours: (prev.hours || []).filter(h => !(h && h.haulRequestId === req.id && myTruckIds.has(h.truckId))),
+      },
+      {
+        type: 'haulRequest.declinedByHauler',
+        actorRole: 'hauler',
+        actorId: op.id,
+        summary: `${op.name} declined ${req.volumeCY} CY of ${matLabel} — returned to dispatcher`,
+        refId: req.id,
+      }
+    ));
+  };
+
+  // ---------- Add-truck (mirror admin assignTruck but force my haulerId)
+  const addTruckToHaul = (req, truckId) => {
+    const assignedTruck = db.trucks.find(t => t.id === truckId);
+    const newAssignment = {
+      truckId,
+      haulerId: op.id,
+      addedAt: Date.now(),
+      days: [{ date: TODAY_ISO, startTime: req.requestedAt || '08:00', loads: [] }],
+    };
+    setDb(prev => appendActivity(
+      {
+        ...prev,
+        haulRequests: prev.haulRequests.map(r => r.id === req.id ? {
+          ...r,
+          matchedHaulerId: r.matchedHaulerId || op.id,
+          matchedTruckId: r.matchedTruckId || truckId,
+          assignments: [...(r.assignments || []), newAssignment],
+        } : r),
+      },
+      {
+        type: 'haulRequest.truckAdded',
+        actorRole: 'hauler',
+        actorId: op.id,
+        summary: `${op.name} added truck #${assignedTruck ? assignedTruck.plate : '?'} to ${haulRequestLabel(db, req)}`,
+        refId: req.id,
+      }
+    ));
+    setAddingTruckFor(null);
+  };
+
+  // Small helper used in section B for "X loads logged" per truck on a haul.
+  // Uses canonical loads filtered by haulRequestId+truckId. Per the stopgap
+  // (commit c102511) loads.haulRequestId is not yet on the Supabase write
+  // whitelist — for that hauler-loaded session, the in-memory state still
+  // tracks it. Cross-tab/cross-device persistence of that one field is
+  // degraded; the section still renders fine without it.
+  const loadsForReqTruck = (reqId, truckId) => (db.loads || [])
+    .filter(l => l && l.haulRequestId === reqId && l.truckId === truckId);
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -12754,70 +12901,234 @@ function HaulerHome({ haulerId, db, navigate }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Hauls" value={haulsCount} sub="assigned" /></Card>
-        <Card padding={S[4]}><Stat label="Trucks" value={myTrucks.length} sub={`${activeTrucks} active`} /></Card>
-        <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
-        <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(totalHours)} /></Card>
+      {/* KPI tiles — repurposed to the four operational counts */}
+      <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
+        <Card padding={S[4]}><Stat label="Pending offers" value={kpiPendingOffers} sub={kpiPendingOffers > 0 ? 'awaiting your response' : 'nothing waiting'} /></Card>
+        <Card padding={S[4]}><Stat label="Active hauls" value={kpiActiveHauls} sub="today" /></Card>
+        <Card padding={S[4]}><Stat label="Open invoices" value={kpiOpenInvoices} sub="from Jobsite Exchange" /></Card>
+        <Card padding={S[4]}><Stat label="My portion owed" value={fmtMoney(kpiMyPortionOwed)} sub="across open invoices" /></Card>
       </div>
 
-      {pendingCount > 0 && (
-        <Card style={{ marginBottom: S[5], borderLeft: `3px solid ${C.warn}` }}>
-          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{pendingCount} item{pendingCount === 1 ? '' : 's'} pending across your hauls</div>
-          <div style={{ ...T.caption, marginTop: 2 }}>
-            Drill into a project to review loads and hour adjustments.
-          </div>
+      {/* ============== Section A — Pending offers (accept/decline) ============== */}
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: S[2] }}>
+        <Label>Pending offers ({pendingOffers.length})</Label>
+        <span style={{ ...T.caption }}>Accept to start dispatching trucks. Decline returns to the dispatcher.</span>
+      </div>
+      {pendingOffers.length === 0 ? (
+        <Card style={{ marginBottom: S[6] }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[3] }}>No pending offers right now.</div>
         </Card>
-      )}
-
-      <div style={{ marginBottom: S[3] }}><Label>Your hauls</Label></div>
-      {projects.length === 0 ? (
-        <EmptyState
-          icon={<ProjectIcon size={40} />}
-          title="You haven't been assigned to any projects."
-          body="Contact your admin to be added to a project."
-        />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: S[3] }}>
-          {projects.map(p => {
-            const pTrucks = myTrucks.filter(t => t.projectId === p.id);
-            const pTruckIds = new Set(pTrucks.map(t => t.id));
-            const pLoads = myLoads.filter(l => pTruckIds.has(l.truckId));
-            const pHours = myHours.filter(h => pTruckIds.has(h.truckId));
-            const pTotalHours = pHours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-            const pPending = pLoads.filter(l => l.status === 'pending').length;
-            // v22: CY (this hauler's trucks, approved loads only). Replaces
-            // the per-project Trucks + Loads counts on the hauler home tile.
-            const pCY = pLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-            const cyLabel = p.haulType === 'HAS' ? 'CY exported'
-              : p.haulType === 'NEEDS' ? 'CY imported'
-              : 'CY hauled';
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+          {pendingOffers.map(req => {
+            const proj = db.projects.find(p => p.id === req.projectId);
+            const matLabel = materialLabel(req.materialCode);
+            const pickup = req.pickupLocation || {};
+            const dropoff = req.dropoffLocation || {};
+            const timing = req.timing || {};
             return (
-              <button key={p.id} onClick={() => navigate(`/hauler/o/${haulerId}/p/${p.id}`)} style={{
-                textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
-                padding: S[5], cursor: 'pointer', color: C.ink,
-              }}
-                onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
-                onMouseLeave={e => { e.currentTarget.style.background = C.surface; }}
-              >
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3] }}>
-                  <div>
-                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{p.name}</div>
-                    <div style={{ ...T.caption, marginTop: S[1] }}>{p.gc}</div>
-                    <div style={{ ...T.micro, color: C.inkFaint, marginTop: 2 }}>{p.address}</div>
+              <Card key={req.id} style={{ borderLeft: `3px solid ${C.warn}` }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3], gap: S[2] }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Haul request'}</div>
+                    <div style={{ ...T.caption, marginTop: S[1] }}>{proj ? proj.gc : ''}</div>
                   </div>
-                  <StatusPill status={p.status || 'active'} />
+                  <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
                 </div>
-                <div style={{ display: 'flex', gap: S[4], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-                  <div><Label style={{ marginBottom: S[1] }}>{cyLabel}</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{pCY.toLocaleString()}</div></div>
-                  <div><Label style={{ marginBottom: S[1] }}>Hours</Label><div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{fmtHours(pTotalHours)}</div></div>
-                  {pPending > 0 && <div><Label style={{ marginBottom: S[1] }} color={C.warn}>Pending</Label><div style={{ ...T.h4, fontWeight: 700, color: C.warn, lineHeight: 1 }}>{pPending}</div></div>}
+                <div style={{ display: 'flex', gap: S[4], paddingTop: S[3], paddingBottom: S[3], borderTop: `1px solid ${C.rule}`, borderBottom: `1px solid ${C.rule}`, marginBottom: S[3] }}>
+                  <div style={{ flex: 1 }}>
+                    <Label style={{ marginBottom: S[1] }}>Volume</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{req.volumeCY} CY</div>
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Label style={{ marginBottom: S[1] }}>Timing</Label>
+                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono }}>{timing.startDate || '—'}{timing.endDate ? ` → ${timing.endDate}` : ''}</div>
+                  </div>
                 </div>
-              </button>
+                <div style={{ marginBottom: S[2] }}>
+                  <Label style={{ marginBottom: S[1] }}>Pickup</Label>
+                  <div style={{ ...T.bodySm, color: C.ink }}>{pickup.name || '—'}</div>
+                  <div style={{ ...T.caption, color: C.inkDim }}>{pickup.address || ''}</div>
+                </div>
+                <div style={{ marginBottom: S[4] }}>
+                  <Label style={{ marginBottom: S[1] }}>Dropoff</Label>
+                  <div style={{ ...T.bodySm, color: C.ink }}>{dropoff.name || '—'}</div>
+                  <div style={{ ...T.caption, color: C.inkDim }}>{dropoff.address || ''}</div>
+                </div>
+                <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
+                  <Btn variant="ok" size="lg" fullWidth onClick={() => acceptOffer(req)} style={{ flex: 1, minWidth: 180 }}>Accept this haul</Btn>
+                  <Btn variant="ghost" size="lg" onClick={() => declineOffer(req)}>Decline</Btn>
+                </div>
+              </Card>
             );
           })}
         </div>
       )}
+
+      {/* ============== Section B — Active assignments ============== */}
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: S[2] }}>
+        <Label>Active hauls ({myActive.length})</Label>
+        <span style={{ ...T.caption }}>Click any truck to log loads.</span>
+      </div>
+      {myActive.length === 0 ? (
+        <Card style={{ marginBottom: S[6] }}>
+          <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[3] }}>No active hauls today.</div>
+        </Card>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: S[3], marginBottom: S[6] }}>
+          {myActive.map(req => {
+            const proj = db.projects.find(p => p.id === req.projectId);
+            const matLabel = materialLabel(req.materialCode);
+            const mineHere = (req.assignments || []).filter(a => a && a.haulerId === op.id);
+            const myTruckIdsHere = new Set(mineHere.map(a => a.truckId));
+            // Completion % uses canonical loads delivered vs req.volumeCY.
+            const deliveredCY = (db.loads || [])
+              .filter(l => l && l.haulRequestId === req.id)
+              .reduce((s, l) => s + (Number(l.cy) || 0), 0);
+            const pct = req.volumeCY > 0 ? Math.min(100, Math.round((deliveredCY / req.volumeCY) * 100)) : 0;
+            const canAddTruck = req.status === 'accepted';
+            const availableTrucks = myTrucks.filter(t => !myTruckIdsHere.has(t.id));
+            const expanded = addingTruckFor === req.id;
+            return (
+              <Card key={req.id}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3], gap: S[2], flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                      <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Haul'}</div>
+                      <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
+                      <StatusPill status={req.status} />
+                    </div>
+                    <div style={{ ...T.caption, marginTop: S[1] }}>{proj ? proj.gc : ''} · {req.volumeCY} CY requested</div>
+                  </div>
+                  <div style={{ textAlign: 'right', minWidth: 110 }}>
+                    <Label style={{ marginBottom: S[1] }}>Delivered</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1, fontFamily: F.mono }}>{deliveredCY.toLocaleString()}<span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> / {req.volumeCY}</span></div>
+                    <div style={{ ...T.caption, marginTop: 2, color: pct >= 100 ? C.ok : C.inkDim }}>{pct}% complete</div>
+                  </div>
+                </div>
+                <div style={{ paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
+                  {mineHere.length === 0 ? (
+                    <div style={{ ...T.bodySm, color: C.inkDim, padding: S[3] }}>No trucks dispatched yet.</div>
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[2] }}>
+                      {mineHere.map(a => {
+                        const truck = db.trucks.find(t => t.id === a.truckId);
+                        const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+                        const truckLoadCount = loadsForReqTruck(req.id, a.truckId).length;
+                        return (
+                          <button key={a.truckId} onClick={() => navigate(`/hauler/o/${op.id}/p/${req.projectId}/t/${a.truckId}`)} style={{
+                            textAlign: 'left', background: C.surfaceHi, border: `1px solid ${C.rule}`, borderRadius: R.md,
+                            padding: S[3], cursor: 'pointer', color: C.ink,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: S[1] }}>
+                              <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truck ? truck.plate : '?'}</span>
+                              {truck && <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{truck.type}</Pill>}
+                            </div>
+                            <div style={{ ...T.caption, color: C.inkDim }}>{driver ? driver.name : '— unassigned'}</div>
+                            <div style={{ ...T.micro, color: C.inkFaint, marginTop: S[1] }}>{truckLoadCount} load{truckLoadCount === 1 ? '' : 's'} logged</div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {canAddTruck && (
+                    <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px dashed ${C.rule}` }}>
+                      {!expanded ? (
+                        <Btn variant="secondary" size="sm" onClick={() => setAddingTruckFor(req.id)} disabled={availableTrucks.length === 0}>
+                          {availableTrucks.length === 0 ? 'All your trucks already assigned' : '+ Add truck'}
+                        </Btn>
+                      ) : (
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[2] }}>
+                            <Label>Add one of your trucks</Label>
+                            <Btn variant="ghost" size="xs" onClick={() => setAddingTruckFor(null)}>Cancel</Btn>
+                          </div>
+                          {availableTrucks.length === 0 ? (
+                            <div style={{ ...T.bodySm, color: C.inkDim }}>All your trucks are already assigned to this haul.</div>
+                          ) : (
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: S[2] }}>
+                              {availableTrucks.map(t => {
+                                const dr = db.drivers.find(d => d.id === t.driverId);
+                                return (
+                                  <button key={t.id} onClick={() => addTruckToHaul(req, t.id)} style={{
+                                    textAlign: 'left', background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.md,
+                                    padding: S[2], cursor: 'pointer', color: C.ink,
+                                  }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
+                                      <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{t.plate}</span>
+                                      <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill>
+                                    </div>
+                                    <div style={{ ...T.caption, color: C.inkDim, marginTop: S[1] }}>{dr ? dr.name : '— unassigned'}</div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ============== Section C — Recent loads logged ============== */}
+      <div style={{ marginBottom: S[3] }}><Label>Recent loads ({recentLoads.length})</Label></div>
+      <Card padding={0} style={{ marginBottom: S[6] }}>
+        {recentLoads.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No loads logged yet.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Date</Th><Th>Time</Th><Th>Truck</Th><Th align="right">CY</Th><Th>Material</Th><Th>Status</Th></tr></thead>
+            <tbody>
+              {recentLoads.map(l => {
+                const t = db.trucks.find(tr => tr.id === l.truckId);
+                return (
+                  <Tr key={l.id}>
+                    <Td mono>{l.date || '—'}</Td>
+                    <Td mono dim>{l.time || '—'}</Td>
+                    <Td mono><span style={{ color: C.accent }}>#{t ? t.plate : '?'}</span></Td>
+                    <Td align="right" mono>{l.cy}</Td>
+                    <Td>{materialLabel(l.material)}</Td>
+                    <Td><StatusPill status={l.status || 'pending'} /></Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {/* ============== Section D — JSE invoices owed to me ============== */}
+      <div style={{ marginBottom: S[3] }}><Label>JSE invoices ({myJseInvoices.length})</Label></div>
+      <Card padding={0}>
+        {myJseInvoices.length === 0 ? (
+          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No JSE invoices yet.</div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead><tr><Th>Invoice</Th><Th>Status</Th><Th>Issued</Th><Th>Linked haul</Th><Th align="right">Total CY</Th><Th align="right">Invoice total</Th><Th align="right">My portion</Th></tr></thead>
+            <tbody>
+              {myJseInvoices.slice().reverse().map(({ inv, req, myPortion, invTotal, totalCY }) => {
+                const proj = req && db.projects.find(p => p.id === req.projectId);
+                return (
+                  <Tr key={inv.id} onClick={() => proj && navigate(`/hauler/o/${op.id}/p/${proj.id}`)}>
+                    <Td mono><span style={{ color: C.accent }}>{inv.number}</span></Td>
+                    <Td><StatusPill status={inv.status} /></Td>
+                    <Td mono dim>{inv.issuedDate || '—'}</Td>
+                    <Td>{proj ? proj.name : '—'}</Td>
+                    <Td align="right" mono>{totalCY}</Td>
+                    <Td align="right" mono>{fmtMoney(invTotal)}</Td>
+                    <Td align="right" mono style={{ fontWeight: 700, color: C.accent }}>{fmtMoney(myPortion)}</Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
     </div>
   );
 }
