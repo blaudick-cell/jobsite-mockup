@@ -3299,6 +3299,36 @@ const _sb = {
 };
 
 // ---- Cloud bootstrap (Phase 2 read path) --------------------------------
+// Schema lockstep audit: for every table in SB_TABLES, attempt a SELECT of
+// every column that SB_FIELDS_JS claims exists. If Supabase rejects the
+// query (PGRST204 or similar), log a clear console.error with the table,
+// the offending field, and a suggested ALTER TABLE statement Dispatch can
+// run via the SQL editor. Fires once per page load after bootstrap. This
+// is what would have caught the loads.haul_request_id silent-drop bug at
+// the first refresh after deploy instead of after Robert noticed edits
+// weren't saving — see outputs/data-revert-rca.md.
+async function auditSbSchema() {
+  if (!_sb.ready || !_sb.client) return;
+  for (const jsKey of SB_TABLE_LIST) {
+    const cfg = SB_TABLES[jsKey];
+    const sbCols = SB_FIELDS_JS[jsKey].map(f => cfg.overrides[f] || camelToSnake(f));
+    const cols = sbCols.join(',');
+    try {
+      const { error } = await _sb.client.from(cfg.sb).select(cols).limit(1);
+      if (error) {
+        const msg = error.message || error.details || String(error);
+        const colMatch = msg.match(/'([^']+)' column/) || msg.match(/column ['"]?([a-z_][a-z0-9_]*)['"]?/i);
+        const missing = colMatch ? colMatch[1] : '<unknown — check error above>';
+        console.error('[supabase][schema-audit] ' + cfg.sb + ' SELECT(' + cols + ') failed: ' + msg
+          + '\n  → Likely missing column. Suggested SQL (adjust type as needed):'
+          + '\n  ALTER TABLE public.' + cfg.sb + ' ADD COLUMN IF NOT EXISTS ' + missing + ' jsonb;');
+      }
+    } catch (e) {
+      console.error('[supabase][schema-audit] ' + cfg.sb + ' probe threw:', e);
+    }
+  }
+}
+
 async function bootstrapCloud(localDb) {
   if (!_sb.ready && !_sb.init()) {
     return { status: 'offline', db: localDb, reason: 'sdk-missing' };
@@ -3326,6 +3356,10 @@ async function bootstrapCloud(localDb) {
       _sb.upsertMeta('schema_version', DB_SCHEMA_VERSION)
         .catch(e => console.warn('[jse] schema_version auto-bump failed:', e));
     }
+    // Fire-and-forget schema audit — won't block render but surfaces any
+    // SB_FIELDS_JS ↔ live-schema drift via console.error before the user
+    // hits the bug.
+    auditSbSchema();
     return { status: 'online', db: assembled, reason: didSeed ? 'seeded' : 'fetched' };
   } catch (e) {
     SyncErrorBus.push('bootstrap', 'fetch', e);
