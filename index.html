@@ -2594,6 +2594,20 @@ function buildSeed() {
 
 // Parse a stored localStorage payload (or null) into a valid db.
 // Used both at initial mount and when a sibling tab writes to `jse_db_v1`.
+// Live-data tables that MUST be guarded by an idempotency check before any
+// destructive overwrite inside the hydrateDb migration cascade. Convention:
+// every step that unconditionally replaces one of these top-level arrays
+// MUST first detect "already at target shape" and short-circuit (see the
+// alreadyV15 / alreadyV16 patterns at v14→v15 / v15→v16). The runtime audit
+// at the bottom of hydrateDb compares pre/post lengths for each table here
+// and logs a console.error if the cascade shrank any of them, which would
+// have caught the data-revert bug at first page load after deploy. See
+// outputs/data-revert-rca.md.
+const HYDRATE_LIVE_DATA_TABLES = [
+  'haulers', 'projects', 'drivers', 'trucks',
+  'loads', 'hours', 'invoices', 'haulRequests',
+];
+
 function hydrateDb(raw) {
   const seed = buildSeed();
   if (raw == null) return seed;
@@ -2607,6 +2621,13 @@ function hydrateDb(raw) {
     const baselineKeys = ['projects', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
     const valid = baselineKeys.every(k => k in parsed) && ('haulers' in parsed || 'operators' in parsed);
     if (!valid) return seed;
+    // Snapshot live-data row counts BEFORE the cascade runs so the
+    // post-cascade audit can flag any unguarded destructive step.
+    const preCascadeCounts = {};
+    for (const k of HYDRATE_LIVE_DATA_TABLES) {
+      preCascadeCounts[k] = Array.isArray(parsed[k]) ? parsed[k].length
+        : (k === 'haulers' && Array.isArray(parsed.operators) ? parsed.operators.length : 0);
+    }
     if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
     if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
     // Schema migration. Apply each forward-step in order:
@@ -3029,6 +3050,28 @@ function hydrateDb(raw) {
         out.routes = rOut;
       }
     } catch (e) { /* fall through with v18 shape; next hydrate retries */ }
+    // Post-cascade audit: did any guarded step accidentally wipe a live
+    // table? Compares pre/post row counts on every HYDRATE_LIVE_DATA_TABLES
+    // entry; flags the data-revert pattern (RCA outputs/data-revert-rca.md)
+    // at first page load after deploy so it's noticed before users edit on
+    // top of a half-empty cache. Threshold is conservative (>=3 rows lost
+    // AND post < 50% of pre) to avoid false-positive on legitimate empties.
+    try {
+      const losses = [];
+      for (const k of HYDRATE_LIVE_DATA_TABLES) {
+        const before = preCascadeCounts[k] || 0;
+        const after  = Array.isArray(out[k]) ? out[k].length : 0;
+        if (before >= 3 && after < Math.ceil(before * 0.5)) {
+          losses.push(k + ': ' + before + ' → ' + after);
+        }
+      }
+      if (losses.length > 0) {
+        console.error('[hydrateDb][audit] cascade shrank live-data tables: '
+          + losses.join('; ')
+          + '. Likely a destructive migration without an idempotency guard'
+          + ' (see HYDRATE_LIVE_DATA_TABLES + alreadyVN convention). RCA: outputs/data-revert-rca.md.');
+      }
+    } catch (e) { /* audit must never throw */ }
     return out;
   } catch (e) {
     return seed;
