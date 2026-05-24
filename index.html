@@ -8417,6 +8417,20 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       }
     ));
   };
+  const deleteInvoice = (invId) => {
+    const inv = (db.invoices || []).find(i => i.id === invId);
+    if (!inv) return;
+    if (!confirm('Delete invoice ' + inv.number + '? This can\'t be undone.')) return;
+    setDb(prev => appendActivity(
+      { ...prev, invoices: (prev.invoices || []).filter(i => i.id !== invId) },
+      {
+        type: 'invoice.deleted',
+        actorRole: 'admin', actorId: null,
+        summary: 'Admin deleted invoice ' + inv.number,
+        refId: req.id,
+      }
+    ));
+  };
   const fmtMoneyInv = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
@@ -9346,7 +9360,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               const total = (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
               const kindLabel = inv.kind === 'final' ? 'Final' : inv.kind === 'interim' ? 'Interim' : (String(inv.number || '').startsWith('INV-FIN-') ? 'Final' : 'Interim');
               return (
-                <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto', gap: S[3], alignItems: 'center', padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
+                <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: S[3], alignItems: 'center', padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                       <span style={{ ...T.body, fontWeight: 700, color: C.ink, fontFamily: F.mono }}>{inv.number}</span>
@@ -9358,16 +9372,17 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     </div>
                   </div>
                   <div style={{ ...T.h4, fontWeight: 700, color: C.ink, fontFamily: F.mono }}>{fmtMoneyInv(total)}</div>
-                  {inv.status === 'draft' && (
+                  {inv.status === 'draft' ? (
                     <Btn variant="secondary" size="sm" onClick={() => advanceInvoiceStatus(inv.id, 'sent')}>Mark sent</Btn>
-                  )}
-                  {inv.status === 'sent' && (
+                  ) : inv.status === 'sent' ? (
                     <Btn variant="secondary" size="sm" onClick={() => advanceInvoiceStatus(inv.id, 'paid')}>Mark paid</Btn>
-                  )}
-                  {inv.status === 'paid' && (
+                  ) : inv.status === 'paid' ? (
                     <span style={{ ...T.caption, color: C.ok }}>Paid {inv.paidAt ? new Date(inv.paidAt).toLocaleDateString() : ''}</span>
+                  ) : (
+                    <span style={{ ...T.caption, color: C.inkDim }}>—</span>
                   )}
                   <Btn variant="primary" size="sm" onClick={() => navigate('/admin/invoices/' + inv.id + '/print')}>Print</Btn>
+                  <Btn variant="danger" size="sm" onClick={() => deleteInvoice(inv.id)}>Delete</Btn>
                 </div>
               );
             })}
@@ -11070,6 +11085,22 @@ function AdminPayments({ db, setDb, navigate, hash }) {
     ));
   };
 
+  const deleteInvoice = (invId) => {
+    const inv = (db.invoices || []).find(i => i.id === invId);
+    if (!inv) return;
+    if (!confirm('Delete invoice ' + inv.number + '? This can\'t be undone.')) return;
+    setDb(prev => appendActivity(
+      { ...prev, invoices: (prev.invoices || []).filter(i => i.id !== invId) },
+      {
+        type: 'invoice.deleted',
+        actorRole: 'admin',
+        actorId: null,
+        summary: 'Admin deleted invoice ' + inv.number,
+        refId: inv.haulRequestId || null,
+      }
+    ));
+  };
+
   // === Run payout batch modal ===
   const [showBatch, setShowBatch] = useState(false);
   const [batchSel, setBatchSel] = useState({}); // { [invId]: true }
@@ -11177,18 +11208,21 @@ function AdminPayments({ db, setDb, navigate, hash }) {
                     <Td align="right" mono style={{ fontWeight: 600 }}>{fmtMoney(total)}</Td>
                     <Td><StatusPill status={inv.status} /></Td>
                     <Td align="right">
-                      {inv.status === 'draft' && (
-                        <Btn size="xs" onClick={(e) => { e.stopPropagation(); sendDraft(inv); }}>Generate</Btn>
-                      )}
-                      {inv.status === 'sent' && (
-                        <Btn size="xs" onClick={(e) => { e.stopPropagation(); markPaid(inv); }}>Mark paid</Btn>
-                      )}
-                      {inv.status === 'paid' && (
-                        <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/payments/${inv.id}`); }}>View receipt</Btn>
-                      )}
-                      {inv.status === 'void' && (
-                        <span style={{ color: C.inkFaint }}>—</span>
-                      )}
+                      <div style={{ display: 'inline-flex', gap: S[2], alignItems: 'center', justifyContent: 'flex-end' }}>
+                        {inv.status === 'draft' && (
+                          <Btn size="xs" onClick={(e) => { e.stopPropagation(); sendDraft(inv); }}>Generate</Btn>
+                        )}
+                        {inv.status === 'sent' && (
+                          <Btn size="xs" onClick={(e) => { e.stopPropagation(); markPaid(inv); }}>Mark paid</Btn>
+                        )}
+                        {inv.status === 'paid' && (
+                          <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); navigate(`/admin/payments/${inv.id}`); }}>View receipt</Btn>
+                        )}
+                        {inv.status === 'void' && (
+                          <span style={{ color: C.inkFaint }}>—</span>
+                        )}
+                        <Btn variant="danger" size="xs" onClick={(e) => { e.stopPropagation(); deleteInvoice(inv.id); }}>Delete</Btn>
+                      </div>
                     </Td>
                   </Tr>
                 );
