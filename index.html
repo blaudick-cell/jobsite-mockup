@@ -4881,7 +4881,11 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
                 const found = (typeof MATERIALS !== 'undefined' && MATERIALS) ? MATERIALS.find(m => m.code === code) : null;
                 matLabel = found ? found.label : (code || matLabel);
               } catch (e) { /* keep fallback */ }
-              const qty = (req && req.volumeCY != null) ? req.volumeCY : (proj && proj.volumeCYNeeded);
+              // Use req.volumeCY only — project.volumeCYNeeded is a stale
+              // seed-only value and shouldn't represent any specific request's
+              // demand (2026-05-24 RCA: same field drove a 200 vs 5,018 tile
+              // mismatch).
+              const qty = (req && req.volumeCY != null) ? req.volumeCY : null;
               const qtyStr = qty != null ? Number(qty).toLocaleString() + ' CY of ' + matLabel : matLabel;
               // Build the widget element. Inline styles only — MapLibre's
               // popup container reparents into a non-React DOM tree.
@@ -5031,7 +5035,12 @@ function AdminProjects({ db, setDb, navigate }) {
     const loadsInTransit = trucksActive;
     // Haul requests on this project — used for target volume + dispatch queue.
     const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
-    const targetCY = reqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+    // targetCY = sum of live (non-completed, non-closed) reqs' volumeCY.
+    // Live filter matches the HAS/NEEDS pill in the tile so the two displays
+    // never disagree (2026-05-24 RCA: bar was reading project.volumeCYNeeded
+    // while pill was summing live reqs → 200 vs 5,018 mismatch on 1105 Rogers).
+    const liveReqs = reqs.filter(r => r && r.status !== 'completed' && r.status !== 'closed');
+    const targetCY = liveReqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
     // v30: CANONICAL rollups derived from assignments → days → loads.
     // Identical formula to AdminHaulRequestDetail and DispatchRow.
     // cyPending = sum of (volumeCY - delivered) on requests that aren't
@@ -5047,12 +5056,13 @@ function AdminProjects({ db, setDb, navigate }) {
     // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
     const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
     const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
-    // CY-based progress (v22): prefer project.volumeCYNeeded; fall back to the
-    // sum of haul-request volumes; final fallback is 0 (renders without a
-    // target, just the running total).
-    const cyTarget = (typeof p.volumeCYNeeded === 'number' && p.volumeCYNeeded > 0)
-      ? p.volumeCYNeeded
-      : targetCY;
+    // CY-based progress: denominator is `sum(haulRequests.volumeCY)` — the
+    // SAME source the HAS/NEEDS pill above reads from, so the two displays
+    // can never disagree. Was preferring the stale `project.volumeCYNeeded`
+    // seed value, which on 1105 Rogers showed `28 / 200 +5,018 pending`
+    // while the pill correctly showed `5,018 CY of Clean Fill` (RCA
+    // 2026-05-24). `volumeCYNeeded` is no longer consulted for the target.
+    const cyTarget = targetCY;
     const cyPct = cyTarget > 0 ? Math.min(100, Math.round((cyCompleted / cyTarget) * 100)) : 0;
     // Demo cycle time: avg(approved-load count × 24 min) / trucksActive. Tweakable.
     const avgCycleTime = trucksActive > 0 && loadsCompleted > 0
@@ -5167,9 +5177,13 @@ function AdminProjects({ db, setDb, navigate }) {
               const aggMatLabel = matCodes.length === 0 ? (p.materialType || '—')
                 : matCodes.length === 1 ? materialLabel(matCodes[0])
                 : 'Mixed';
+              // Single source of truth: sum(liveReqs.volumeCY). NO fallback
+              // to project.volumeCYNeeded — the seed value drifts and was
+              // disagreeing with the bar's denominator (2026-05-24 RCA).
+              // No live reqs → '—' (matches what the bar shows: nothing).
               const qtyStr = liveReqs.length > 0
                 ? Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel
-                : (p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() + ' CY of ' + (p.materialType || '—') + ' (planned)' : '—');
+                : '—';
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
                   <HasNeedsPill type={p.haulType} fontSize={13} />
