@@ -119,3 +119,35 @@ Run this AFTER the etag/marker checks above, BEFORE you write the final report.
 **During the smoke test, also capture browser console output** via `read_console_messages`. Quote any `[supabase]` or `[hydrateDb][audit]` lines verbatim in the report — those are the new safeguards from this same RCA, and seeing them fire post-deploy is itself diagnostic data.
 
 **Failure flag.** If smoke test fails, your report's first line must be: `VERIFICATION FAILED — <reason>`. Do not bury this. Dispatch's revert path keys off it.
+
+## Render-stability check (post-2026-05-23)
+
+Added in response to the Live Operations Map "tweaking on and off" report — markers re-mounting on every geocode resolution produced visible flicker even though the data + bundle were correct. Etag flip + edit/refresh smoke test would NOT have caught this; it's a render-loop bug. This step closes that gap.
+
+Run AFTER the edit/refresh smoke test, BEFORE the final report. Same Chrome MCP availability rule applies — skip + note if not connected.
+
+**Render-stability steps (Chrome MCP available):**
+
+1. `mcp__claude-in-chrome__navigate` to `https://jobsite-mockup-demo.netlify.app/#/admin`. Allow ~3s for hydrate + first bootstrap.
+2. Install a window-scoped counter via `javascript_tool` BEFORE the map settles. Wrap `MapLibre.Map.prototype.addSource` (counts `'routes'` / `'mini-route'` source mounts) and `MapLibre.Marker.prototype.addTo` (counts marker mounts). Pseudocode:
+   ```js
+   window.__jseMapSpy = { addSource: 0, markerAdds: 0 };
+   const origAddSource = window.maplibregl.Map.prototype.addSource;
+   window.maplibregl.Map.prototype.addSource = function(name, opts) {
+     if (name === 'routes' || name === 'mini-route') window.__jseMapSpy.addSource++;
+     return origAddSource.call(this, name, opts);
+   };
+   const origAddTo = window.maplibregl.Marker.prototype.addTo;
+   window.maplibregl.Marker.prototype.addTo = function(map) {
+     window.__jseMapSpy.markerAdds++;
+     return origAddTo.call(this, map);
+   };
+   ```
+3. Reload (`navigate` to the same URL) so the spy is active from the first map mount.
+4. Wait 15s on `/admin` without interacting. Geocode-backfill + OSRM-route fetches should complete and the map should settle.
+5. Read `window.__jseMapSpy` via `javascript_tool`. Expected:
+   - `addSource` ≤ 2. > 2 means the map is being re-created on each render.
+   - `markerAdds` ≤ (live endpoints + haulers + 4 buffer). > 2× that means the diff-reconcile path regressed to remove-all-add-all.
+6. If counts exceed the thresholds, report **VERIFICATION FAILED — map re-mounted/re-fetched <N> times in 15s settle window**. Quote the spy numbers verbatim. Dispatch can decide to revert.
+
+**Why these thresholds:** addSource fires once inside `map.on('load')`, so a healthy session shows exactly 1. markerAdds = initial endpoint+hauler count, plus one extra add per legitimately-new geocode resolution. Anything beyond a small buffer = a regression in the diff-reconcile path (LiveOperationsTileMap + HaulRouteMiniMap rely on `markersRef.current = new Map()` keyed by stable ids — see comments in those components).

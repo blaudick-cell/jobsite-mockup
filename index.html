@@ -4668,7 +4668,14 @@ function AdminProjects({ db, setDb, navigate }) {
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
-    const markersRef = useRef([]);
+    // Map<id, { marker, coordKey, type, isHauler }> — diff-reconciled across
+    // every endpointsSignature/haulersSignature change so markers don't all
+    // tear down and re-mount when a single geocode resolves. Root cause of the
+    // "tweaking on and off" Robert reported 2026-05-23 — multiple sequential
+    // setDb calls (one per resolved address) each cleared markersRef and re-
+    // added every marker via setTimeout(0), so 4-5 cold-cache addresses
+    // produced 4-5 visible flickers in ~1-2s.
+    const markersRef = useRef(new Map());
 
     // Resolve geocoded points from `db.geocode`. The cache is pre-seeded with
     // approximate coords for every known address; runtime Nominatim refines
@@ -4935,44 +4942,69 @@ function AdminProjects({ db, setDb, navigate }) {
         // pins. C.inkDim = #9A9A9A.
         const HAULER_HALO = 'radial-gradient(circle, #9a9a9a66, #9a9a9a22 55%, #9a9a9a00 75%)';
         const HAULER_DOT  = '#9A9A9A';
-        // Remove any previously-added markers so we don't accumulate duplicates
-        // when projectEndpoints or haulerPoints changes.
-        markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
-        markersRef.current = [];
-        const addAll = () => {
+        const popupHtmlFor = (label) => '<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (label || '').replace(/</g, '&lt;') + '</div>';
+        const mkMarker = (want) => {
+          const el = want.isHauler
+            ? mkHaloDotEl(HAULER_HALO, HAULER_DOT)
+            : mkHaloDotEl(haloFor(want.type), dotFor(want.type));
+          if (want.isHauler) el.classList.add('jx-haul-pin-hauler');
+          return new window.maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat([want.coord.lng, want.coord.lat])
+            .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML(popupHtmlFor(want.label)));
+        };
+        // Diff-reconcile against the previous marker set instead of tearing
+        // down + rebuilding. Ids are stable across re-renders (pickup =
+        // `<reqId>-p`, dump = `<reqId>-d`, hauler = `hauler-<haulerId>`), so a
+        // single geocode resolution only moves/adds the one marker that
+        // changed. Existing markers stay mounted = no flicker.
+        const reconcile = () => {
           if (cancelled) return;
           try {
+            const desired = new Map();
             projectEndpoints.forEach(pt => {
-              const el = mkHaloDotEl(haloFor(pt.type), dotFor(pt.type));
-              const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
-                .setLngLat([pt.coord.lng, pt.coord.lat])
-                .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
-                .addTo(map);
-              markersRef.current.push(marker);
+              desired.set(pt.id, { coord: pt.coord, type: pt.type, label: pt.label, isHauler: false });
             });
             haulerPoints.forEach(pt => {
-              const el = mkHaloDotEl(HAULER_HALO, HAULER_DOT);
-              el.classList.add('jx-haul-pin-hauler');
-              const marker = new window.maplibregl.Marker({ element: el, anchor: 'center' })
-                .setLngLat([pt.coord.lng, pt.coord.lat])
-                .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false }).setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' + (pt.label || '').replace(/</g, '&lt;') + '</div>'))
-                .addTo(map);
-              markersRef.current.push(marker);
+              desired.set(pt.id, { coord: pt.coord, type: 'hauler', label: pt.label, isHauler: true });
             });
+            const current = (markersRef.current instanceof Map) ? markersRef.current : new Map();
+            const next = new Map();
+            for (const [id, entry] of current.entries()) {
+              if (!desired.has(id)) { try { entry.marker.remove(); } catch (e) {} }
+            }
+            for (const [id, want] of desired.entries()) {
+              const coordKey = want.coord.lng.toFixed(5) + ',' + want.coord.lat.toFixed(5);
+              const cur = current.get(id);
+              if (cur && cur.type === want.type && cur.isHauler === want.isHauler) {
+                if (cur.coordKey !== coordKey) {
+                  try { cur.marker.setLngLat([want.coord.lng, want.coord.lat]); } catch (e) {}
+                  cur.coordKey = coordKey;
+                }
+                next.set(id, cur);
+              } else {
+                if (cur) { try { cur.marker.remove(); } catch (e) {} }
+                try {
+                  const marker = mkMarker(want).addTo(map);
+                  next.set(id, { marker, coordKey, type: want.type, isHauler: want.isHauler });
+                } catch (e) { /* swallow — partial markers are better than no markers */ }
+              }
+            }
+            markersRef.current = next;
           } catch (e) { /* swallow — partial markers are better than no markers */ }
         };
         if (map.loaded && map.loaded()) {
-          addAll();
+          reconcile();
         } else {
-          map.once && map.once('load', addAll);
+          map.once && map.once('load', reconcile);
         }
       }, 0);
-      // Cleanup: cancel pending timeout + remove markers added so far.
+      // Cleanup: cancel the pending timeout only. DO NOT remove markers —
+      // they're diff-reconciled across re-runs, not rebuilt. The map-init
+      // effect's unmount path destroys the map container, which removes all
+      // attached marker DOM nodes in one go.
       return () => {
         cancelled = true;
         clearTimeout(t);
-        markersRef.current.forEach(m => { try { m.remove(); } catch (e) {} });
-        markersRef.current = [];
       };
     }, [endpointsSignature, haulersSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -8026,7 +8058,9 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
   const containerRef = useRef(null);
   const mapRef = useRef(null);
-  const markersRef = useRef([]);
+  // Map<'pick'|'dump', { marker, coordKey }> — diff-reconciled, see same fix
+  // in LiveOperationsTileMap. Was tearing down both pins on every coord change.
+  const markersRef = useRef(new Map());
   // Lifecycle of the two external calls. Lets us distinguish "still loading"
   // from "geocode failed" / "route failed" so the placeholder copy stays honest.
   const [status, setStatus] = useState({ geocode: 'idle', route: 'idle' });
@@ -8154,8 +8188,6 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
     let cancelled = false;
     const t = setTimeout(() => {
       if (cancelled) return;
-      markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
-      markersRef.current = [];
       const src = map.getSource && map.getSource('mini-route');
       if (src) {
         try {
@@ -8181,10 +8213,37 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
         el.appendChild(dot);
         return el;
       };
-      try {
-        if (pick) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(PICKUP_HALO, '#ef5b5b'), anchor: 'center' }).setLngLat([pick.lng, pick.lat]).addTo(map));
-        if (dump) markersRef.current.push(new window.maplibregl.Marker({ element: mkPin(DUMP_HALO, '#B3E635'), anchor: 'center' }).setLngLat([dump.lng, dump.lat]).addTo(map));
-      } catch (e) { /* ignore */ }
+      // Diff-reconcile pick + dump pins keyed by 'pick'/'dump'. Reuses the
+      // existing marker (setLngLat) when coord rounds to the same value;
+      // creates a new one only when missing. Prevents the per-render flicker
+      // that came from remove() + new Marker() on every coordsSig change.
+      const current = (markersRef.current instanceof Map) ? markersRef.current : new Map();
+      const desired = new Map();
+      if (pick) desired.set('pick', { coord: pick, halo: PICKUP_HALO, dot: '#ef5b5b' });
+      if (dump) desired.set('dump', { coord: dump, halo: DUMP_HALO,   dot: '#B3E635' });
+      const next = new Map();
+      for (const [key, entry] of current.entries()) {
+        if (!desired.has(key)) { try { entry.marker.remove(); } catch (e) { /* ignore */ } }
+      }
+      for (const [key, want] of desired.entries()) {
+        const coordKey = want.coord.lng.toFixed(5) + ',' + want.coord.lat.toFixed(5);
+        const cur = current.get(key);
+        if (cur) {
+          if (cur.coordKey !== coordKey) {
+            try { cur.marker.setLngLat([want.coord.lng, want.coord.lat]); } catch (e) { /* ignore */ }
+            cur.coordKey = coordKey;
+          }
+          next.set(key, cur);
+        } else {
+          try {
+            const marker = new window.maplibregl.Marker({ element: mkPin(want.halo, want.dot), anchor: 'center' })
+              .setLngLat([want.coord.lng, want.coord.lat])
+              .addTo(map);
+            next.set(key, { marker, coordKey });
+          } catch (e) { /* ignore */ }
+        }
+      }
+      markersRef.current = next;
       const fitPoints = routeCoords && routeCoords.length >= 2
         ? routeCoords
         : (pick && dump ? [[pick.lng, pick.lat], [dump.lng, dump.lat]] : null);
@@ -8196,11 +8255,12 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
         } catch (e) { /* ignore */ }
       }
     }, 0);
+    // Cleanup: cancel the pending timeout only. Markers persist across re-
+    // runs (diff-reconciled, not rebuilt). Map-init's cleanup destroys the
+    // container which removes attached marker DOM nodes on unmount.
     return () => {
       cancelled = true;
       clearTimeout(t);
-      markersRef.current.forEach(m => { try { m.remove(); } catch (e) { /* ignore */ } });
-      markersRef.current = [];
     };
   }, [coordsSig, styleLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -15221,15 +15281,24 @@ function App() {
     if (todo.length === 0) return undefined;
     let cancelled = false;
     (async () => {
+      // Accumulate resolved coords across the loop; flush in a single setDb
+      // at the end so the geocode object reference flips once instead of
+      // N times. With the per-write model, every resolution triggered a
+      // full Live-Ops marker reconcile pass — visible as flicker.
+      const accum = {};
       for (const addr of todo) {
         if (cancelled) return;
         const res = await geocodeAddress(addr);
         if (cancelled) return;
         if (res && isFinite(res.lat) && isFinite(res.lng)) {
-          setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), [addr]: res } }));
+          accum[addr] = res;
         }
         await new Promise(r => setTimeout(r, 200));
       }
+      if (cancelled) return;
+      const keys = Object.keys(accum);
+      if (keys.length === 0) return;
+      setDb(prev => ({ ...prev, geocode: { ...(prev.geocode || {}), ...accum } }));
     })();
     return () => { cancelled = true; };
   }, [db.haulRequests, setDb]);
