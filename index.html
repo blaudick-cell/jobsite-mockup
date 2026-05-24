@@ -15583,19 +15583,31 @@ function App() {
   useEffect(() => {
     const onStorage = (e) => {
       if (e.key !== DB_STORAGE_KEY) return;
-      const next = hydrateDb(e.newValue);
-      const nextSerialized = e.newValue == null ? null : JSON.stringify(next);
+      const hydrated = hydrateDb(e.newValue);
+      // Preserve our own local-only caches (db.geocode + db.routes) across
+      // cross-tab storage events. These caches aren't synced to Supabase and
+      // shouldn't follow peer state — if a peer on a stale bundle broadcasts
+      // its serialized db (with its own narrower route cache), taking that
+      // narrower cache would drop entries we'd just fetched, the async fetch
+      // effect would re-fetch them, peer would override again, and the route
+      // total would flicker at the broadcast cadence (2026-05-24 flicker
+      // RCA, GC-disable commit). Merge: keep our entries, layer peer's on
+      // top so brand-new keys still propagate.
+      setDbRaw(prev => {
+        const next = { ...hydrated };
+        if (prev && prev.geocode) next.geocode = { ...hydrated.geocode, ...prev.geocode };
+        if (prev && prev.routes)  next.routes  = { ...hydrated.routes,  ...prev.routes };
+        return next;
+      });
+      const nextSerialized = e.newValue == null ? null : JSON.stringify(hydrated);
       // Self-heal: if our hydrate migrated (or otherwise changed) the
       // incoming payload, write the migrated state back to localStorage so
       // peer tabs on stale cached bundles see the canonical value on their
-      // next storage event. Without this, a peer tab that lacks our newer
-      // migration logic keeps echoing pre-migration shape forever (root
-      // cause of the 2026-05-24 hreq-001 flicker war — see RCA).
+      // next storage event.
       if (e.newValue != null && nextSerialized !== e.newValue) {
         try { window.localStorage.setItem(DB_STORAGE_KEY, nextSerialized); } catch (e2) {}
       }
       lastSerializedRef.current = nextSerialized;
-      setDbRaw(next);
       setRemoteUpdateNonce(n => n + 1);
     };
     window.addEventListener('storage', onStorage);
