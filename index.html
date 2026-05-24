@@ -15494,6 +15494,13 @@ function App() {
   // redundant writes — including the write that would otherwise echo back the
   // value we just received from another tab.
   const lastSerializedRef = useRef(null);
+  // Module-scope replacer used by every JSON.stringify call that needs to
+  // strip db.routes + db.geocode (memory-only caches). Returning a replacer
+  // function avoids the `{ routes: _r, geocode: _g, ...persistable } = ...`
+  // pattern, which Babel-standalone transforms to multiple `const _excluded`
+  // declarations at the same script scope -> "Identifier '_excluded' has
+  // already been declared" parse error that bricked the live boot 2026-05-24.
+  const stripCachesReplacer = (key, value) => (key === 'routes' || key === 'geocode') ? undefined : value;
   useEffect(() => {
     try {
       // EXCLUDE db.routes and db.geocode from the cross-tab/local persist
@@ -15503,8 +15510,7 @@ function App() {
       // peer, the peer's setDbRaw(hydrate(...)) replaced the peer's caches
       // with ours, peer's persist wrote back, and the route-total caption
       // oscillated at the broadcast cadence. Caches stay in-memory only.
-      const { routes: _r, geocode: _g, ...persistable } = db;
-      const serialized = JSON.stringify(persistable);
+      const serialized = JSON.stringify(db, stripCachesReplacer);
       if (lastSerializedRef.current === serialized) return;
       lastSerializedRef.current = serialized;
       window.localStorage.setItem(DB_STORAGE_KEY, serialized);
@@ -15605,19 +15611,17 @@ function App() {
       // Self-heal: if our hydrate migrated (or otherwise changed) the
       // incoming payload, write the migrated state back to localStorage so
       // peer tabs on stale cached bundles see the canonical value on their
-      // next storage event.
-      if (e.newValue != null && nextSerialized !== e.newValue) {
-        try {
-          const { routes: _r, geocode: _g, ...persistable } = hydrated;
-          window.localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(persistable));
-        } catch (e2) {}
+      // next storage event. Use stripCachesReplacer to mirror the persist
+      // effect's payload shape (routes/geocode excluded). No destructuring
+      // rest pattern here -- multiple at this scope collided in Babel's
+      // _excluded helper and bricked the boot (2026-05-24 RCA).
+      const persistShape = hydrated == null ? null : JSON.stringify(hydrated, stripCachesReplacer);
+      if (e.newValue != null && nextSerialized !== e.newValue && persistShape != null) {
+        try { window.localStorage.setItem(DB_STORAGE_KEY, persistShape); } catch (e2) {}
       }
       // lastSerializedRef must reflect what our persist effect WILL serialize
       // (without routes/geocode) so we don't double-write on the next render.
-      try {
-        const { routes: _r, geocode: _g, ...persistable } = hydrated;
-        lastSerializedRef.current = JSON.stringify(persistable);
-      } catch (e2) { lastSerializedRef.current = nextSerialized; }
+      lastSerializedRef.current = persistShape;
       setRemoteUpdateNonce(n => n + 1);
     };
     window.addEventListener('storage', onStorage);
