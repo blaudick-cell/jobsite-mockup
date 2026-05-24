@@ -2608,6 +2608,48 @@ const HYDRATE_LIVE_DATA_TABLES = [
   'loads', 'hours', 'invoices', 'haulRequests',
 ];
 
+// Pre-v19 haul-request addresses that were swapped in the v18→v19 migration.
+// Module-scope so the Realtime path can also apply the swap when Supabase
+// echoes back a pre-migration row (otherwise the row keeps reverting from
+// the migrated value to the stale cloud value on every Realtime broadcast,
+// producing the "tweaking on and off" map flicker — see 2026-05-24 RCA).
+const STALE_HAUL_ADDR_SWAPS = {
+  'hreq-001': {
+    pick: { from: '14200 Smith Rd, Aurora, CO 80011',     to: '6100 N Broadway, Denver, CO 80216',  name: 'Aggregate Industries — Santa Fe' },
+    drop: { from: '4421 Birch Rd, Winter Park, CO 80482', to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street site' },
+  },
+  'hreq-003': {
+    pick: { from: '6100 N Broadway, Denver, CO 80216',    to: '12200 E 56th Ave, Denver, CO 80239', name: 'Martin Marietta — Sand Creek' },
+    drop: { from: '1240 E 13th Ave, Denver, CO 80218',    to: '15185 W 68th Pl, Arvada, CO 80007',  name: 'Geos Neighborhood site' },
+  },
+  'hreq-005': {
+    pick: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — basement cut' },
+    drop: { from: '7501 Stuart St, Westminster, CO 80030', to: '1500 Yarrow St, Lakewood, CO 80214', name: 'Yarrow Street spoils site' },
+  },
+  'hreq-008': {
+    pick: null,
+    drop: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — North parking' },
+  },
+};
+
+// Per-row migration: returns the migrated row if a swap applied, else the
+// original row (same identity). Idempotent — calling twice is a no-op on the
+// second call. Used by hydrateDb (full-state path) and applyRealtimeChange
+// (per-row Supabase echo path).
+function migrateHaulRequestRow(r) {
+  if (!r || typeof r !== 'object') return r;
+  const swap = STALE_HAUL_ADDR_SWAPS[r.id];
+  if (!swap) return r;
+  let next = r;
+  if (swap.pick && r.pickupLocation && r.pickupLocation.address === swap.pick.from) {
+    next = { ...next, pickupLocation: { ...(next.pickupLocation || {}), address: swap.pick.to, name: swap.pick.name } };
+  }
+  if (swap.drop && r.dropoffLocation && r.dropoffLocation.address === swap.drop.from) {
+    next = { ...next, dropoffLocation: { ...(next.dropoffLocation || {}), address: swap.drop.to, name: swap.drop.name } };
+  }
+  return next;
+}
+
 function hydrateDb(raw) {
   const seed = buildSeed();
   if (raw == null) return seed;
@@ -3018,38 +3060,13 @@ function hydrateDb(raw) {
     // by any project or any active haul request. Reduces map.derivedPoints
     // surface area and keeps the localStorage payload small.
     try {
-      const STALE_HAUL_ADDR = {
-        'hreq-001': {
-          pick: { from: '14200 Smith Rd, Aurora, CO 80011',     to: '6100 N Broadway, Denver, CO 80216',  name: 'Aggregate Industries — Santa Fe' },
-          drop: { from: '4421 Birch Rd, Winter Park, CO 80482', to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street site' },
-        },
-        'hreq-003': {
-          pick: { from: '6100 N Broadway, Denver, CO 80216',    to: '12200 E 56th Ave, Denver, CO 80239', name: 'Martin Marietta — Sand Creek' },
-          drop: { from: '1240 E 13th Ave, Denver, CO 80218',    to: '15185 W 68th Pl, Arvada, CO 80007',  name: 'Geos Neighborhood site' },
-        },
-        'hreq-005': {
-          pick: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — basement cut' },
-          drop: { from: '7501 Stuart St, Westminster, CO 80030', to: '1500 Yarrow St, Lakewood, CO 80214', name: 'Yarrow Street spoils site' },
-        },
-        'hreq-008': {
-          pick: null, // pickup unchanged (12200 E 56th was already current)
-          drop: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — North parking' },
-        },
-      };
+      // v18 → v19 swap: delegates to the module-scope migrateHaulRequestRow
+      // helper so the Realtime path can run the same migration on Supabase
+      // echoes (otherwise a pre-migration cloud row keeps reverting the
+      // freshly migrated local row, producing visible map flicker as the
+      // address pair flips between stale and current values).
       if (Array.isArray(out.haulRequests)) {
-        out.haulRequests = out.haulRequests.map(r => {
-          if (!r || typeof r !== 'object') return r;
-          const swap = STALE_HAUL_ADDR[r.id];
-          if (!swap) return r;
-          let next = r;
-          if (swap.pick && r.pickupLocation && r.pickupLocation.address === swap.pick.from) {
-            next = { ...next, pickupLocation: { ...(next.pickupLocation || {}), address: swap.pick.to, name: swap.pick.name } };
-          }
-          if (swap.drop && r.dropoffLocation && r.dropoffLocation.address === swap.drop.from) {
-            next = { ...next, dropoffLocation: { ...(next.dropoffLocation || {}), address: swap.drop.to, name: swap.drop.name } };
-          }
-          return next;
-        });
+        out.haulRequests = out.haulRequests.map(migrateHaulRequestRow);
       }
       // Garbage-collect KNOWN-orphan geocode/routes entries — the specific
       // pre-v16 address strings tied to retired projects (WP/CH/GW/AS) plus
@@ -3426,6 +3443,32 @@ async function bootstrapCloud(localDb) {
     // SB_FIELDS_JS ↔ live-schema drift via console.error before the user
     // hits the bug.
     auditSbSchema();
+    // Push any haul-request rows that hydrateDb migrated (v18→v19 address
+    // swaps) back to Supabase, so subsequent Realtime broadcasts don't
+    // re-introduce the stale shape and trigger the migration-vs-echo war
+    // that produced the 2026-05-24 map-flicker RCA. Diff cloud-raw vs
+    // assembled to find migrated rows; fire-and-forget upsert.
+    try {
+      const sbIdx = SB_TABLE_LIST.indexOf('haulRequests');
+      if (sbIdx >= 0) {
+        const cloudHRs = tableArrays[sbIdx] || [];
+        const migratedHRs = (assembled.haulRequests || []).filter(asmRow => {
+          const cloudRow = cloudHRs.find(r => r.id === asmRow.id);
+          if (!cloudRow) return false;
+          const cloudJs = sbRowToJs('haulRequests', cloudRow);
+          const cloudPick = cloudJs.pickupLocation && cloudJs.pickupLocation.address;
+          const cloudDrop = cloudJs.dropoffLocation && cloudJs.dropoffLocation.address;
+          const asmPick = asmRow.pickupLocation && asmRow.pickupLocation.address;
+          const asmDrop = asmRow.dropoffLocation && asmRow.dropoffLocation.address;
+          return cloudPick !== asmPick || cloudDrop !== asmDrop;
+        });
+        if (migratedHRs.length > 0) {
+          migratedHRs.forEach(r => markLocalWrite('haulRequests', r.id, sbRowToJs('haulRequests', jsRowToSb('haulRequests', r))));
+          _sb.upsertRows('haulRequests', migratedHRs)
+            .catch(e => SyncErrorBus.push('haulRequests', 'migration-upsert', e));
+        }
+      }
+    } catch (e) { console.warn('[jse] post-bootstrap migration upsert failed:', e); }
     return { status: 'online', db: assembled, reason: didSeed ? 'seeded' : 'fetched' };
   } catch (e) {
     SyncErrorBus.push('bootstrap', 'fetch', e);
@@ -3640,7 +3683,12 @@ function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
     rowKey = payload.old && payload.old.id;
     jsRowForCompare = null;
   } else {
-    const jsRow = sbRowToJs(jsKey, payload.new);
+    let jsRow = sbRowToJs(jsKey, payload.new);
+    // Apply the same per-row migrations hydrateDb runs on initial load so
+    // pre-migration cloud rows don't keep reverting freshly-migrated local
+    // state every Realtime broadcast (root cause of the 2026-05-24 map
+    // flicker — see RCA in commit message).
+    if (jsKey === 'haulRequests') jsRow = migrateHaulRequestRow(jsRow);
     rowKey = jsRow.id;
     jsRowForCompare = jsRow;
   }
@@ -4372,8 +4420,6 @@ function SiteConditionsCard() {
 // ADMIN
 // =====================================================================
 function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
-    if (!window.__lomRenderCount) window.__lomRenderCount = 0;
-    window.__lomRenderCount++;
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
@@ -4718,12 +4764,8 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     }, [endpointsSignature, haulersSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
-      if (!window.__lomMapInitFires) window.__lomMapInitFires = 0;
-      window.__lomMapInitFires++;
-      if (!mlAvailable || !containerRef.current) { window.__lomMapInitSkippedGuardA = (window.__lomMapInitSkippedGuardA || 0) + 1; return; }
-      if (mapRef.current) { window.__lomMapInitSkippedGuardB = (window.__lomMapInitSkippedGuardB || 0) + 1; return; }
-      if (!window.__lomMapInitReached) window.__lomMapInitReached = 0;
-      window.__lomMapInitReached++;
+      if (!mlAvailable || !containerRef.current) return;
+      if (mapRef.current) return;
       const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
       const retina = dpr > 1 ? '@2x' : '';
       // Tile URL template matches jobsiteexchange.com's bundle exactly (per map-recon.md).
