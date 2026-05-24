@@ -7,6 +7,34 @@
 
 ---
 
+## 2026-05-23 URGENT — write path broken on loads + hours
+
+Robert reported: *"any new field added or edited no longer saves correctly."* Root cause: commit `d528abf` (schema v17→v18, `feat(loads): canonical db.loads as single source`) added `haulRequestId` to `loads` and `hours` rows in JS + the `SB_FIELDS_JS` whitelist, but the matching `ALTER TABLE`s were never applied. Every load/hours upsert since that deploy has 400'd with:
+
+```
+PGRST204 — Could not find the 'haul_request_id' column of 'loads' in the schema cache
+PGRST204 — Could not find the 'haul_request_id' column of 'hours' in the schema cache
+```
+
+`syncDbToCloud` swallows the error (`.catch(e => console.warn(...))`), so the local state appears to save but Supabase never receives it. On the next page refresh, bootstrap reads the pre-edit cloud state and any field changes vanish — affecting **every** edit that triggers a loads or hours upsert (add load, change load CY/ticket/photo/time/date, change clock-in/out, assign load to a haul, etc.).
+
+**Apply these:**
+
+```sql
+ALTER TABLE loads ADD COLUMN IF NOT EXISTS haul_request_id text REFERENCES haul_requests(id) ON DELETE SET NULL;
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS haul_request_id text REFERENCES haul_requests(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_loads_haul_request_id ON loads(haul_request_id);
+CREATE INDEX IF NOT EXISTS idx_hours_haul_request_id ON hours(haul_request_id);
+```
+
+The `text` type matches the `haul_requests.id` PK shape (`hreq-001` etc.). `SET NULL` on delete is consistent with the other hauler/project FK cleanup pattern. The two indexes are because the load/hour rollup queries in `AdminHaulRequestDetail` filter by `haul_request_id`.
+
+**JS-side stopgap shipped at the same time:** `haulRequestId` removed from `SB_FIELDS_JS.loads` + `SB_FIELDS_JS.hours` so upserts succeed (sacrificing cross-device load↔haul assignment until the migration lands). After Dispatch applies the migration, restore the two whitelist entries and bump `DB_SCHEMA_VERSION` to invalidate the localStorage cache.
+
+---
+
+---
+
 ## TL;DR — apply these 8 ALTER TABLEs, then re-run me
 
 ```sql
