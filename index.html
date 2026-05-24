@@ -7969,7 +7969,6 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
 function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const requests = db.haulRequests || [];
   const req = requests.find(r => r.id === requestId);
-  const [pickerHaulerId, setPickerHaulerId] = useState(null);
   const [assigningTruck, setAssigningTruck] = useState(false);
   const [addingDayFor, setAddingDayFor] = useState(null);
   const [newDayDate, setNewDayDate] = useState(TODAY_ISO);
@@ -8031,11 +8030,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const totalHoursBilledForHaul = totalBilledHoursForRequest(req, db);
   const fmtTotalDollars = '$' + totalDollarsForHaul.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-  // Suggested haulers (legacy picker, kept for grouped browse) — exclude haulers whose trucks are all assigned
-  const suggestedHaulers = db.haulers.filter(op => {
-    const pickable = db.trucks.filter(t => t.haulerId === op.id && !alreadyAssignedIds.has(t.id));
-    return pickable.length > 0;
-  });
+  // Hauler lookup map — used to group/filter trucks by their owning hauler in
+  // the truck-assignment picker and to render hauler-section headers above the
+  // assignment-tile grid below.
+  const haulerById = new Map(db.haulers.map(h => [h.id, h]));
 
   const updateReq = (mutator) => setDb(prev => ({
     ...prev,
@@ -8137,7 +8135,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         refId: req.id,
       }
     ));
-    setPickerHaulerId(null);
     setAssigningTruck(false);
   };
 
@@ -8922,24 +8919,49 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       </div>
 
       {assigningTruck && (() => {
-        const pickableTrucks = db.trucks.filter(t => !alreadyAssignedIds.has(t.id));
+        // v33: Picker filter — drop orphan trucks (haulerId missing or pointing
+        // at a deleted hauler) so we never render an "unassigned" pill. Then
+        // group surviving trucks by their owning hauler and stack a section
+        // per hauler so admins read the picker the same way they read the
+        // assignment tiles below.
+        const pickableTrucks = db.trucks.filter(t => !alreadyAssignedIds.has(t.id) && t.haulerId && haulerById.has(t.haulerId));
+        const trucksByHauler = new Map();
+        for (const t of pickableTrucks) {
+          if (!trucksByHauler.has(t.haulerId)) trucksByHauler.set(t.haulerId, []);
+          trucksByHauler.get(t.haulerId).push(t);
+        }
+        const sortedHaulerIds = Array.from(trucksByHauler.keys()).sort((a, b) => {
+          const an = (haulerById.get(a)?.name || '').toLowerCase();
+          const bn = (haulerById.get(b)?.name || '').toLowerCase();
+          return an.localeCompare(bn);
+        });
         return (
           <Card style={{ marginBottom: S[4], padding: S[4], background: C.surfaceHi }}>
             <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
             {pickableTrucks.length === 0 ? (
-              <div style={{ ...T.bodySm, color: C.inkFaint }}>All trucks are already assigned to this haul.</div>
+              <div style={{ ...T.bodySm, color: C.inkFaint }}>No available trucks.</div>
             ) : (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
-                {pickableTrucks.map(t => {
-                  const tHauler = db.haulers.find(h => h.id === t.haulerId);
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+                {sortedHaulerIds.map(hid => {
+                  const hauler = haulerById.get(hid);
+                  const trucks = trucksByHauler.get(hid);
                   return (
-                    <button key={t.id} onClick={() => assignTruck(t.haulerId, t.id)} style={{
-                      ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
-                      borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
-                    }}
-                      onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
-                      onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
-                    >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>{t.type}</span><span style={{ color: C.inkFaint, marginLeft: 6 }}>· {tHauler ? tHauler.name : 'unassigned'}</span></button>
+                    <div key={hid}>
+                      <div style={{ ...T.caption, color: C.inkDim, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: S[2] }}>
+                        {hauler ? hauler.name : 'Unknown hauler'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
+                        {trucks.map(t => (
+                          <button key={t.id} onClick={() => assignTruck(t.haulerId, t.id)} style={{
+                            ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
+                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
+                          }}
+                            onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
+                            onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
+                          >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>· {t.type}</span></button>
+                        ))}
+                      </div>
+                    </div>
                   );
                 })}
               </div>
@@ -8948,9 +8970,48 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         );
       })()}
 
-      {assignments.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3], marginBottom: S[6] }}>
-          {assignments.map(a => {
+      {assignments.length > 0 && (() => {
+        // v33: Group assignment tiles under a per-hauler section header so
+        // multi-truck-per-hauler hauls read as a single unit. The header is
+        // text-only for now; commit 4 wires the "Settlement statement"
+        // hotspot into the right-aligned placeholder.
+        const assignmentsByHauler = new Map();
+        for (const a of assignments) {
+          if (!assignmentsByHauler.has(a.haulerId)) assignmentsByHauler.set(a.haulerId, []);
+          assignmentsByHauler.get(a.haulerId).push(a);
+        }
+        const sortedHaulerIds = Array.from(assignmentsByHauler.keys()).sort((x, y) => {
+          const xn = (haulerById.get(x)?.name || '').toLowerCase();
+          const yn = (haulerById.get(y)?.name || '').toLowerCase();
+          return xn.localeCompare(yn);
+        });
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[5], marginBottom: S[6] }}>
+            {sortedHaulerIds.map(hid => {
+              const sectionHauler = haulerById.get(hid);
+              const sectionAssignments = assignmentsByHauler.get(hid);
+              const truckCount = sectionAssignments.length;
+              return (
+                <div key={hid}>
+                  <div style={{
+                    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                    gap: S[3], flexWrap: 'wrap',
+                    paddingBottom: S[2], marginBottom: S[3],
+                    borderBottom: `1px solid ${C.rule}`,
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: S[2], minWidth: 0 }}>
+                      <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.2 }}>
+                        {sectionHauler ? sectionHauler.name : 'Unknown hauler'}
+                      </div>
+                      <div style={{ ...T.caption, color: C.inkDim }}>
+                        {truckCount} truck{truckCount === 1 ? '' : 's'}
+                      </div>
+                    </div>
+                    {/* placeholder — commit 4 inserts "Settlement statement" here */}
+                    <div />
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3] }}>
+                    {sectionAssignments.map(a => {
             const t = db.trucks.find(x => x.id === a.truckId);
             const aHauler = db.haulers.find(h => h.id === a.haulerId);
             // v32: per-truck rollups read canonical db.loads + db.hours.
@@ -9243,66 +9304,13 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                   </Card>
                 );
               })}
-        </div>
-      )}
-
-      {/* Suggested haulers */}
-      <div style={{ marginBottom: S[3] }}>
-        <Label>{req.status === 'pending' ? 'Suggested haulers' : 'Other haulers'}</Label>
-      </div>
-      <Card padding={0}>
-        {suggestedHaulers.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>
-            No haulers available right now.
-          </div>
-        ) : (
-          <div style={{ maxHeight: '60vh', overflowY: 'auto' }}>
-            {suggestedHaulers.map((op, i) => {
-              const opTrucks = db.trucks.filter(t => t.haulerId === op.id && !alreadyAssignedIds.has(t.id));
-              const isMatched = req.matchedHaulerId === op.id;
-              const showPicker = pickerHaulerId === op.id;
-              return (
-                <div key={op.id} style={{
-                  padding: S[4],
-                  borderBottom: i < suggestedHaulers.length - 1 ? `1px solid ${C.rule}` : 'none',
-                  background: isMatched ? C.accentSoft : 'transparent',
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
-                    <Avatar name={op.name} color={C.accent} logo={op.logo} />
-                    <div style={{ flex: 1, minWidth: 200 }}>
-                      <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{op.name}</div>
-                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                        {op.projectIds.length} project{op.projectIds.length === 1 ? '' : 's'} · {opTrucks.length} truck{opTrucks.length === 1 ? '' : 's'}
-                      </div>
-                    </div>
-                    {isMatched
-                      ? <Pill color={C.accent} soft={C.accentSoft}>Assigned</Pill>
-                      : <Btn variant="primary" size="sm" onClick={() => setPickerHaulerId(showPicker ? null : op.id)}>{showPicker ? 'Cancel' : 'Assign'}</Btn>}
                   </div>
-                  {showPicker && (
-                    <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-                      <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
-                        {opTrucks.length === 0 ? (
-                          <span style={{ ...T.caption, color: C.inkFaint }}>This hauler has no trucks on the roster.</span>
-                        ) : opTrucks.map(t => (
-                          <button key={t.id} onClick={() => assign(op.id, t.id)} style={{
-                            ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
-                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
-                          }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
-                          >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>{t.type}</span></button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
-        )}
-      </Card>
+        );
+      })()}
 
       {/* v18: Invoices — JSE-issued interim/final invoices billed to the GC,
           payable to Jobsite Exchange. Buttons drop into the print view. */}
