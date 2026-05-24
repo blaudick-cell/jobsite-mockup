@@ -1583,8 +1583,8 @@ const EMPTY_LOGISTICS = {
 
 const HAUL_REQUESTS_SEED = [
   { id: 'hreq-001', projectId: 'RG', materialCode: 'CF', volumeCY: 18, requestedAt: '07:15', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: 'Needs to be on-site before noon.', assignments: [],
-    pickupLocation:  { name: 'Highline Pit',           address: '14200 Smith Rd, Aurora, CO 80011' },
-    dropoffLocation: { name: 'Winter Park job site',   address: '4421 Birch Rd, Winter Park, CO 80482' },
+    pickupLocation:  { name: 'Aggregate Industries — Santa Fe', address: '6100 N Broadway, Denver, CO 80216' },
+    dropoffLocation: { name: 'Rogers Street site',     address: '1105 Rogers Street, Golden, CO' },
     timing:          { startDate: TODAY_ISO, endDate: '' },
     siteAccess: {
       loading: { notes: 'Loader 962 on-site 6-2.',                       equipment: 'Cat 962M wheel loader' },
@@ -1596,12 +1596,12 @@ const HAUL_REQUESTS_SEED = [
       { truckId: 'tk-611', haulerId: 'op-003', addedAt: 1716230000000,
         days: [{ date: TODAY_ISO, startTime: '08:05', loads: [] }] },
     ],
-    pickupLocation:  { name: 'Aggregate Industries — Santa Fe', address: '6100 N Broadway, Denver, CO 80216' },
-    dropoffLocation: { name: 'Capitol Hill Mixed-Use',          address: '1240 E 13th Ave, Denver, CO 80218' },
+    pickupLocation:  { name: 'Martin Marietta — Sand Creek', address: '12200 E 56th Ave, Denver, CO 80239' },
+    dropoffLocation: { name: 'Geos Neighborhood site',       address: '15185 W 68th Pl, Arvada, CO 80007' },
     timing:          { startDate: TODAY_ISO, endDate: isoDaysAgo(-2) },
     siteAccess: {
       loading: { notes: 'Yard hours 5a-3p; show ticket at gate.',  equipment: 'Loader + scale operator' },
-      dumping: { notes: 'Tight alley off 13th; dump in NE bay.',   equipment: 'Skid steer to spread' },
+      dumping: { notes: 'Stage in NE corner of site.',             equipment: 'Skid steer to spread' },
     } },
   { id: 'hreq-004', projectId: 'RG', materialCode: 'TS', volumeCY: 12, requestedAt: '08:30', status: 'pending',   matchedHaulerId: null,    matchedTruckId: null,  acceptedByDriver: null,    passedBy: [], notes: '', assignments: [], ...EMPTY_LOGISTICS },
   { id: 'hreq-005', projectId: 'RG', materialCode: 'EX', volumeCY: 22, requestedAt: '08:48', status: 'matched',   matchedHaulerId: 'op-006', matchedTruckId: 'tk-119', acceptedByDriver: null,    passedBy: [], notes: '',
@@ -1611,8 +1611,8 @@ const HAUL_REQUESTS_SEED = [
       { truckId: 'tk-220', haulerId: 'op-002', addedAt: 1716232500000,
         days: [{ date: TODAY_ISO, startTime: '09:00', loads: [] }] },
     ],
-    pickupLocation:  { name: 'GW Apartments — basement cut', address: '88 Greenway Blvd, Boulder, CO 80301' },
-    dropoffLocation: { name: 'Stuart Street spoils site',    address: '7501 Stuart St, Westminster, CO 80030' },
+    pickupLocation:  { name: 'Rogers Street — basement cut', address: '1105 Rogers Street, Golden, CO' },
+    dropoffLocation: { name: 'Yarrow Street spoils site',    address: '1500 Yarrow St, Lakewood, CO 80214' },
     timing:          { startDate: TODAY_ISO, endDate: '' },
     siteAccess: {
       loading: { notes: 'Excavator pace ~1 load every 6min.', equipment: 'Cat 336 excavator' },
@@ -1630,7 +1630,7 @@ const HAUL_REQUESTS_SEED = [
         ] }] },
     ],
     pickupLocation:  { name: 'Martin Marietta — Sand Creek', address: '12200 E 56th Ave, Denver, CO 80239' },
-    dropoffLocation: { name: 'GW Apartments — North parking', address: '88 Greenway Blvd, Boulder, CO 80301' },
+    dropoffLocation: { name: 'Rogers Street — North parking', address: '1105 Rogers Street, Golden, CO' },
     timing:          { startDate: YESTERDAY_ISO, endDate: '' },
     siteAccess: {
       loading: { notes: 'Standard scale + ticket window.',    equipment: 'Yard loader' },
@@ -1908,7 +1908,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 18;
+const DB_SCHEMA_VERSION = 19;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -1931,17 +1931,11 @@ const GEOCODE_SEED = {
   '4825 Marshall St, Wheat Ridge, CO 80033':        { lat: 39.7805, lng: -105.0827 },
   '1500 Yarrow St, Lakewood, CO 80214':             { lat: 39.7460, lng: -105.0816 },
   '7350 W 48th Ave, Wheat Ridge, CO 80033':         { lat: 39.7853, lng: -105.0789 },
-  '4421 Birch Rd, Winter Park, CO':                 { lat: 39.8869, lng: -105.7625 },
-  '1240 E 13th Ave, Denver, CO':                    { lat: 39.7406, lng: -104.9783 },
-  '88 Greenway Blvd, Boulder, CO':                  { lat: 40.0150, lng: -105.2705 },
-  '7700 E Iliff Ave, Aurora, CO':                   { lat: 39.6724, lng: -104.8581 },
-  // Haul-request pickup/dropoff addresses (HAUL_REQUESTS_SEED, verbatim with zip)
-  '14200 Smith Rd, Aurora, CO 80011':               { lat: 39.7850, lng: -104.7383 },
-  '4421 Birch Rd, Winter Park, CO 80482':           { lat: 39.8869, lng: -105.7625 },
+  // Haul-request pickup/dropoff addresses currently referenced by
+  // HAUL_REQUESTS_SEED post-v19 (Denver-metro alignment). Pre-v19 entries
+  // for Winter Park / Capitol Hill / Greenway / Stuart were trimmed when
+  // those addresses came off the seed.
   '6100 N Broadway, Denver, CO 80216':              { lat: 39.8100, lng: -104.9874 },
-  '1240 E 13th Ave, Denver, CO 80218':              { lat: 39.7406, lng: -104.9783 },
-  '88 Greenway Blvd, Boulder, CO 80301':            { lat: 40.0150, lng: -105.2705 },
-  '7501 Stuart St, Westminster, CO 80030':          { lat: 39.8284, lng: -105.0413 },
   '12200 E 56th Ave, Denver, CO 80239':             { lat: 39.7910, lng: -104.8439 },
   // ----- Hauler home-base addresses (HAULERS_SEED.address values, verbatim). -----
   // Coords sourced from public records / FMCSA SAFER / Zillow + Google for
@@ -2929,6 +2923,90 @@ function hydrateDb(raw) {
         }
       }
     } catch (e) { /* fall through with v17 shape; next hydrate retries */ }
+    // v18 → v19: repair haul-request addresses that drifted from project FK
+    // remaps in v15→v16. Pre-v16 haul-request rows carried explicit
+    // pickup/dropoff addresses tied to the OLD projects (WP/CH/GW/AS); v16
+    // remapped the projectId but left the address strings pointing at
+    // unrelated locations, so the Live Operations Map drew routes from
+    // Aurora→Winter Park for a Golden project, etc.
+    //
+    // For each known-stale (id, fromAddress) pair below, swap to the v19 seed
+    // value. Defensive — only touches rows whose stored address still matches
+    // the old bad value; any user-edited address survives untouched.
+    //
+    // Also GC the geocode + routes caches: drop entries no longer referenced
+    // by any project or any active haul request. Reduces map.derivedPoints
+    // surface area and keeps the localStorage payload small.
+    try {
+      const STALE_HAUL_ADDR = {
+        'hreq-001': {
+          pick: { from: '14200 Smith Rd, Aurora, CO 80011',     to: '6100 N Broadway, Denver, CO 80216',  name: 'Aggregate Industries — Santa Fe' },
+          drop: { from: '4421 Birch Rd, Winter Park, CO 80482', to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street site' },
+        },
+        'hreq-003': {
+          pick: { from: '6100 N Broadway, Denver, CO 80216',    to: '12200 E 56th Ave, Denver, CO 80239', name: 'Martin Marietta — Sand Creek' },
+          drop: { from: '1240 E 13th Ave, Denver, CO 80218',    to: '15185 W 68th Pl, Arvada, CO 80007',  name: 'Geos Neighborhood site' },
+        },
+        'hreq-005': {
+          pick: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — basement cut' },
+          drop: { from: '7501 Stuart St, Westminster, CO 80030', to: '1500 Yarrow St, Lakewood, CO 80214', name: 'Yarrow Street spoils site' },
+        },
+        'hreq-008': {
+          pick: null, // pickup unchanged (12200 E 56th was already current)
+          drop: { from: '88 Greenway Blvd, Boulder, CO 80301',  to: '1105 Rogers Street, Golden, CO',     name: 'Rogers Street — North parking' },
+        },
+      };
+      if (Array.isArray(out.haulRequests)) {
+        out.haulRequests = out.haulRequests.map(r => {
+          if (!r || typeof r !== 'object') return r;
+          const swap = STALE_HAUL_ADDR[r.id];
+          if (!swap) return r;
+          let next = r;
+          if (swap.pick && r.pickupLocation && r.pickupLocation.address === swap.pick.from) {
+            next = { ...next, pickupLocation: { ...(next.pickupLocation || {}), address: swap.pick.to, name: swap.pick.name } };
+          }
+          if (swap.drop && r.dropoffLocation && r.dropoffLocation.address === swap.drop.from) {
+            next = { ...next, dropoffLocation: { ...(next.dropoffLocation || {}), address: swap.drop.to, name: swap.drop.name } };
+          }
+          return next;
+        });
+      }
+      // Garbage-collect KNOWN-orphan geocode/routes entries — the specific
+      // pre-v16 address strings tied to retired projects (WP/CH/GW/AS) plus
+      // the no-zip duplicates that the v16+ project/haul seeds don't use.
+      // Targeted list, not a sweep — we don't want to over-trim and force
+      // the async Nominatim effect to re-resolve addresses the user typed
+      // into EditableText/autocomplete fields that aren't currently on an
+      // active haul (e.g. drafts, completed history).
+      const ORPHAN_ADDRESSES = new Set([
+        // Old project/haul addresses (no-zip variants from pre-v16 seeds)
+        '4421 Birch Rd, Winter Park, CO',
+        '1240 E 13th Ave, Denver, CO',
+        '88 Greenway Blvd, Boulder, CO',
+        '7700 E Iliff Ave, Aurora, CO',
+        // Pre-v19 haul-request seed addresses (now repaired by the swap above)
+        '14200 Smith Rd, Aurora, CO 80011',
+        '4421 Birch Rd, Winter Park, CO 80482',
+        '1240 E 13th Ave, Denver, CO 80218',
+        '88 Greenway Blvd, Boulder, CO 80301',
+        '7501 Stuart St, Westminster, CO 80030',
+      ]);
+      if (out.geocode && typeof out.geocode === 'object') {
+        const gcOut = {};
+        for (const [addr, coord] of Object.entries(out.geocode)) {
+          if (!ORPHAN_ADDRESSES.has(addr)) gcOut[addr] = coord;
+        }
+        out.geocode = gcOut;
+      }
+      if (out.routes && typeof out.routes === 'object') {
+        const rOut = {};
+        for (const [key, route] of Object.entries(out.routes)) {
+          const [pick, drop] = key.split('|');
+          if (!ORPHAN_ADDRESSES.has(pick) && !ORPHAN_ADDRESSES.has(drop)) rOut[key] = route;
+        }
+        out.routes = rOut;
+      }
+    } catch (e) { /* fall through with v18 shape; next hydrate retries */ }
     return out;
   } catch (e) {
     return seed;
@@ -4387,10 +4465,14 @@ function AdminProjects({ db, setDb, navigate }) {
     // completed + closed hauls so the map only reflects work in flight.
     // Color is driven by req status: 'pending' -> red, anything else (open /
     // matched / accepted / active / approved / upcoming) -> green.
+    // v25: also drop reqs whose projectId no longer exists in db.projects —
+    // defends the map against orphan-FK drift after project deletes.
+    const projectById = new Map((db.projects || []).map(p => [p.id, p]));
     const reqRoutes = (db.haulRequests || []).map(req => {
       if (!req) return null;
       if (req.status === 'completed' || req.status === 'closed') return null;
-      const proj = (db.projects || []).find(p => p.id === req.projectId) || null;
+      if (!projectById.has(req.projectId)) return null;
+      const proj = projectById.get(req.projectId) || null;
       const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
       const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
       if (!pickAddr || !dumpAddr) return null;
@@ -4470,7 +4552,8 @@ function AdminProjects({ db, setDb, navigate }) {
       const keys = new Set();
       (db.haulRequests || []).forEach(req => {
         if (!req || req.status === 'completed' || req.status === 'closed') return;
-        const proj = (db.projects || []).find(p => p.id === req.projectId);
+        if (!projectById.has(req.projectId)) return;
+        const proj = projectById.get(req.projectId);
         const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
         const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
         if (!pickAddr || !dumpAddr) return;
@@ -4492,7 +4575,8 @@ function AdminProjects({ db, setDb, navigate }) {
         const pairs = [];
         (db.haulRequests || []).forEach(req => {
           if (!req || req.status === 'completed' || req.status === 'closed') return;
-          const proj = (db.projects || []).find(p => p.id === req.projectId);
+          if (!projectById.has(req.projectId)) return;
+          const proj = projectById.get(req.projectId);
           const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
           const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
           if (!pickAddr || !dumpAddr) return;
