@@ -1908,7 +1908,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 17;
+const DB_SCHEMA_VERSION = 18;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -2413,64 +2413,53 @@ function haulRequestLabel(state, req) {
 // Derive from the project that owns the request. Falls back to 'NEEDS' so
 // the pill always renders and the toggle has a starting state.
 // === Total billed hours for one haul request =============================
-// Sums day.hours across the request's assignments. Per-day hours are the
-// values entered into the day chip on AdminHaulRequestDetail (commit
-// 636b766). Returns 0 if the request has no assignments, no days, or no
-// recorded hours. Single source of truth for billed-hours stats so every
-// haul tile shows the same number.
-function totalBilledHoursForRequest(req) {
-  if (!req || !Array.isArray(req.assignments)) return 0;
+// v32: canonical-store reads. Sums db.hours rows matched by haulRequestId.
+// Each db.hours row is a real shift (clockIn / clockOut / breakMin) — we
+// pass through calcHours() so partial shifts (open clockOut) use NOW_MIN
+// just like the per-truck day list. Single source of truth for billed-hour
+// stats across project tiles, dispatch rows, hauler dash, and haul detail.
+function totalBilledHoursForRequest(req, db) {
+  if (!req || !db || !Array.isArray(db.hours)) return 0;
   let total = 0;
-  for (const a of req.assignments) {
-    if (!a || !Array.isArray(a.days)) continue;
-    for (const d of a.days) {
-      const h = d && typeof d.hours === 'number' ? d.hours : null;
-      if (h && h > 0) total += h;
-    }
+  for (const h of db.hours) {
+    if (!h || h.haulRequestId !== req.id) continue;
+    total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
   }
   return total;
 }
 
-// v30: canonical assignment-derived rollups. Single source of truth so the
-// project tile, dispatch row, and haul detail all agree. Reads from the
-// haul-request → assignments → days → loads tree (the live operational
-// data), NOT the legacy db.loads / db.hours collections that seed older
-// dashboard tables.
-function deliveredCYForRequest(req) {
-  if (!req || !Array.isArray(req.assignments)) return 0;
+// v32: canonical-store reads. Sums db.loads.cy filtered by haulRequestId.
+// Replaces the legacy req.assignments[].days[].loads rollup.
+function deliveredCYForRequest(req, db) {
+  if (!req || !db || !Array.isArray(db.loads)) return 0;
   let total = 0;
-  for (const a of req.assignments) {
-    if (!a || !Array.isArray(a.days)) continue;
-    for (const d of a.days) {
-      if (!Array.isArray(d.loads)) continue;
-      for (const l of d.loads) total += Number(l.cy) || 0;
-    }
+  for (const l of db.loads) {
+    if (!l || l.haulRequestId !== req.id) continue;
+    total += Number(l.cy) || 0;
   }
   return total;
 }
+// v32: dollars for one request — sum hours × truck.ratePerHour (or type
+// fallback rate) over the canonical db.hours rows for this request. Truck
+// rate is looked up per-row from the row's truckId.
 function dollarsForRequest(req, db) {
-  if (!req || !Array.isArray(req.assignments) || !db) return 0;
+  if (!req || !db || !Array.isArray(db.hours)) return 0;
   let total = 0;
-  for (const a of req.assignments) {
-    const truck = (db.trucks || []).find(t => t.id === a.truckId);
+  for (const h of db.hours) {
+    if (!h || h.haulRequestId !== req.id) continue;
+    const truck = (db.trucks || []).find(t => t.id === h.truckId);
     const rate = (truck && truck.ratePerHour != null)
       ? truck.ratePerHour
       : ((truck && db.rates && db.rates[truck.type]) || 0);
-    if (!Array.isArray(a.days)) continue;
-    for (const d of a.days) {
-      const h = typeof d.hours === 'number' ? d.hours : 0;
-      total += h * rate;
-    }
+    total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut) * rate;
   }
   return total;
 }
-// v31: hauler-scoped rollup. Sums everything across haul requests where
-// any assignment.haulerId === haulerId. Returns the same metric family
-// AdminProjects + AdminHaulRequestDetail use (haulsCount/totalCY/
-// totalLoads/totalHours/totalRevenue), so the Hauler Dashboard and the
-// Hauler self-serve dashboard agree with the main dash penny-for-penny.
-// Replaces the legacy db.hours/db.loads roll-up that was drifting away
-// from haul-request-driven operational reality.
+// v32: hauler-scoped rollup. Builds the set of haulRequests where this
+// hauler has at least one assignment, then sums canonical db.loads +
+// db.hours filtered by haulRequestId. Matches the per-request helpers
+// above so every surface that displays "this hauler's total CY / hours /
+// revenue" agrees with the per-haul detail page.
 function haulerRollupV31(haulerId, db) {
   const out = { haulsCount: 0, totalCY: 0, totalLoads: 0, totalHours: 0, totalRevenue: 0 };
   if (!haulerId || !db) return out;
@@ -2478,24 +2467,24 @@ function haulerRollupV31(haulerId, db) {
   const reqs = (db.haulRequests || []).filter(r =>
     Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === haulerId)
   );
+  const reqIds = new Set(reqs.map(r => r.id));
   for (const r of reqs) {
     if (r.projectId) projectIds.add(r.projectId);
-    for (const a of (r.assignments || [])) {
-      if (!a || a.haulerId !== haulerId) continue;
-      const truck = (db.trucks || []).find(t => t.id === a.truckId);
-      const rate = (truck && truck.ratePerHour != null)
-        ? truck.ratePerHour
-        : ((truck && db.rates && db.rates[truck.type]) || 0);
-      for (const d of (a.days || [])) {
-        const dh = typeof d.hours === 'number' ? d.hours : 0;
-        out.totalHours += dh;
-        out.totalRevenue += dh * rate;
-        if (Array.isArray(d.loads)) {
-          out.totalLoads += d.loads.length;
-          for (const l of d.loads) out.totalCY += Number(l.cy) || 0;
-        }
-      }
-    }
+  }
+  for (const l of (db.loads || [])) {
+    if (!l || !reqIds.has(l.haulRequestId)) continue;
+    out.totalLoads += 1;
+    out.totalCY += Number(l.cy) || 0;
+  }
+  for (const h of (db.hours || [])) {
+    if (!h || !reqIds.has(h.haulRequestId)) continue;
+    const truck = (db.trucks || []).find(t => t.id === h.truckId);
+    const rate = (truck && truck.ratePerHour != null)
+      ? truck.ratePerHour
+      : ((truck && db.rates && db.rates[truck.type]) || 0);
+    const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
+    out.totalHours += hrs;
+    out.totalRevenue += hrs * rate;
   }
   out.haulsCount = projectIds.size;
   return out;
@@ -2866,6 +2855,80 @@ function hydrateDb(raw) {
         });
       }
     } catch (e) { /* fall through with v16 shape */ }
+    // v17 → v18: link loads/hours to a specific haul request via
+    // `haulRequestId`. db.loads + db.hours are now the canonical source of
+    // truth for every load/hours surface; the legacy
+    // req.assignments[].days[].loads/.hours fields stop being read. This
+    // migration:
+    //   (a) defaults haulRequestId: null on every existing load/hour;
+    //   (b) walks req.assignments[].days[].loads and pushes any load not
+    //       already present in db.loads (stamped with haulRequestId);
+    //   (c) walks req.assignments[].days[].hours (the number) and
+    //       synthesizes a db.hours row per (req,truck,day) when none
+    //       exists yet. Back-calc clockOut from clockIn (or 07:00 default).
+    // Idempotent — re-running over a v18 payload is a no-op.
+    try {
+      if (Array.isArray(out.loads)) {
+        out.loads = out.loads.map(l => (l && l.haulRequestId === undefined) ? { ...l, haulRequestId: null } : l);
+      }
+      if (Array.isArray(out.hours)) {
+        out.hours = out.hours.map(h => (h && h.haulRequestId === undefined) ? { ...h, haulRequestId: null } : h);
+      }
+      if (Array.isArray(out.haulRequests) && Array.isArray(out.loads)) {
+        const existingLoadIds = new Set(out.loads.map(l => l && l.id).filter(Boolean));
+        for (const req of out.haulRequests) {
+          if (!req || !Array.isArray(req.assignments)) continue;
+          for (const a of req.assignments) {
+            if (!a || !Array.isArray(a.days)) continue;
+            for (const d of a.days) {
+              if (!d || !Array.isArray(d.loads)) continue;
+              for (const l of d.loads) {
+                if (!l || !l.id || existingLoadIds.has(l.id)) continue;
+                out.loads.push({
+                  ...l,
+                  truckId: l.truckId || a.truckId,
+                  projectId: l.projectId || req.projectId,
+                  date: l.date || d.date,
+                  haulRequestId: l.haulRequestId || req.id,
+                });
+                existingLoadIds.add(l.id);
+              }
+            }
+          }
+        }
+      }
+      if (Array.isArray(out.haulRequests) && Array.isArray(out.hours)) {
+        for (const req of out.haulRequests) {
+          if (!req || !Array.isArray(req.assignments)) continue;
+          for (const a of req.assignments) {
+            if (!a || !Array.isArray(a.days)) continue;
+            for (const d of a.days) {
+              const hVal = d && typeof d.hours === 'number' ? d.hours : 0;
+              if (hVal <= 0) continue;
+              const exists = out.hours.some(h => h && h.haulRequestId === req.id && h.truckId === a.truckId && h.date === d.date);
+              if (exists) continue;
+              const clockIn = d.startTime || '07:00';
+              const [hh, mm] = clockIn.split(':').map(Number);
+              const startMin = (hh || 0) * 60 + (mm || 0);
+              const endMin = startMin + Math.round(hVal * 60);
+              const clockOut = String(Math.floor(endMin / 60) % 24).padStart(2, '0') + ':' + String(endMin % 60).padStart(2, '0');
+              out.hours.push({
+                id: 'hr-v18-' + req.id + '-' + a.truckId + '-' + d.date,
+                driverId: null,
+                truckId: a.truckId,
+                projectId: req.projectId,
+                clockIn,
+                clockOut,
+                breakMin: 0,
+                status: 'approved',
+                date: d.date,
+                haulRequestId: req.id,
+              });
+            }
+          }
+        }
+      }
+    } catch (e) { /* fall through with v17 shape; next hydrate retries */ }
     return out;
   } catch (e) {
     return seed;
@@ -2938,8 +3001,8 @@ const SB_FIELDS_JS = {
   haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
   drivers:      ['id','name','phone'],
   trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
-  loads:        ['id','driverId','truckId','projectId','material','cy','ticketNo','time','date','status','photo','notes'],
-  hours:        ['id','driverId','truckId','projectId','clockIn','clockOut','breakMin','status','date'],
+  loads:        ['id','driverId','truckId','projectId','material','cy','ticketNo','time','date','status','photo','notes','haulRequestId'],
+  hours:        ['id','driverId','truckId','projectId','clockIn','clockOut','breakMin','status','date','haulRequestId'],
   invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','notes'],
   haulRequests: ['id','projectId','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
@@ -4083,12 +4146,12 @@ function AdminProjects({ db, setDb, navigate }) {
     // cyPending = sum of (volumeCY - delivered) on requests that aren't
     // fully delivered yet, so the "+N pending" pill aligns with what the
     // detail page would show as "to deliver".
-    const cyCompleted = reqs.reduce((s, r) => s + deliveredCYForRequest(r), 0);
+    const cyCompleted = reqs.reduce((s, r) => s + deliveredCYForRequest(r, db), 0);
     const cyPending   = reqs.reduce((s, r) => {
       if (r.status === 'completed' || r.status === 'closed') return s;
-      return s + Math.max(0, (r.volumeCY || 0) - deliveredCYForRequest(r));
+      return s + Math.max(0, (r.volumeCY || 0) - deliveredCYForRequest(r, db));
     }, 0);
-    const totalHours = reqs.reduce((s, r) => s + totalBilledHoursForRequest(r), 0);
+    const totalHours = reqs.reduce((s, r) => s + totalBilledHoursForRequest(r, db), 0);
     const totalRevenue = reqs.reduce((s, r) => s + dollarsForRequest(r, db), 0);
     // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
     const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
@@ -7207,7 +7270,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
               not trucks-needed. Split into two honest lines: delivered/target
               CY (matches detail page) and trucks assigned / distance / time. */}
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
-            <span style={{ color: C.ink, fontWeight: 600 }}>{deliveredCYForRequest(e.r)}/{e.r.volumeCY || 0}</span> CY
+            <span style={{ color: C.ink, fontWeight: 600 }}>{deliveredCYForRequest(e.r, db)}/{e.r.volumeCY || 0}</span> CY
             <span style={{ color: C.inkFaint }}> · </span>
             <span>{assignedTruckCountForRequest(e.r)} truck{assignedTruckCountForRequest(e.r) === 1 ? '' : 's'}</span>
             <span style={{ color: C.inkFaint }}> · </span>
@@ -7221,14 +7284,14 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 4 }}>
             <span style={{ color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Billed</span>
             <span style={{ color: C.inkFaint }}> · </span>
-            <span style={{ color: C.ink, fontWeight: 600 }}>{fmtHours(totalBilledHoursForRequest(e.r))}</span> hrs
+            <span style={{ color: C.ink, fontWeight: 600 }}>{fmtHours(totalBilledHoursForRequest(e.r, db))}</span> hrs
           </div>
           {/* v30: Mini fulfillment bar tracks delivered CY / target CY, so it
               matches the number above the bar and the detail page progress
               ring. Was previously trucksAssigned/trucksNeeded which read as
               0% even when half the volume was delivered. */}
           {(() => {
-            const delivered = deliveredCYForRequest(e.r);
+            const delivered = deliveredCYForRequest(e.r, db);
             const target = e.r.volumeCY || 0;
             const pct = target > 0 ? (delivered / target) * 100 : 0;
             return (
@@ -7912,6 +7975,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const [newDayDate, setNewDayDate] = useState(TODAY_ISO);
   const [newDayStart, setNewDayStart] = useState('08:00');
   const [addLoadForm, setAddLoadForm] = useState({ truckId: null, date: null, time: '', cy: '' });
+  // v32: photo lightbox state — mirrors the HaulerTruckView pattern so a
+  // load's photo on the haul-detail load list can be viewed/replaced.
+  // Hooks MUST run unconditionally before the early-return guard below.
+  const [photoFor, setPhotoFor] = useState(null);
+  const replacePhotoRef = useRef(null);
   // v20: Edit-mode gateway for the combined haul-request tile (Project &
   // contractor / Haul Request / Logistics rolled into one Card). Default
   // view is read-only; "Edit ↗" toggles editable affordances simultaneously
@@ -7953,14 +8021,14 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const matMaterial = material ? material.label : req.materialCode;
   const assignments = req.assignments || [];
   const alreadyAssignedIds = new Set(assignments.map(a => a.truckId));
-  const totalDeliveredCY = assignments.reduce((s, a) =>
-    s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
+  // v32: header total CY reads canonical db.loads filtered by haulRequestId.
+  const totalDeliveredCY = deliveredCYForRequest(req, db);
   const overallPct = req.volumeCY > 0 ? (totalDeliveredCY / req.volumeCY) * 100 : 0;
   // v23: TOTAL chip = hours × hourly rate, matching `dollarsForRequest` —
   // the single source of truth used by the invoice generator and every other
   // dollar rollup on this haul.
   const totalDollarsForHaul = dollarsForRequest(req, db);
-  const totalHoursBilledForHaul = totalBilledHoursForRequest(req);
+  const totalHoursBilledForHaul = totalBilledHoursForRequest(req, db);
   const fmtTotalDollars = '$' + totalDollarsForHaul.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // Suggested haulers (legacy picker, kept for grouped browse) — exclude haulers whose trucks are all assigned
@@ -8085,51 +8153,120 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     setNewDayStart('08:00');
   };
 
+  // v32: load + hours mutations now write to the canonical db.loads /
+  // db.hours collections (stamped with haulRequestId). The req's
+  // assignments[].days[] skeleton stays as the per-truck day organizer
+  // (date + startTime stub) — but the actual load + hours records live
+  // in the canonical store and are read back by haulRequestId filter.
   const addLoad = (truckId, date, time, cy) => {
     const n = parseFloat(cy);
     if (!time || !Number.isFinite(n) || n <= 0) return;
-    const newLoad = { id: 'hreq-load-' + Math.random().toString(36).substring(2, 7), time, cy: n };
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.map(a => a.truckId === truckId
-        ? { ...a, days: a.days.map(d => d.date === date ? { ...d, loads: [...d.loads, newLoad] } : d) }
-        : a),
-    }));
+    const truck = db.trucks.find(t => t.id === truckId);
+    const projectId = (truck && truck.projectId) || req.projectId || null;
+    const driverId = (truck && truck.driverId) || null;
+    const existingNums = (db.loads || [])
+      .map(l => parseInt((l.id || '').replace(/^ld-/, ''), 10))
+      .filter(n => !isNaN(n));
+    const nextNum = existingNums.length ? Math.max(...existingNums) + 1 : 1001;
+    const newLoad = {
+      id: 'ld-' + nextNum,
+      driverId,
+      truckId,
+      projectId,
+      material: req.materialCode || (truck && truck.type) || null,
+      cy: n,
+      ticketNo: null,
+      time,
+      date,
+      status: 'approved',
+      haulRequestId: req.id,
+    };
+    setDb(prev => ({ ...prev, loads: [...(prev.loads || []), newLoad] }));
     setAddLoadForm({ truckId: null, date: null, time: '', cy: '' });
   };
 
   const removeLoad = (truckId, date, loadId) => {
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.map(a => a.truckId === truckId
-        ? { ...a, days: a.days.map(d => d.date === date ? { ...d, loads: d.loads.filter(l => l.id !== loadId) } : d) }
-        : a),
-    }));
+    setDb(prev => ({ ...prev, loads: (prev.loads || []).filter(l => l.id !== loadId) }));
   };
 
-  // v26: in-place editors for assignment days + their loads. Both write
-  // through the same updateReq path so the activity feed gets a single
-  // haul_request.updated entry per edit, and Realtime broadcasts the
-  // patched req as usual. patch is a partial object (e.g. {startTime},
-  // {hours}, {time}, {cy}); missing fields are left untouched.
+  // v32: load patches now write to db.loads by id. Day patches that touch
+  // `hours` (the number, the billing source of truth) upsert a single
+  // canonical db.hours row per (req,truck,date); patches that touch
+  // `startTime` still live on the day skeleton (read by the day-header
+  // chip + by the v18 migration's clockIn back-calc).
   const updateDay = (truckId, date, patch) => {
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.map(a => a.truckId === truckId
-        ? { ...a, days: a.days.map(d => d.date === date ? { ...d, ...patch } : d) }
-        : a),
-    }));
+    // startTime stays on the assignments[].days[] skeleton — keep the day
+    // record updated for back-compat with the "Start HH:MM" chip.
+    if ('startTime' in patch) {
+      updateReq(r => ({
+        ...r,
+        assignments: r.assignments.map(a => a.truckId === truckId
+          ? { ...a, days: a.days.map(d => d.date === date ? { ...d, startTime: patch.startTime } : d) }
+          : a),
+      }));
+    }
+    if ('hours' in patch) {
+      const hVal = typeof patch.hours === 'number' ? patch.hours : 0;
+      const truck = db.trucks.find(t => t.id === truckId);
+      const projectId = (truck && truck.projectId) || req.projectId || null;
+      const driverId = (truck && truck.driverId) || null;
+      // Find or upsert the canonical hours row for this (req,truck,date).
+      const existingHr = (db.hours || []).find(h => h && h.haulRequestId === req.id && h.truckId === truckId && h.date === date);
+      // Pull startTime from current day skeleton (or 07:00 default).
+      const asg = (req.assignments || []).find(a => a.truckId === truckId);
+      const day = asg && (asg.days || []).find(d => d.date === date);
+      const clockIn = (day && day.startTime) || (existingHr && existingHr.clockIn) || '07:00';
+      const [hh, mm] = clockIn.split(':').map(Number);
+      const startMin = (hh || 0) * 60 + (mm || 0);
+      const endMin = startMin + Math.round(hVal * 60);
+      const clockOut = hVal > 0
+        ? (String(Math.floor(endMin / 60) % 24).padStart(2, '0') + ':' + String(endMin % 60).padStart(2, '0'))
+        : null;
+      if (existingHr) {
+        setDb(prev => ({
+          ...prev,
+          hours: (prev.hours || []).map(h => h.id === existingHr.id
+            ? { ...h, clockIn, clockOut, breakMin: 0, status: hVal > 0 ? 'approved' : h.status }
+            : h),
+        }));
+      } else if (hVal > 0) {
+        const newHr = {
+          id: 'hr-hreq-' + Math.random().toString(36).substring(2, 7),
+          driverId,
+          truckId,
+          projectId,
+          clockIn,
+          clockOut,
+          breakMin: 0,
+          status: 'approved',
+          date,
+          haulRequestId: req.id,
+        };
+        setDb(prev => ({ ...prev, hours: [...(prev.hours || []), newHr] }));
+      }
+    }
   };
   const updateLoad = (truckId, date, loadId, patch) => {
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.map(a => a.truckId === truckId
-        ? { ...a, days: a.days.map(d => d.date === date
-            ? { ...d, loads: d.loads.map(l => l.id === loadId ? { ...l, ...patch } : l) }
-            : d) }
-        : a),
+    setDb(prev => ({
+      ...prev,
+      loads: (prev.loads || []).map(l => l.id === loadId ? { ...l, ...patch } : l),
     }));
   };
+  // v32: photo lightbox handler — reads a file as data URL and patches the
+  // canonical db.loads row. Matches HaulerTruckView's onPickReplacePhoto so
+  // the photo round-trips through Supabase via SB_FIELDS_JS.loads.photo.
+  const onPickReplacePhoto = (e) => {
+    const f = e.target.files && e.target.files[0];
+    if (!f || !photoFor) return;
+    const reader = new FileReader();
+    reader.onload = ev => setDb(prev => ({
+      ...prev,
+      loads: (prev.loads || []).map(l => l.id === photoFor ? { ...l, photo: ev.target.result } : l),
+    }));
+    reader.readAsDataURL(f);
+    e.target.value = '';
+  };
+  const photoLoad = photoFor ? (db.loads || []).find(l => l.id === photoFor) : null;
   // Parse a free-form CY string -> number | null. Strips letters/spaces so
   // "12 CY", "12", "12.5" all yield 12 / 12.5. Returns null on bad input
   // so the EditableText reverts to the prior value.
@@ -8152,37 +8289,49 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 
   const removeAssignment = (truckId) => {
     const assignedTruck = db.trucks.find(t => t.id === truckId);
-    const target = assignments.find(a => a.truckId === truckId);
-    const loadsOnTruck = target ? target.days.reduce((s, d) => s + d.loads.length, 0) : 0;
+    // v32: canonical-store load count for the confirm prompt
+    const loadsOnTruck = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === truckId).length;
     const msg = loadsOnTruck > 0
       ? `Remove truck #${assignedTruck ? assignedTruck.plate : '?'} from this haul? ${loadsOnTruck} logged load${loadsOnTruck === 1 ? '' : 's'} will be discarded.`
       : `Remove truck #${assignedTruck ? assignedTruck.plate : '?'} from this haul?`;
     if (!confirm(msg)) return;
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.filter(a => a.truckId !== truckId),
-      // Clear legacy matched fields if removing the very truck they pointed at,
-      // so the UI's "Matched" pill doesn't keep lying.
-      matchedHaulerId: r.matchedHaulerId && r.matchedTruckId === truckId ? null : r.matchedHaulerId,
-      matchedTruckId:  r.matchedTruckId === truckId ? null : r.matchedTruckId,
+    setDb(prev => ({
+      ...prev,
+      haulRequests: prev.haulRequests.map(r2 => r2.id === req.id ? {
+        ...r2,
+        assignments: r2.assignments.filter(a => a.truckId !== truckId),
+        // Clear legacy matched fields if removing the very truck they pointed at,
+        // so the UI's "Matched" pill doesn't keep lying.
+        matchedHaulerId: r2.matchedHaulerId && r2.matchedTruckId === truckId ? null : r2.matchedHaulerId,
+        matchedTruckId:  r2.matchedTruckId === truckId ? null : r2.matchedTruckId,
+      } : r2),
+      // v32: drop canonical loads/hours for this (req,truck)
+      loads: (prev.loads || []).filter(l => !(l && l.haulRequestId === req.id && l.truckId === truckId)),
+      hours: (prev.hours || []).filter(h => !(h && h.haulRequestId === req.id && h.truckId === truckId)),
     }));
   };
 
   const removeDay = (truckId, date) => {
     const target = assignments.find(a => a.truckId === truckId);
     if (!target) return;
-    const day = target.days.find(d => d.date === date);
-    const loadCount = day ? day.loads.length : 0;
+    // v32: load count comes from canonical store (filtered by haulRequestId)
+    const loadCount = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === truckId && l.date === date).length;
     if (target.days.length <= 1) {
       alert("Can't remove the only day on this truck — remove the truck assignment instead.");
       return;
     }
     if (loadCount > 0 && !confirm(`Remove this day? ${loadCount} logged load${loadCount === 1 ? '' : 's'} will be discarded.`)) return;
-    updateReq(r => ({
-      ...r,
-      assignments: r.assignments.map(a => a.truckId === truckId
-        ? { ...a, days: a.days.filter(d => d.date !== date) }
-        : a),
+    setDb(prev => ({
+      ...prev,
+      haulRequests: prev.haulRequests.map(r2 => r2.id === req.id ? {
+        ...r2,
+        assignments: r2.assignments.map(a => a.truckId === truckId
+          ? { ...a, days: a.days.filter(d => d.date !== date) }
+          : a),
+      } : r2),
+      // v32: drop the canonical load/hours rows for this (req,truck,date)
+      loads: (prev.loads || []).filter(l => !(l && l.haulRequestId === req.id && l.truckId === truckId && l.date === date)),
+      hours: (prev.hours || []).filter(h => !(h && h.haulRequestId === req.id && h.truckId === truckId && h.date === date)),
     }));
   };
 
@@ -8198,11 +8347,17 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
   const generateHaulInvoice = (kind) => {
     const today = new Date().toISOString().slice(0, 10);
+    // v32: per-truck line items derive from canonical db.loads + db.hours
+    // filtered by haulRequestId + truckId.
     const lineItems = (req.assignments || []).map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
       const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
-      const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (Number(l.cy) || 0), 0), 0);
-      const hours = (a.days || []).reduce((s, d) => s + (typeof d.hours === 'number' ? d.hours : 0), 0);
+      const cy = (db.loads || [])
+        .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
+        .reduce((s, l) => s + (Number(l.cy) || 0), 0);
+      const hours = (db.hours || [])
+        .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
+        .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
       const ratePerHour = (truck && truck.ratePerHour != null)
         ? truck.ratePerHour
         : ((truck && db.rates && db.rates[truck.type]) || 0);
@@ -8230,7 +8385,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       createdAt: new Date().toISOString(),
       billTo: project ? project.gc : '—',
       lineItems,
-      loadCount: (req.assignments || []).reduce((s, a) => s + a.days.reduce((s2, d) => s2 + d.loads.length, 0), 0),
+      loadCount: (db.loads || []).filter(l => l && l.haulRequestId === req.id).length,
       totalCY: totalCYForInv,
       notes: '',
       status: 'draft',
@@ -8798,7 +8953,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           {assignments.map(a => {
             const t = db.trucks.find(x => x.id === a.truckId);
             const aHauler = db.haulers.find(h => h.id === a.haulerId);
-            const truckCY = a.days.reduce((s, d) => s + d.loads.reduce((s2, l) => s2 + (l.cy || 0), 0), 0);
+            // v32: per-truck rollups read canonical db.loads + db.hours.
+            const truckCY = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId).reduce((s, l) => s + (Number(l.cy) || 0), 0);
             const isAddingDay = addingDayFor === a.truckId;
             // v29-TRUCK-KPI: per-assignment KPI metadata. hours are NOT
             // tracked per load — daily d.hours is the billing source of truth
@@ -8807,7 +8963,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             const hourlyRate = (t && t.ratePerHour != null)
               ? t.ratePerHour
               : ((t && db.rates && db.rates[t.type]) || (typeMeta && typeMeta.rate) || 0);
-            const totalHoursForTruck = a.days.reduce((s, dd) => s + (typeof dd.hours === 'number' ? dd.hours : 0), 0);
+            const totalHoursForTruck = (db.hours || [])
+              .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
+              .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
             const totalDollarsForTruck = totalHoursForTruck * hourlyRate;
             const todayDay = a.days.find(dd => isToday(dd.date)) || null;
             const todayStart = todayDay ? (todayDay.startTime || '—') : '—';
@@ -8946,12 +9104,16 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                       </div>
                     </div>
 
-                    {/* Day sections — newest first. Each header shows daily
-                        totals (h • CY • $) computed from d.hours × hourlyRate;
-                        load rows only carry time + CY + remove. */}
+                    {/* Day sections — newest first. v32: each day's loads +
+                        hours come from db.loads / db.hours filtered by
+                        haulRequestId + truckId + date (canonical store);
+                        the assignments[].days[] entry remains only as the
+                        date + startTime stub. */}
                     {sortedDays.map(d => {
-                      const dailyCY = d.loads.reduce((s, l) => s + (l.cy || 0), 0);
-                      const dailyHours = typeof d.hours === 'number' ? d.hours : 0;
+                      const loadsForDay = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId && l.date === d.date);
+                      const hoursRowsForDay = (db.hours || []).filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId && h.date === d.date);
+                      const dailyCY = loadsForDay.reduce((s, l) => s + (Number(l.cy) || 0), 0);
+                      const dailyHours = hoursRowsForDay.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
                       const dailyDollars = dailyHours * hourlyRate;
                       const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
                       const dayLabel = isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date);
@@ -8970,10 +9132,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                              {/* Daily hours — editable. Authoritative billing source. */}
+                              {/* Daily hours — editable. v32: edit upserts a
+                                  canonical db.hours row tied to this (req,truck,day). */}
                               <div style={{ ...T.monoSm, color: C.ink, fontWeight: 600, display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
-                                <EditableText value={d.hours != null && d.hours !== '' ? String(d.hours) : ''} placeholder="0"
-                                  onSave={(v) => { const n = parseHours(v); if (n !== d.hours) updateDay(a.truckId, d.date, { hours: n }); }} />
+                                <EditableText value={dailyHours > 0 ? String(parseFloat(dailyHours.toFixed(2))) : ''} placeholder="0"
+                                  onSave={(v) => { const n = parseHours(v); if (n != null && Math.abs(n - dailyHours) > 0.001) updateDay(a.truckId, d.date, { hours: n }); }} />
                                 <span style={{ color: C.inkFaint }}>h</span>
                               </div>
                               <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
@@ -8993,20 +9156,35 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                             </div>
                           </div>
 
-                          {/* Compact column header — TIME | CY HAULED */}
-                          {d.loads.length > 0 && (
+                          {/* Compact column header — PHOTO | TIME | CY HAULED */}
+                          {loadsForDay.length > 0 && (
                             <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginTop: S[2], paddingBottom: 4, borderBottom: `1px solid ${C.rule}` }}>
+                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', minWidth: 48 }}>Photo</span>
                               <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', minWidth: 64 }}>Time</span>
                               <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', flex: 1 }}>CY Hauled</span>
                             </div>
                           )}
 
-                          {d.loads.length === 0 ? (
+                          {loadsForDay.length === 0 ? (
                             <div style={{ ...T.caption, color: C.inkFaint, padding: `${S[2]}px 0` }}>No loads yet today.</div>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              {d.loads.map(l => (
+                              {loadsForDay.map(l => (
                                 <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>
+                                  {/* v32: photo thumbnail — click to open lightbox.
+                                      Mirrors the HaulerTruckView pattern; upload
+                                      writes a data URL into db.loads[i].photo. */}
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); setPhotoFor(l.id); }}
+                                    title={l.photo ? 'View / replace photo' : 'Add photo'}
+                                    style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', minWidth: 48 }}
+                                  >
+                                    {l.photo ? (
+                                      <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover', border: `1px solid ${C.ruleHi}` }} />
+                                    ) : (
+                                      <div style={{ width: 32, height: 32, borderRadius: R.xs, background: C.surface, border: `1px dashed ${C.ruleHi}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkFaint, fontSize: 14 }} aria-label="No photo — click to add">📷</div>
+                                    )}
+                                  </button>
                                   <span style={{ ...T.monoSm, color: C.info, fontWeight: 600, minWidth: 64, display: 'inline-block' }}>
                                     <EditableText value={l.time || ''} placeholder="HH:MM"
                                       onSave={(v) => { const tt = (v || '').trim(); if (tt !== l.time) updateLoad(a.truckId, d.date, l.id, { time: tt }); }} />
@@ -9179,6 +9357,57 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         )}
       </Card>
+
+      {/* v32: photo lightbox + hidden file input — mirrors HaulerTruckView. */}
+      <input ref={replacePhotoRef} type="file" accept="image/*" capture="environment" onChange={onPickReplacePhoto} style={{ display: 'none' }} />
+      {photoLoad && (() => {
+        const photoTruck = (db.trucks || []).find(t => t.id === photoLoad.truckId);
+        return (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Load photo"
+            onClick={() => setPhotoFor(null)}
+            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4] }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              style={{ background: C.bg, border: `1px solid ${C.ruleHi}`, borderRadius: R.lg, padding: S[4], maxWidth: 'min(640px, 100%)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: S[3] }}
+            >
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3] }}>
+                <div>
+                  <Label color={C.accent}>Load photo</Label>
+                  <div style={{ ...T.bodySm, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
+                    #{photoTruck ? photoTruck.plate : (photoLoad.truckId || '?')} · {photoLoad.time} · {photoLoad.cy || 0} CY{photoLoad.material ? (' · ' + materialLabel(photoLoad.material)) : ''}
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPhotoFor(null)}
+                  aria-label="Close"
+                  style={{ background: 'transparent', border: 'none', color: C.inkDim, cursor: 'pointer', fontSize: 24, lineHeight: 1, padding: 4 }}
+                >×</button>
+              </div>
+              {photoLoad.photo ? (
+                <img src={photoLoad.photo} alt={`Load on #${photoTruck ? photoTruck.plate : ''} at ${photoLoad.time}`} style={{ width: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: R.md, background: '#000' }} />
+              ) : (
+                <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5], border: `1px dashed ${C.ruleHi}`, borderRadius: R.md }}>No photo on file for this load yet. Click "Upload photo" to add one.</div>
+              )}
+              <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
+                {photoLoad.photo && (
+                  <button
+                    onClick={() => { if (window.confirm('Remove the photo from this load?')) setDb(prev => ({ ...prev, loads: (prev.loads || []).map(l => l.id === photoLoad.id ? { ...l, photo: null } : l) })); }}
+                    style={{ ...T.bodySm, background: 'transparent', border: `1px solid ${C.warn}`, color: C.warn, padding: '8px 14px', borderRadius: R.sm, cursor: 'pointer', fontFamily: F.display, fontWeight: 600 }}
+                  >Remove photo</button>
+                )}
+                <button
+                  onClick={() => replacePhotoRef.current && replacePhotoRef.current.click()}
+                  style={{ ...T.bodySm, background: C.accent, border: 'none', color: C.bg, padding: '8px 14px', borderRadius: R.sm, cursor: 'pointer', fontFamily: F.display, fontWeight: 700 }}
+                >{photoLoad.photo ? 'Replace photo' : 'Upload photo'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -10216,8 +10445,11 @@ function AdminReporting({ db, setDb, navigate }) {
     .filter(r => (r.assignments || []).some(a => a.haulerId === haulerId))
     .map(r => {
       const myAssignments = (r.assignments || []).filter(a => a.haulerId === haulerId);
-      const deliveredCY = myAssignments.reduce((s, a) =>
-        s + a.days.reduce((s2, d) => s2 + d.loads.reduce((s3, l) => s3 + (l.cy || 0), 0), 0), 0);
+      // v32: canonical-store delivered CY for this hauler's trucks on this haul
+      const myTruckIds = new Set(myAssignments.map(a => a.truckId));
+      const deliveredCY = (db.loads || [])
+        .filter(l => l && l.haulRequestId === r.id && myTruckIds.has(l.truckId))
+        .reduce((s, l) => s + (Number(l.cy) || 0), 0);
       const invoice = invoices.find(i => i.haulerId === haulerId && i.haulRequestId === r.id);
       return { req: r, myAssignments, deliveredCY, invoice };
     });
@@ -10232,11 +10464,16 @@ function AdminReporting({ db, setDb, navigate }) {
     // v23: hours × hourly rate per truck assignment. deliveredCY rides
     // along for the CY column on the printable invoice but does NOT flow
     // into the amount.
+    // v32: per-truck line items from canonical store filtered by haulRequestId + truckId.
     const lineItems = myAssignments.map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
       const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
-      const cy = (a.days || []).reduce((s, d) => s + (d.loads || []).reduce((s2, l) => s2 + (Number(l.cy) || 0), 0), 0);
-      const hours = (a.days || []).reduce((s, d) => s + (typeof d.hours === 'number' ? d.hours : 0), 0);
+      const cy = (db.loads || [])
+        .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
+        .reduce((s, l) => s + (Number(l.cy) || 0), 0);
+      const hours = (db.hours || [])
+        .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
+        .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
       const ratePerHour = (truck && truck.ratePerHour != null)
         ? truck.ratePerHour
         : ((truck && db.rates && db.rates[truck.type]) || 0);
@@ -10253,6 +10490,7 @@ function AdminReporting({ db, setDb, navigate }) {
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
     const nowIso = new Date().toISOString();
+    const myTruckIdsForCount = new Set(myAssignments.map(a => a.truckId));
     const newInvoice = {
       id: 'inv-' + Date.now(),
       haulerId, projectId: req.projectId, haulRequestId: req.id,
@@ -10261,7 +10499,7 @@ function AdminReporting({ db, setDb, navigate }) {
       createdAt: nowIso,
       billTo: project ? project.gc : '—',
       lineItems,
-      loadCount: myAssignments.reduce((s, a) => s + a.days.reduce((s2, d) => s2 + d.loads.length, 0), 0),
+      loadCount: (db.loads || []).filter(l => l && l.haulRequestId === req.id && myTruckIdsForCount.has(l.truckId)).length,
       totalCY: totalCYForInv,
       notes: '',
       status: 'draft',
@@ -12111,6 +12349,42 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   const truckType = TRUCK_TYPES.find(tt => tt.code === truck.type);
   const truckLoads = db.loads.filter(l => l.truckId === truckId).sort((a, b) => a.time.localeCompare(b.time));
   const truckHoursRows = db.hours.filter(h => h.truckId === truckId);
+  // v32: haul-request options for the per-load + per-day picker.
+  // Show requests where (a) this truck is in assignments OR (b) the request
+  // is on the same project as the truck. Picks gracefully fall back to "—"
+  // for the unassigned (null) state.
+  const haulRequestOptions = (() => {
+    const seen = new Set();
+    const opts = [];
+    for (const r of (db.haulRequests || [])) {
+      if (!r || !r.id) continue;
+      const assignedHere = Array.isArray(r.assignments) && r.assignments.some(a => a && a.truckId === truckId);
+      const sameProject = r.projectId === truck.projectId;
+      if (!assignedHere && !sameProject) continue;
+      if (seen.has(r.id)) continue;
+      seen.add(r.id);
+      const proj = db.projects.find(p => p.id === r.projectId);
+      const matLabel = materialLabel(r.materialCode);
+      const idShort = r.id.replace(/^hreq-/, '');
+      opts.push({ value: r.id, label: 'HR-' + idShort + ' · ' + (proj ? proj.gc : 'Project?') + ' · ' + matLabel });
+    }
+    return opts;
+  })();
+  // Per-row picker handler: update a load's haulRequestId.
+  const updateLoadHaulReq = (loadId, newReqId) => {
+    setDb(prev => ({
+      ...prev,
+      loads: (prev.loads || []).map(l => l.id === loadId ? { ...l, haulRequestId: newReqId || null } : l),
+    }));
+  };
+  // Day-header picker: cascades to every load + hours row on (date, truck).
+  const setDayHaulReq = (date, newReqId) => {
+    setDb(prev => ({
+      ...prev,
+      loads: (prev.loads || []).map(l => (l && l.truckId === truckId && l.date === date) ? { ...l, haulRequestId: newReqId || null } : l),
+      hours: (prev.hours || []).map(h => (h && h.truckId === truckId && h.date === date) ? { ...h, haulRequestId: newReqId || null } : h),
+    }));
+  };
   // Inline edits — every field clickable, persists via setDb → syncs to Supabase
   // through the Phase-3 write wrapper. Covers every field a trucker can input
   // (loads: material/cy/photo/notes/time/status; hours: clock-in/out/break/status)
@@ -12135,6 +12409,15 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       const existing = db.hours.map(h => parseInt((h.id || '').replace(/^hr-/, ''), 10)).filter(n => !isNaN(n));
       return existing.length ? Math.max(...existing) + 1 : 1;
     })();
+    // v32: auto-link to a haul request when this truck has exactly one
+    // active assignment on its project.
+    const candidateReqs = (db.haulRequests || []).filter(r =>
+      r && r.projectId === truck.projectId &&
+      Array.isArray(r.assignments) &&
+      r.assignments.some(a => a && a.truckId === truck.id) &&
+      r.status !== 'completed' && r.status !== 'closed'
+    );
+    const autoHaulReqId = candidateReqs.length === 1 ? candidateReqs[0].id : null;
     const newRow = {
       id: 'hr-' + nextNum,
       driverId: driver ? driver.id : null,
@@ -12145,6 +12428,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       breakMin: 30,
       status: 'open',
       date: dateIso || TODAY_ISO,
+      haulRequestId: autoHaulReqId,
     };
     setDb(prev => appendActivity(
       { ...prev, hours: [...prev.hours, newRow] },
@@ -12340,6 +12624,15 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
           const dayLoads = loadsByDate.get(date) || [];
           const dayHoursRows = hoursByDate.get(date) || [];
           const dayHoursTotal = dayHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+          // v32: derive a single "current haul request" for this day from
+          // the loads + hours rows on this date. If every row on the day
+          // shares the same haulRequestId, that's the day's haul; otherwise
+          // null (mixed). The day-header picker, when set, cascades to all
+          // rows.
+          const dayReqIds = new Set();
+          for (const l of dayLoads) dayReqIds.add(l.haulRequestId || null);
+          for (const h of dayHoursRows) dayReqIds.add(h.haulRequestId || null);
+          const dayCurrentReqId = dayReqIds.size === 1 ? Array.from(dayReqIds)[0] : null;
           return (
             <Card key={date} padding={0} style={{ marginBottom: S[5] }}>
               <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, background: C.surfaceHi }}>
@@ -12351,6 +12644,24 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                   <span style={{ fontFamily: F.mono, color: C.accent, fontWeight: 700 }}>{fmtHours(dayHoursTotal)} hrs</span>
                   <span style={{ color: C.inkFaint }}>·</span>
                   <span style={{ ...T.bodySm, color: C.inkDim }}>{dayLoads.length} load{dayLoads.length === 1 ? '' : 's'}</span>
+                  {/* v32: day-level haul-assignment picker. Setting this
+                      cascades the chosen haulRequestId to every load + hours
+                      row on this (truck, date). Empty option clears. */}
+                  {haulRequestOptions.length > 0 && (
+                    <>
+                      <span style={{ color: C.inkFaint }}>·</span>
+                      <span style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Haul</span>
+                      <select
+                        value={dayCurrentReqId || ''}
+                        onChange={e => setDayHaulReq(date, e.target.value)}
+                        title={dayReqIds.size > 1 ? 'Loads on this day belong to multiple haul requests — picking one cascades.' : 'Assign every load + hours row on this day to a haul request'}
+                        style={{ ...T.caption, fontFamily: F.mono, color: C.accent, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 6px', cursor: 'pointer', maxWidth: 240 }}
+                      >
+                        <option value="">{dayReqIds.size > 1 ? '— mixed —' : '— none —'}</option>
+                        {haulRequestOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                      </select>
+                    </>
+                  )}
                 </div>
                 {dayHoursRows.length > 0 ? (
                   <div style={{ marginTop: S[2], display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -12397,7 +12708,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
               ) : (
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr><Th width={60}>Photo</Th><Th width={70}>Time</Th><Th>Ticket</Th><Th>Material</Th><Th align="right">CY</Th><Th>Status</Th><Th>Notes</Th><Th width={40}></Th></tr>
+                  <tr><Th width={60}>Photo</Th><Th width={70}>Time</Th><Th>Ticket</Th><Th>Material</Th><Th align="right">CY</Th><Th>Status</Th><Th width={170}>Haul</Th><Th>Notes</Th><Th width={40}></Th></tr>
                 </thead>
                 <tbody>
                   {dayLoads.map(l => (
@@ -12420,6 +12731,24 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                 <Td><EditableSelect value={l.material} options={loadMaterialOptions} onSave={(v) => updateLoad(l.id, { material: v })} /></Td>
                 <Td align="right" mono><span style={{ color: C.accent, fontWeight: 700 }}><EditableText value={String(l.cy != null ? l.cy : '')} onSave={(v) => updateLoad(l.id, { cy: parseFloat(v) || 0 })} mono /> CY</span></Td>
                 <Td><EditableSelect value={l.status} options={loadStatusOptions} onSave={(v) => updateLoad(l.id, { status: v })} /></Td>
+                {/* v32: per-load haul-assignment picker. Empty option clears
+                    the link; otherwise updates db.loads[i].haulRequestId so
+                    rollups attribute this load to the right haul. */}
+                <Td>
+                  {haulRequestOptions.length === 0 ? (
+                    <span style={{ ...T.caption, color: C.inkFaint, fontStyle: 'italic' }}>—</span>
+                  ) : (
+                    <select
+                      value={l.haulRequestId || ''}
+                      onChange={e => updateLoadHaulReq(l.id, e.target.value)}
+                      title="Link this load to a haul request"
+                      style={{ ...T.caption, fontFamily: F.mono, color: l.haulRequestId ? C.accent : C.inkDim, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 4px', cursor: 'pointer', maxWidth: 160, width: '100%', boxSizing: 'border-box' }}
+                    >
+                      <option value="">— none —</option>
+                      {haulRequestOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                  )}
+                </Td>
                 <Td dim><EditableText value={l.notes || ''} onSave={(v) => updateLoad(l.id, { notes: v })} multiline placeholder="Add notes…" /></Td>
                 <Td align="right">
                   <button
@@ -12513,6 +12842,16 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
     if (!canSubmit) return;
     const existing = db.loads.map(l => parseInt((l.id || '').replace(/^ld-/, ''), 10)).filter(n => !isNaN(n));
     const nextNum = existing.length ? Math.max(...existing) + 1 : 1001;
+    // v32: auto-link to a haul request when the truck is unambiguously
+    // assigned to exactly one active request on this project. If multiple
+    // candidates, leave null — the user can pick via the per-load picker.
+    const candidateReqs = (db.haulRequests || []).filter(r =>
+      r && r.projectId === truck.projectId &&
+      Array.isArray(r.assignments) &&
+      r.assignments.some(a => a && a.truckId === truck.id) &&
+      r.status !== 'completed' && r.status !== 'closed'
+    );
+    const autoHaulReqId = candidateReqs.length === 1 ? candidateReqs[0].id : null;
     const newLoad = {
       id: 'ld-' + nextNum,
       driverId: driver ? driver.id : null,
@@ -12522,6 +12861,8 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
       cy: parseFloat(cy),
       ticketNo: ticketNo || null,
       time,
+      date: TODAY_ISO,
+      haulRequestId: autoHaulReqId,
       status: 'pending',
     };
     setDb(prev => appendActivity(

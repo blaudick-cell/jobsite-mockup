@@ -312,3 +312,25 @@ ALTER TABLE hours ADD COLUMN IF NOT EXISTS paused_ms      bigint NOT NULL DEFAUL
 After applying, add `'clockedInAt', 'clockedOutAt', 'pausedAt', 'pausedMs'` to `SB_FIELDS_JS.hours` in `index.html` so writes include the columns and reads decode them. The camelToSnake adapter already maps them correctly (no overrides needed).
 
 Not load-bearing for the in-tab Pause fix; needed only for cross-reload persistence of pause state.
+
+---
+
+## v20 follow-up — link loads + hours to a haul request (2026-05-23)
+
+Architectural unification: `db.loads` and `db.hours` become the canonical source of truth for every load / hours surface (truck detail page, haul detail page, truck mini-phone widget on /admin/trucks/active). To do that, each row needs to know which haul request it belongs to so that the haul detail page's per-truck day-list can filter `db.loads.filter(l => l.haulRequestId === req.id && l.truckId === assignment.truckId)` instead of reading the legacy `req.assignments[].days[].loads[]` array.
+
+```sql
+-- v20: link loads + hours to a haul request (nullable; legacy rows stay NULL)
+ALTER TABLE loads ADD COLUMN IF NOT EXISTS haul_request_id text;
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS haul_request_id text;
+
+-- helpful read-path indexes
+CREATE INDEX IF NOT EXISTS loads_haul_request_id_idx ON loads(haul_request_id);
+CREATE INDEX IF NOT EXISTS hours_haul_request_id_idx ON hours(haul_request_id);
+```
+
+After applying, add `'haulRequestId'` to both `SB_FIELDS_JS.loads` and `SB_FIELDS_JS.hours` in `index.html`. The camelToSnake adapter already maps `haulRequestId ↔ haul_request_id` correctly (no overrides needed — same convention as `invoices.haulRequestId`).
+
+Additive, idempotent, safe to re-run. Dispatch can auto-apply.
+
+**Photo upload on haul-detail loads:** No new bucket needed. The existing truck-page photo upload stores a base64 data URL inline in `loads.photo` (existing `text` column), already round-trips through Supabase via `SB_FIELDS_JS.loads.photo`. The haul-detail photo column mirrors that same data-URL pattern — no Storage code path required.
