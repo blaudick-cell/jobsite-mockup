@@ -3688,7 +3688,22 @@ function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
     // pre-migration cloud rows don't keep reverting freshly-migrated local
     // state every Realtime broadcast (root cause of the 2026-05-24 map
     // flicker — see RCA in commit message).
-    if (jsKey === 'haulRequests') jsRow = migrateHaulRequestRow(jsRow);
+    if (jsKey === 'haulRequests') {
+      const migrated = migrateHaulRequestRow(jsRow);
+      if (migrated !== jsRow) {
+        // Self-heal: write the migrated shape back to Supabase so the cloud
+        // source is repaired and other clients (including stale-bundle peers)
+        // stop broadcasting pre-migration data on every tiny edit. Prime the
+        // echo-skip guard with the post-round-trip shape so our own upsert's
+        // Realtime echo doesn't ping-pong us.
+        try {
+          markLocalWrite('haulRequests', migrated.id, sbRowToJs('haulRequests', jsRowToSb('haulRequests', migrated)));
+          _sb.upsertRows('haulRequests', [migrated])
+            .catch(e => SyncErrorBus.push('haulRequests', 'realtime-heal', e));
+        } catch (e) { /* upsert is best-effort heal; never throw past the listener */ }
+      }
+      jsRow = migrated;
+    }
     rowKey = jsRow.id;
     jsRowForCompare = jsRow;
   }
@@ -15596,7 +15611,17 @@ function App() {
     const onStorage = (e) => {
       if (e.key !== DB_STORAGE_KEY) return;
       const next = hydrateDb(e.newValue);
-      lastSerializedRef.current = e.newValue == null ? null : JSON.stringify(next);
+      const nextSerialized = e.newValue == null ? null : JSON.stringify(next);
+      // Self-heal: if our hydrate migrated (or otherwise changed) the
+      // incoming payload, write the migrated state back to localStorage so
+      // peer tabs on stale cached bundles see the canonical value on their
+      // next storage event. Without this, a peer tab that lacks our newer
+      // migration logic keeps echoing pre-migration shape forever (root
+      // cause of the 2026-05-24 hreq-001 flicker war — see RCA).
+      if (e.newValue != null && nextSerialized !== e.newValue) {
+        try { window.localStorage.setItem(DB_STORAGE_KEY, nextSerialized); } catch (e2) {}
+      }
+      lastSerializedRef.current = nextSerialized;
       setDbRaw(next);
       setRemoteUpdateNonce(n => n + 1);
     };
