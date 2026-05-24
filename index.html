@@ -3104,43 +3104,16 @@ function hydrateDb(raw) {
         out.routes = rOut;
       }
     } catch (e) { /* fall through with v18 shape; next hydrate retries */ }
-    // Idempotent geocode/routes GC — runs on every hydrate, drops cache
-    // entries no longer referenced by ANY project (address / pickup / dump),
-    // ANY hauler (address), or ANY haul request (pickup / dropoff, all
-    // statuses incl. completed). Preserves history; only sweeps truly
-    // orphaned addresses. Unlike the v18→v19 targeted list, this catches
-    // future orphans automatically as haul requests get deleted or
-    // re-addressed.
-    try {
-      const liveAddrs = new Set();
-      (out.projects || []).forEach(p => {
-        if (!p) return;
-        if (p.address) liveAddrs.add(p.address);
-        if (p.pickupLocation) liveAddrs.add(p.pickupLocation);
-        if (p.dumpLocation) liveAddrs.add(p.dumpLocation);
-      });
-      (out.haulers || []).forEach(h => { if (h && h.address) liveAddrs.add(h.address); });
-      (out.haulRequests || []).forEach(r => {
-        if (!r) return;
-        if (r.pickupLocation && r.pickupLocation.address) liveAddrs.add(r.pickupLocation.address);
-        if (r.dropoffLocation && r.dropoffLocation.address) liveAddrs.add(r.dropoffLocation.address);
-      });
-      if (out.geocode && typeof out.geocode === 'object') {
-        const gcOut = {};
-        for (const [addr, coord] of Object.entries(out.geocode)) {
-          if (liveAddrs.has(addr)) gcOut[addr] = coord;
-        }
-        out.geocode = gcOut;
-      }
-      if (out.routes && typeof out.routes === 'object') {
-        const rOut = {};
-        for (const [key, route] of Object.entries(out.routes)) {
-          const [pick, drop] = (key || '').split('|');
-          if (liveAddrs.has(pick) && liveAddrs.has(drop)) rOut[key] = route;
-        }
-        out.routes = rOut;
-      }
-    } catch (e) { /* GC must never throw — fall through with prior cache */ }
+    // Idempotent geocode/routes GC — DISABLED 2026-05-24.
+    // Was: drop cache entries no longer referenced by any live address.
+    // Why disabled: running on every hydrate (including cross-tab storage
+    // events from peer tabs on stale bundles whose haulRequests still hold
+    // pre-migration addresses) caused the route cache to oscillate — the
+    // peer's serialized state lacks NEW-shape routes, hydrate's GC dropped
+    // them, our OSRM async-fetch effect re-cached them, peer overrode again.
+    // The cache is local-only and small; a few stale entries are harmless.
+    // Targeted v18→v19 GC above still runs (only sweeps the known-orphan
+    // address strings from retired pre-v16 seeds).
     // Post-cascade audit: did any guarded step accidentally wipe a live
     // table? Compares pre/post row counts on every HYDRATE_LIVE_DATA_TABLES
     // entry; flags the data-revert pattern (RCA outputs/data-revert-rca.md)
