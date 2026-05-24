@@ -2436,6 +2436,11 @@ function deliveredCYForRequest(req, db) {
 // v32: dollars for one request — sum hours × truck.ratePerHour (or type
 // fallback rate) over the canonical db.hours rows for this request. Truck
 // rate is looked up per-row from the row's truckId.
+// SCOPE WARNING (F5 — 2026-05-24 value-source audit): this helper sums
+// EVERY hour on the request regardless of which hauler logged it. Callers
+// in a per-hauler context (e.g. HaulerLanding, settlement statement) must
+// filter `db.hours` by `req.assignments.filter(a => a.haulerId === me).truckId`
+// themselves — see `haulsForHauler` line ~11089 for the correct pattern.
 function dollarsForRequest(req, db) {
   if (!req || !db || !Array.isArray(db.hours)) return 0;
   let total = 0;
@@ -4411,6 +4416,10 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
+    // F6 (2026-05-24 audit): gate the caption count on map style loaded so a
+    // CartoCDN outage doesn't show "5 haulers · 3 pickups" while the canvas
+    // sits blank with 0 pins. Flips to true inside map.on('load', ...).
+    const [styleLoaded, setStyleLoaded] = useState(false);
     // Map<id, { marker, coordKey, type, isHauler }> — diff-reconciled across
     // every endpointsSignature/haulersSignature change so markers don't all
     // tear down and re-mount when a single geocode resolves. Root cause of the
@@ -4790,6 +4799,9 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
       mapRef.current = map;
 
       map.on('load', () => {
+        // F6 (2026-05-24 audit): flip caption-gate true so the counter row
+        // ("3 projects · 5 haulers · …") replaces its placeholder.
+        setStyleLoaded(true);
         // Each layer wrapped in try/catch — a single layer failing must NOT
         // block subsequent layers OR the marker creation that follows.
         // Previous bug: routes-lines threw on data-expression dasharray and
@@ -4948,13 +4960,23 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
           <Label color={C.accent}>Live operations map</Label>
           <span style={{ ...T.caption, color: C.inkDim }}>
-            {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {reqRoutes.length} haul{reqRoutes.length === 1 ? '' : 's'} ({reqRoutes.filter(r => r.isPending).length} pending) {(() => {
-              const osrm = reqRoutes.filter(r => !r.isStraight).length;
-              const totalMeters = reqRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
-              const totalMinutes = reqRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
-              if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
-              return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
-            })()}
+            {/* F6 (2026-05-24 audit): gate the counter row on map.styleLoaded
+                so a CartoCDN/WebGL failure shows an honest "tiles loading…"
+                placeholder instead of claiming "5 haulers · 3 pickups" while
+                the canvas is empty. */}
+            {!styleLoaded ? (
+              <span style={{ color: C.inkFaint }}>tiles loading…</span>
+            ) : (
+              <>
+                {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {reqRoutes.length} haul{reqRoutes.length === 1 ? '' : 's'} ({reqRoutes.filter(r => r.isPending).length} pending) {(() => {
+                  const osrm = reqRoutes.filter(r => !r.isStraight).length;
+                  const totalMeters = reqRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
+                  const totalMinutes = reqRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
+                  if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
+                  return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
+                })()}
+              </>
+            )}
           </span>
         </div>
         <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
@@ -4968,8 +4990,8 @@ function AdminProjects({ db, setDb, navigate }) {
   const healthFor = (p) => {
     if ((p.status || 'active') === 'completed') return 'completed';
     if (p.status === 'upcoming') return 'upcoming';
-    if (p.pendingLoads >= 3) return 'critical';
-    if (p.pendingLoads > 0 && p.trucksActive < p.trucks.length) return 'atrisk';
+    if (p.pendingApprovalLoads >= 3) return 'critical';
+    if (p.pendingApprovalLoads > 0 && p.trucksActive < p.trucks.length) return 'atrisk';
     return 'healthy';
   };
   const healthTone = (h) => ({
@@ -5011,25 +5033,16 @@ function AdminProjects({ db, setDb, navigate }) {
     const trucksActive = trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
     const trucksAssigned = trucks.length;
     const projLoads = db.loads.filter(l => l.projectId === p.id);
-    const loadsCompleted = projLoads.filter(l => l.status === 'approved').length;
-    const pendingLoads = projLoads.filter(l => l.status === 'pending').length;
-    // CY moved on this project — sum of approved loads' cubic yards. This is
-    // the top-line "actual dirt moved" metric and replaces the LOADS/TRUCKS
-    // dashboard pair (v22). Pending CY trails behind for the "+N pending" pill.
-    // v30: legacy db.loads / db.hours rollups — kept under `legacy*` so
-    // any view that genuinely operates on those collections (e.g. the
-    // historical /admin/loads + /admin/hours tables seeded for demo
-    // dashboards) still has access. The Hauling Overview tile, dispatch
-    // row, and haul detail now all consume the assignment-derived
-    // canonical totals below instead — guaranteeing one truth across views.
-    const legacyCYCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    const legacyCYPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    const legacyTotalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-    const legacyTotalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
-      const t = db.trucks.find(t => t.id === h.truckId);
-      const rate = t ? db.rates[t.type] : 0;
-      return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * rate;
-    }, 0);
+    // F1 (2026-05-24 value-source audit): `loadsCompleted` no longer filters by
+    // status === 'approved'. Pending loads are real logged work and should count
+    // toward the operational "loads completed" metric; the Payments page handles
+    // the approve→sent→paid billing distinction separately. This also aligns the
+    // load count with `cyCompleted`/`deliveredCYForRequest`, which never filtered.
+    const loadsCompleted = projLoads.length;
+    // F4 rename: `pendingLoads` → `pendingApprovalLoads` to disambiguate from
+    // `cyPending` (remaining demand). This count is the admin approval queue;
+    // the CY pending is how much CY is left to deliver.
+    const pendingApprovalLoads = projLoads.filter(l => l.status === 'pending').length;
     // Loads in transit ≈ open shifts on this project's trucks (a load is "in
     // flight" while a driver is clocked-in on it).
     const loadsInTransit = trucksActive;
@@ -5069,8 +5082,8 @@ function AdminProjects({ db, setDb, navigate }) {
       ? Math.max(18, Math.round((totalHours * 60) / Math.max(1, loadsCompleted)))
       : 0;
     // ETA: at current cadence, hours-of-work-left ≈ pending × cycle.
-    const minsLeft = pendingLoads * (avgCycleTime || 30);
-    const estimatedCompletion = pendingLoads === 0
+    const minsLeft = pendingApprovalLoads * (avgCycleTime || 30);
+    const estimatedCompletion = pendingApprovalLoads === 0
       ? '—'
       : (minsLeft < 90 ? minsLeft + 'm' : (minsLeft / 60).toFixed(1) + 'h');
     // Material + haul-type derived from the first material code; readable label.
@@ -5102,7 +5115,7 @@ function AdminProjects({ db, setDb, navigate }) {
     const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
     const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
     const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
-    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, legacyCYCompleted, legacyCYPending, legacyTotalHours, legacyTotalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingApprovalLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
     enriched.healthStatus = healthFor(enriched);
     return enriched;
   });
@@ -9041,7 +9054,14 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>{Math.round(overallPct)}%</span>
                 <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
                 <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
-                  {assignments.length === 0 ? 'no trucks' : assignments.length + ' truck' + (assignments.length === 1 ? '' : 's')}
+                  {(() => {
+                    // F3 (2026-05-24 audit): use canonical helper so this
+                    // count agrees with the dispatch row's truck count even
+                    // when `req.assignments` has duplicate entries for the
+                    // same `truckId` (legacy data / race on assignment).
+                    const n = assignedTruckCountForRequest(req);
+                    return n === 0 ? 'no trucks' : n + ' truck' + (n === 1 ? '' : 's');
+                  })()}
                 </span>
                 <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
                 <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
@@ -9332,9 +9352,14 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         <div>
           <Label>Assignments</Label>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            {assignments.length === 0
-              ? 'No trucks assigned yet.'
-              : `${assignments.length} truck${assignments.length === 1 ? '' : 's'} assigned · ${totalDeliveredCY} of ${req.volumeCY} CY delivered (${Math.round(overallPct)}%)`}
+            {(() => {
+              // F3 (2026-05-24 audit): use canonical dedup'd helper so this
+              // header agrees with the dispatch row.
+              const n = assignedTruckCountForRequest(req);
+              return n === 0
+                ? 'No trucks assigned yet.'
+                : `${n} truck${n === 1 ? '' : 's'} assigned · ${totalDeliveredCY} of ${req.volumeCY} CY delivered (${Math.round(overallPct)}%)`;
+            })()}
           </div>
         </div>
         <Btn variant="primary" size="sm" onClick={() => setAssigningTruck(v => !v)}>
@@ -10141,10 +10166,14 @@ function AdminHaulers({ db, setDb, navigate }) {
 
   // === Operational KPI strip data ===
   const totalTrucks    = db.trucks.length;
-  const trucksActiveAll = (() => {
-    const activeIds = new Set(db.hours.filter(h => h.status === 'open').map(h => h.truckId));
-    return activeIds.size;
-  })();
+  // F2 (2026-05-24 value-source audit): require `t.driverId` so this global
+  // KPI matches the per-project `trucksActive` filter (index.html line 5011 +
+  // 13228). Without this, a truck with an open shift but no driver_id
+  // (legacy / mid-unassign data) was counted in the global KPI but not in any
+  // tile, making sum(tiles) ≠ global.
+  const trucksActiveAll = db.trucks.filter(t =>
+    t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')
+  ).length;
   const trucksAvailable = db.trucks.filter(t => t.driverId).length - trucksActiveAll;
   const trucksOffline   = db.trucks.length - db.trucks.filter(t => t.driverId).length;
   const avgResponse     = enriched.length ? Math.round(enriched.reduce((s, h) => s + h.responseMin, 0) / enriched.length) : 0;
@@ -10588,11 +10617,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const totalCYDelivered = haulerRollup.totalCY;
   const totalLoadsCount = haulerRollup.totalLoads;
   const haulsCount = haulerRollup.haulsCount;
-  const legacyTotalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  const legacyTotalRevenue = hours.reduce((s, h) => {
-    const t = trucks.find(x => x.id === h.truckId);
-    return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0);
-  }, 0);
+  // F-cleanup (2026-05-24 audit): removed `legacyTotalHours` +
+  // `legacyTotalRevenue` — they were computed but never rendered. The four
+  // hauler header stat cards below all read from `haulerRollup` already.
 
   const beginEdit = () => { setDraft({ name: hauler.name, phone: hauler.phone, email: hauler.email }); setEditing(true); };
   // Match the new-hauler wizard's email validator. Empty is allowed (some
