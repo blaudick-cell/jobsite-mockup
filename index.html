@@ -4371,300 +4371,7 @@ function SiteConditionsCard() {
 // =====================================================================
 // ADMIN
 // =====================================================================
-function AdminProjects({ db, setDb, navigate }) {
-  // === Helpers (inlined into the dashboard so the refactor stays scoped) ===
-  // Health classifier per UX spec — drives the StatusBadge tint + sorting.
-  const healthFor = (p) => {
-    if ((p.status || 'active') === 'completed') return 'completed';
-    if (p.status === 'upcoming') return 'upcoming';
-    if (p.pendingLoads >= 3) return 'critical';
-    if (p.pendingLoads > 0 && p.trucksActive < p.trucks.length) return 'atrisk';
-    return 'healthy';
-  };
-  const healthTone = (h) => ({
-    healthy:   { c: C.ok,     soft: C.okSoft,                            label: 'Healthy' },
-    atrisk:    { c: C.warn,   soft: C.warnSoft,                          label: 'At risk' },
-    critical:  { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Delayed'  },
-    upcoming:  { c: C.info,   soft: C.infoSoft,                          label: 'Upcoming' },
-    completed: { c: C.inkDim, soft: 'rgba(255,255,255,0.06)',            label: 'Completed' },
-  }[h] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: h });
-
-  // Lightweight bar primitives. Track + filled rail, accent fill, tone-aware.
-  const ProgressBar = ({ pct, color = C.accent, height = 6 }) => {
-    const w = Math.max(0, Math.min(100, pct || 0));
-    return (
-      <div style={{ width: '100%', height, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
-        <div style={{ width: w + '%', height: '100%', background: color, borderRadius: 999, transition: 'width 240ms ease' }} />
-      </div>
-    );
-  };
-  const UtilizationBar = ({ active, total }) => {
-    const segs = Math.max(0, total);
-    if (segs === 0) return <div style={{ ...T.caption, color: C.inkFaint }}>no trucks</div>;
-    return (
-      <div style={{ display: 'flex', gap: 3, height: 6 }}>
-        {Array.from({ length: segs }).map((_, i) => (
-          <div key={i} style={{ flex: 1, height: '100%', background: i < active ? C.accent : C.surfaceHi, borderRadius: 2 }} />
-        ))}
-      </div>
-    );
-  };
-
-  // === Enrich projects with all the operational fields the control center
-  // needs. Most are derived from existing data; a couple are demo defaults
-  // backfilled per UX spec (avgCycleTime, loadsTarget). ===
-  const updateProject = (id, patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === id ? { ...p, ...patch } : p) }));
-  const projects = db.projects.map(p => {
-    const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
-    const trucks = db.trucks.filter(t => t.projectId === p.id);
-    const trucksActive = trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
-    const trucksAssigned = trucks.length;
-    const projLoads = db.loads.filter(l => l.projectId === p.id);
-    const loadsCompleted = projLoads.filter(l => l.status === 'approved').length;
-    const pendingLoads = projLoads.filter(l => l.status === 'pending').length;
-    // CY moved on this project — sum of approved loads' cubic yards. This is
-    // the top-line "actual dirt moved" metric and replaces the LOADS/TRUCKS
-    // dashboard pair (v22). Pending CY trails behind for the "+N pending" pill.
-    // v30: legacy db.loads / db.hours rollups — kept under `legacy*` so
-    // any view that genuinely operates on those collections (e.g. the
-    // historical /admin/loads + /admin/hours tables seeded for demo
-    // dashboards) still has access. The Hauling Overview tile, dispatch
-    // row, and haul detail now all consume the assignment-derived
-    // canonical totals below instead — guaranteeing one truth across views.
-    const legacyCYCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    const legacyCYPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
-    const legacyTotalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-    const legacyTotalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
-      const t = db.trucks.find(t => t.id === h.truckId);
-      const rate = t ? db.rates[t.type] : 0;
-      return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * rate;
-    }, 0);
-    // Loads in transit ≈ open shifts on this project's trucks (a load is "in
-    // flight" while a driver is clocked-in on it).
-    const loadsInTransit = trucksActive;
-    // Haul requests on this project — used for target volume + dispatch queue.
-    const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
-    const targetCY = reqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
-    // v30: CANONICAL rollups derived from assignments → days → loads.
-    // Identical formula to AdminHaulRequestDetail and DispatchRow.
-    // cyPending = sum of (volumeCY - delivered) on requests that aren't
-    // fully delivered yet, so the "+N pending" pill aligns with what the
-    // detail page would show as "to deliver".
-    const cyCompleted = reqs.reduce((s, r) => s + deliveredCYForRequest(r, db), 0);
-    const cyPending   = reqs.reduce((s, r) => {
-      if (r.status === 'completed' || r.status === 'closed') return s;
-      return s + Math.max(0, (r.volumeCY || 0) - deliveredCYForRequest(r, db));
-    }, 0);
-    const totalHours = reqs.reduce((s, r) => s + totalBilledHoursForRequest(r, db), 0);
-    const totalRevenue = reqs.reduce((s, r) => s + dollarsForRequest(r, db), 0);
-    // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
-    const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
-    const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
-    // CY-based progress (v22): prefer project.volumeCYNeeded; fall back to the
-    // sum of haul-request volumes; final fallback is 0 (renders without a
-    // target, just the running total).
-    const cyTarget = (typeof p.volumeCYNeeded === 'number' && p.volumeCYNeeded > 0)
-      ? p.volumeCYNeeded
-      : targetCY;
-    const cyPct = cyTarget > 0 ? Math.min(100, Math.round((cyCompleted / cyTarget) * 100)) : 0;
-    // Demo cycle time: avg(approved-load count × 24 min) / trucksActive. Tweakable.
-    const avgCycleTime = trucksActive > 0 && loadsCompleted > 0
-      ? Math.max(18, Math.round((totalHours * 60) / Math.max(1, loadsCompleted)))
-      : 0;
-    // ETA: at current cadence, hours-of-work-left ≈ pending × cycle.
-    const minsLeft = pendingLoads * (avgCycleTime || 30);
-    const estimatedCompletion = pendingLoads === 0
-      ? '—'
-      : (minsLeft < 90 ? minsLeft + 'm' : (minsLeft / 60).toFixed(1) + 'h');
-    // Material + haul-type derived from the first material code; readable label.
-    const matCodes = Array.isArray(p.material) ? p.material : [];
-    const matLabels = matCodes.map(mc => {
-      const m = MATERIALS.find(x => x.code === mc);
-      return m ? m.label : mc;
-    });
-    const materialType = matLabels[0] || 'Mixed';
-    // v25: enrich a separate `haulDirection` (the verbose 'Import' /
-    // 'Export' label used by stat-card subtitles). Previously this was
-    // ALSO assigned to `haulType` in the spread below, which shadowed the
-    // raw project.haulType ('NEEDS' / 'HAS') and made HasNeedsPill on the
-    // Hauling Overview render NEEDS for every project regardless of true
-    // direction. Keep both names distinct so each consumer reads what it
-    // expects: pills read raw `haulType`, copy reads `haulDirection`.
-    const haulDirection = p.haulType === 'NEEDS' ? 'Import'
-      : p.haulType === 'HAS' ? 'Export'
-      : matCodes.includes('EX') ? 'Export'
-      : matCodes.includes('CF') ? 'Import'
-      : matCodes.includes('CR') ? 'Aggregate Import'
-      : matCodes.includes('TS') ? 'Topsoil'
-      : 'Transfer';
-    // Pickup / dump pulled off the first haul request that carries them
-    // (schema v12+, fields `pickupLocation` / `dropoffLocation` — each is an
-    // { name, address } object). Render as a single line; fall back to the
-    // project address if no haul request carries logistics yet.
-    const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
-    const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
-    const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
-    const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
-    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, legacyCYCompleted, legacyCYPending, legacyTotalHours, legacyTotalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
-    enriched.healthStatus = healthFor(enriched);
-    return enriched;
-  });
-  const active = projects.filter(p => (p.status || 'active') === 'active');
-  const upcoming = projects.filter(p => p.status === 'upcoming');
-  const completed = projects.filter(p => p.status === 'completed');
-
-  // === Top-line operational KPIs ===
-  const liveTrucksAll = db.trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
-  const loadsInTransitAll = active.reduce((s, p) => s + p.loadsInTransit, 0);
-  const delayedCount = active.filter(p => p.healthStatus === 'critical' || p.healthStatus === 'atrisk').length;
-  const pendingDispatches = (db.haulRequests || []).filter(r => r.status === 'pending').length;
-  const cycleTimes = active.map(p => p.avgCycleTime).filter(v => v > 0);
-  const avgCycle = cycleTimes.length > 0 ? Math.round(cycleTimes.reduce((s, v) => s + v, 0) / cycleTimes.length) : 0;
-  const totalActiveRevenue = active.reduce((s, p) => s + p.totalRevenue, 0);
-  const kpis = [
-    { label: 'Active hauls',       value: active.length,           tone: C.accent, sub: active.length === 1 ? 'on the board' : 'on the board' },
-    { label: 'Live trucks',        value: liveTrucksAll,           tone: C.ok,     sub: 'clocked-in now' },
-    { label: 'Loads in transit',   value: loadsInTransitAll,       tone: C.info,   sub: 'across active hauls' },
-    { label: 'Delayed / at risk',  value: delayedCount,            tone: delayedCount > 0 ? C.warn : C.inkDim, sub: 'needs attention' },
-    { label: 'Pending dispatches', value: pendingDispatches,       tone: pendingDispatches > 0 ? C.warn : C.inkDim, sub: 'unmatched requests' },
-    { label: 'Avg cycle time',     value: avgCycle > 0 ? avgCycle + ' min' : '—', tone: C.accent, sub: 'per load · active hauls' },
-  ];
-
-  // === Dispatch queue (pending haul requests, prioritized) ===
-  const queueItems = (db.haulRequests || []).filter(r => r.status === 'pending').map(r => {
-    const proj = db.projects.find(pp => pp.id === r.projectId);
-    const mat = MATERIALS.find(m => m.code === r.materialCode);
-    const reqAssigned = (r.assignments || []).length;
-    const priority = r.volumeCY >= 25 ? 'High' : r.volumeCY >= 12 ? 'Med' : 'Low';
-    return { req: r, proj, mat, reqAssigned, priority };
-  });
-  const priorityTone = (p) => p === 'High' ? C.warn : p === 'Med' ? C.info : C.inkDim;
-
-  // === Operational haul card — replaces the dense table row ===
-  const HaulOperationalCard = ({ p, dim }) => {
-    const tone = healthTone(p.healthStatus);
-    // Shortcut: when the project has exactly one in-flight haul, deep-link to
-    // its detail page; otherwise fall back to the project-filtered list so the
-    // user can pick. In-flight = anything not completed/closed (same notion
-    // already used by the qty rollup on this same card).
-    const liveReqsForCard = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
-    const cardHref = liveReqsForCard.length === 1
-      ? '/admin/requests/' + liveReqsForCard[0].id
-      : '/admin/requests?projectId=' + p.id;
-    return (
-      <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
-        <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start', cursor: 'pointer' }}
-             className="haul-op-card-grid"
-             onClick={() => navigate(cardHref)}
-             role="link"
-             tabIndex={0}
-             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(cardHref); } }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 4, flexWrap: 'wrap' }}>
-              <h3 style={{ ...T.h4, fontWeight: 700, margin: 0, color: C.ink, letterSpacing: -0.3 }}>{p.name}</h3>
-              <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
-            </div>
-            <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
-            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
-            {/* v25: aggregate qty + material across the project's actual
-                non-completed haul requests, instead of the project-level
-                volumeCYNeeded + material[0]. This keeps the Hauling Overview
-                tile numerically consistent with the per-haul views (Dispatch
-                row, Haul Detail, Map popup) — sum of those rows == this row.
-                Falls back to the project's planned target when there are no
-                live reqs yet. */}
-            {(() => {
-              const liveReqs = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
-              const aggCY = liveReqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
-              const matCodes = Array.from(new Set(liveReqs.map(r => r.materialCode).filter(Boolean)));
-              const aggMatLabel = matCodes.length === 0 ? (p.materialType || '—')
-                : matCodes.length === 1 ? materialLabel(matCodes[0])
-                : 'Mixed';
-              const qtyStr = liveReqs.length > 0
-                ? Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel
-                : (p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() + ' CY of ' + (p.materialType || '—') + ' (planned)' : '—');
-              return (
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                  <HasNeedsPill type={p.haulType} fontSize={13} />
-                  <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{qtyStr}</span>
-                </div>
-              );
-            })()}
-          </div>
-          <div style={{ minWidth: 0 }}>
-            {/* v22: replaces the LOADS + TRUCKS stacked pair with a single CY
-                metric — total cubic yards moved on the project, framed as
-                IMPORTED (for NEEDS / fill jobs) or EXPORTED (for HAS / dig
-                jobs). Falls back to a neutral "CY HAULED" label when haulType
-                is unset on legacy rows. */}
-            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>
-              CY {p.haulDirection === 'Export' ? 'EXPORTED' : p.haulDirection === 'Import' ? 'IMPORTED' : 'HAULED'}
-            </div>
-            <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
-              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{(p.cyCompleted || 0).toLocaleString()}</span>
-              {p.cyTarget > 0 && <span style={{ color: C.inkDim }}> / {p.cyTarget.toLocaleString()}</span>}
-              {p.cyPending > 0 && <span style={{ color: C.warn, marginLeft: S[2], fontWeight: 600 }}>+{p.cyPending.toLocaleString()} pending</span>}
-            </div>
-            <ProgressBar pct={p.cyPct} color={p.healthStatus === 'critical' ? (C.danger || C.warn) : p.healthStatus === 'atrisk' ? C.warn : C.accent} />
-          </div>
-          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[2] }}>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>AVG CYCLE</div>
-              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.avgCycleTime > 0 ? p.avgCycleTime + ' min' : '—'}</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>EST. COMPLETION</div>
-              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.estimatedCompletion}</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAULERS</div>
-              <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{p.ops.length}</div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: S[2], alignItems: 'flex-end' }}>
-            {/* v30: p.totalHours and p.totalRevenue are now both
-                canonical assignment-derived rollups — same formula as the
-                haul detail. The legacy log-clock comparison is dropped
-                because it conflated two different concepts (clock-in vs
-                billed). Single line: billed hours · total dollars. */}
-            <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>
-              {fmtHours(p.totalHours)} hrs billed <span style={{ color: C.inkFaint }}>·</span> {fmtMoney(p.totalRevenue)}
-            </div>
-          </div>
-        </div>
-      </Card>
-    );
-  };
-
-  // === Live operations map — dark tactical dispatch view.
-  //   Architecture intentionally mirrors a real-map integration so the inline
-  //   SVG ROAD/CITY layers can be swapped for a Mapbox GL or MapLibre source
-  //   without rewriting the route/marker/tooltip/filter code on top:
-  //     • <BaseLayer />      → today: SVG roads + cities + terrain washes
-  //                            tomorrow: real raster/vector tiles
-  //     • <RouteLayer />     → projected pickup→dump paths with animated flow
-  //     • <PickupMarker />,
-  //       <DumpMarker />,
-  //       <TruckMarker />   → SVG primitives that ride the route paths
-  //     • <MapFilters />     → status chips (Active / Upcoming / Delayed / Completed)
-  //     • <MetricsDrawer />  → collapsible side panel summarizing visible state
-  //     • <RouteTooltip />,
-  //       <PinnedRouteCard /> → hover preview + click-to-pin info card
-  //   Real Mapbox swap, when ready: provide a public token, lift the projection
-  //   helpers to the Mapbox `lng/lat` API, render the base layer with
-  //   <mapboxgl.Map style="mapbox://styles/mapbox/dark-v11"> and keep the
-  //   route/marker/tooltip code as overlays.
-  // =====================================================================
-  // LiveOperationsTileMap — MapLibre GL JS rendering CartoCDN `dark_all` raster
-  // tiles, EXACTLY matching jobsiteexchange.com's real map look (see
-  // map-recon.md for the tile URL we pulled out of their JS bundle). Overlays
-  // pickup/dropoff markers + bezier-style straight-line routes from the v12
-  // logistics fields. Falls back to the SVG `LiveOperationsMap` if MapLibre
-  // failed to load (e.g. CDN blocked) — keeps /admin shippable in any network
-  // condition. Geocoding via `db.geocode` pre-seeded cache (no live Nominatim
-  // calls on first render — see GEOCODE_SEED in Block 2).
-  // =====================================================================
-  const LiveOperationsTileMap = () => {
+function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
@@ -5195,7 +4902,7 @@ function AdminProjects({ db, setDb, navigate }) {
       };
     }, [mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    if (!mlAvailable) return <LiveOperationsMap />;
+    if (!mlAvailable) return <FallbackMap />;
     return (
       <div style={{ position: 'relative', width: '100%', marginTop: S[4] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
@@ -5213,7 +4920,301 @@ function AdminProjects({ db, setDb, navigate }) {
         <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
       </div>
     );
+}
+
+function AdminProjects({ db, setDb, navigate }) {
+  // === Helpers (inlined into the dashboard so the refactor stays scoped) ===
+  // Health classifier per UX spec — drives the StatusBadge tint + sorting.
+  const healthFor = (p) => {
+    if ((p.status || 'active') === 'completed') return 'completed';
+    if (p.status === 'upcoming') return 'upcoming';
+    if (p.pendingLoads >= 3) return 'critical';
+    if (p.pendingLoads > 0 && p.trucksActive < p.trucks.length) return 'atrisk';
+    return 'healthy';
   };
+  const healthTone = (h) => ({
+    healthy:   { c: C.ok,     soft: C.okSoft,                            label: 'Healthy' },
+    atrisk:    { c: C.warn,   soft: C.warnSoft,                          label: 'At risk' },
+    critical:  { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Delayed'  },
+    upcoming:  { c: C.info,   soft: C.infoSoft,                          label: 'Upcoming' },
+    completed: { c: C.inkDim, soft: 'rgba(255,255,255,0.06)',            label: 'Completed' },
+  }[h] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: h });
+
+  // Lightweight bar primitives. Track + filled rail, accent fill, tone-aware.
+  const ProgressBar = ({ pct, color = C.accent, height = 6 }) => {
+    const w = Math.max(0, Math.min(100, pct || 0));
+    return (
+      <div style={{ width: '100%', height, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: w + '%', height: '100%', background: color, borderRadius: 999, transition: 'width 240ms ease' }} />
+      </div>
+    );
+  };
+  const UtilizationBar = ({ active, total }) => {
+    const segs = Math.max(0, total);
+    if (segs === 0) return <div style={{ ...T.caption, color: C.inkFaint }}>no trucks</div>;
+    return (
+      <div style={{ display: 'flex', gap: 3, height: 6 }}>
+        {Array.from({ length: segs }).map((_, i) => (
+          <div key={i} style={{ flex: 1, height: '100%', background: i < active ? C.accent : C.surfaceHi, borderRadius: 2 }} />
+        ))}
+      </div>
+    );
+  };
+
+  // === Enrich projects with all the operational fields the control center
+  // needs. Most are derived from existing data; a couple are demo defaults
+  // backfilled per UX spec (avgCycleTime, loadsTarget). ===
+  const updateProject = (id, patch) => setDb(prev => ({ ...prev, projects: prev.projects.map(p => p.id === id ? { ...p, ...patch } : p) }));
+  const projects = db.projects.map(p => {
+    const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
+    const trucks = db.trucks.filter(t => t.projectId === p.id);
+    const trucksActive = trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
+    const trucksAssigned = trucks.length;
+    const projLoads = db.loads.filter(l => l.projectId === p.id);
+    const loadsCompleted = projLoads.filter(l => l.status === 'approved').length;
+    const pendingLoads = projLoads.filter(l => l.status === 'pending').length;
+    // CY moved on this project — sum of approved loads' cubic yards. This is
+    // the top-line "actual dirt moved" metric and replaces the LOADS/TRUCKS
+    // dashboard pair (v22). Pending CY trails behind for the "+N pending" pill.
+    // v30: legacy db.loads / db.hours rollups — kept under `legacy*` so
+    // any view that genuinely operates on those collections (e.g. the
+    // historical /admin/loads + /admin/hours tables seeded for demo
+    // dashboards) still has access. The Hauling Overview tile, dispatch
+    // row, and haul detail now all consume the assignment-derived
+    // canonical totals below instead — guaranteeing one truth across views.
+    const legacyCYCompleted = projLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+    const legacyCYPending   = projLoads.filter(l => l.status === 'pending').reduce((s, l) => s + (Number(l.cy) || 0), 0);
+    const legacyTotalHours = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+    const legacyTotalRevenue = db.hours.filter(h => h.projectId === p.id).reduce((s, h) => {
+      const t = db.trucks.find(t => t.id === h.truckId);
+      const rate = t ? db.rates[t.type] : 0;
+      return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * rate;
+    }, 0);
+    // Loads in transit ≈ open shifts on this project's trucks (a load is "in
+    // flight" while a driver is clocked-in on it).
+    const loadsInTransit = trucksActive;
+    // Haul requests on this project — used for target volume + dispatch queue.
+    const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
+    const targetCY = reqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+    // v30: CANONICAL rollups derived from assignments → days → loads.
+    // Identical formula to AdminHaulRequestDetail and DispatchRow.
+    // cyPending = sum of (volumeCY - delivered) on requests that aren't
+    // fully delivered yet, so the "+N pending" pill aligns with what the
+    // detail page would show as "to deliver".
+    const cyCompleted = reqs.reduce((s, r) => s + deliveredCYForRequest(r, db), 0);
+    const cyPending   = reqs.reduce((s, r) => {
+      if (r.status === 'completed' || r.status === 'closed') return s;
+      return s + Math.max(0, (r.volumeCY || 0) - deliveredCYForRequest(r, db));
+    }, 0);
+    const totalHours = reqs.reduce((s, r) => s + totalBilledHoursForRequest(r, db), 0);
+    const totalRevenue = reqs.reduce((s, r) => s + dollarsForRequest(r, db), 0);
+    // Approx 12 CY / load → quick loadsTarget so the progress bar reads.
+    const loadsTarget = targetCY > 0 ? Math.max(1, Math.round(targetCY / 12)) : Math.max(loadsCompleted, 1);
+    const loadPct = loadsTarget > 0 ? Math.round((loadsCompleted / loadsTarget) * 100) : 0;
+    // CY-based progress (v22): prefer project.volumeCYNeeded; fall back to the
+    // sum of haul-request volumes; final fallback is 0 (renders without a
+    // target, just the running total).
+    const cyTarget = (typeof p.volumeCYNeeded === 'number' && p.volumeCYNeeded > 0)
+      ? p.volumeCYNeeded
+      : targetCY;
+    const cyPct = cyTarget > 0 ? Math.min(100, Math.round((cyCompleted / cyTarget) * 100)) : 0;
+    // Demo cycle time: avg(approved-load count × 24 min) / trucksActive. Tweakable.
+    const avgCycleTime = trucksActive > 0 && loadsCompleted > 0
+      ? Math.max(18, Math.round((totalHours * 60) / Math.max(1, loadsCompleted)))
+      : 0;
+    // ETA: at current cadence, hours-of-work-left ≈ pending × cycle.
+    const minsLeft = pendingLoads * (avgCycleTime || 30);
+    const estimatedCompletion = pendingLoads === 0
+      ? '—'
+      : (minsLeft < 90 ? minsLeft + 'm' : (minsLeft / 60).toFixed(1) + 'h');
+    // Material + haul-type derived from the first material code; readable label.
+    const matCodes = Array.isArray(p.material) ? p.material : [];
+    const matLabels = matCodes.map(mc => {
+      const m = MATERIALS.find(x => x.code === mc);
+      return m ? m.label : mc;
+    });
+    const materialType = matLabels[0] || 'Mixed';
+    // v25: enrich a separate `haulDirection` (the verbose 'Import' /
+    // 'Export' label used by stat-card subtitles). Previously this was
+    // ALSO assigned to `haulType` in the spread below, which shadowed the
+    // raw project.haulType ('NEEDS' / 'HAS') and made HasNeedsPill on the
+    // Hauling Overview render NEEDS for every project regardless of true
+    // direction. Keep both names distinct so each consumer reads what it
+    // expects: pills read raw `haulType`, copy reads `haulDirection`.
+    const haulDirection = p.haulType === 'NEEDS' ? 'Import'
+      : p.haulType === 'HAS' ? 'Export'
+      : matCodes.includes('EX') ? 'Export'
+      : matCodes.includes('CF') ? 'Import'
+      : matCodes.includes('CR') ? 'Aggregate Import'
+      : matCodes.includes('TS') ? 'Topsoil'
+      : 'Transfer';
+    // Pickup / dump pulled off the first haul request that carries them
+    // (schema v12+, fields `pickupLocation` / `dropoffLocation` — each is an
+    // { name, address } object). Render as a single line; fall back to the
+    // project address if no haul request carries logistics yet.
+    const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
+    const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
+    const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
+    const dumpLocation = fmtLoc(firstReq.dropoffLocation) || p.address || '—';
+    const enriched = { ...p, ops, trucks, trucksActive, trucksAssigned, totalLoads: loadsCompleted, loadsCompleted, loadsTarget, loadPct, pendingLoads, loadsInTransit, cyCompleted, cyPending, cyTarget, cyPct, totalHours, totalRevenue, legacyCYCompleted, legacyCYPending, legacyTotalHours, legacyTotalRevenue, avgCycleTime, estimatedCompletion, materialType, haulDirection, pickupLocation, dumpLocation, reqs };
+    enriched.healthStatus = healthFor(enriched);
+    return enriched;
+  });
+  const active = projects.filter(p => (p.status || 'active') === 'active');
+  const upcoming = projects.filter(p => p.status === 'upcoming');
+  const completed = projects.filter(p => p.status === 'completed');
+
+  // === Top-line operational KPIs ===
+  const liveTrucksAll = db.trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
+  const loadsInTransitAll = active.reduce((s, p) => s + p.loadsInTransit, 0);
+  const delayedCount = active.filter(p => p.healthStatus === 'critical' || p.healthStatus === 'atrisk').length;
+  const pendingDispatches = (db.haulRequests || []).filter(r => r.status === 'pending').length;
+  const cycleTimes = active.map(p => p.avgCycleTime).filter(v => v > 0);
+  const avgCycle = cycleTimes.length > 0 ? Math.round(cycleTimes.reduce((s, v) => s + v, 0) / cycleTimes.length) : 0;
+  const totalActiveRevenue = active.reduce((s, p) => s + p.totalRevenue, 0);
+  const kpis = [
+    { label: 'Active hauls',       value: active.length,           tone: C.accent, sub: active.length === 1 ? 'on the board' : 'on the board' },
+    { label: 'Live trucks',        value: liveTrucksAll,           tone: C.ok,     sub: 'clocked-in now' },
+    { label: 'Loads in transit',   value: loadsInTransitAll,       tone: C.info,   sub: 'across active hauls' },
+    { label: 'Delayed / at risk',  value: delayedCount,            tone: delayedCount > 0 ? C.warn : C.inkDim, sub: 'needs attention' },
+    { label: 'Pending dispatches', value: pendingDispatches,       tone: pendingDispatches > 0 ? C.warn : C.inkDim, sub: 'unmatched requests' },
+    { label: 'Avg cycle time',     value: avgCycle > 0 ? avgCycle + ' min' : '—', tone: C.accent, sub: 'per load · active hauls' },
+  ];
+
+  // === Dispatch queue (pending haul requests, prioritized) ===
+  const queueItems = (db.haulRequests || []).filter(r => r.status === 'pending').map(r => {
+    const proj = db.projects.find(pp => pp.id === r.projectId);
+    const mat = MATERIALS.find(m => m.code === r.materialCode);
+    const reqAssigned = (r.assignments || []).length;
+    const priority = r.volumeCY >= 25 ? 'High' : r.volumeCY >= 12 ? 'Med' : 'Low';
+    return { req: r, proj, mat, reqAssigned, priority };
+  });
+  const priorityTone = (p) => p === 'High' ? C.warn : p === 'Med' ? C.info : C.inkDim;
+
+  // === Operational haul card — replaces the dense table row ===
+  const HaulOperationalCard = ({ p, dim }) => {
+    const tone = healthTone(p.healthStatus);
+    // Shortcut: when the project has exactly one in-flight haul, deep-link to
+    // its detail page; otherwise fall back to the project-filtered list so the
+    // user can pick. In-flight = anything not completed/closed (same notion
+    // already used by the qty rollup on this same card).
+    const liveReqsForCard = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
+    const cardHref = liveReqsForCard.length === 1
+      ? '/admin/requests/' + liveReqsForCard[0].id
+      : '/admin/requests?projectId=' + p.id;
+    return (
+      <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
+        <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start', cursor: 'pointer' }}
+             className="haul-op-card-grid"
+             onClick={() => navigate(cardHref)}
+             role="link"
+             tabIndex={0}
+             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate(cardHref); } }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 4, flexWrap: 'wrap' }}>
+              <h3 style={{ ...T.h4, fontWeight: 700, margin: 0, color: C.ink, letterSpacing: -0.3 }}>{p.name}</h3>
+              <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
+            </div>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
+            {/* v25: aggregate qty + material across the project's actual
+                non-completed haul requests, instead of the project-level
+                volumeCYNeeded + material[0]. This keeps the Hauling Overview
+                tile numerically consistent with the per-haul views (Dispatch
+                row, Haul Detail, Map popup) — sum of those rows == this row.
+                Falls back to the project's planned target when there are no
+                live reqs yet. */}
+            {(() => {
+              const liveReqs = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
+              const aggCY = liveReqs.reduce((s, r) => s + (r.volumeCY || 0), 0);
+              const matCodes = Array.from(new Set(liveReqs.map(r => r.materialCode).filter(Boolean)));
+              const aggMatLabel = matCodes.length === 0 ? (p.materialType || '—')
+                : matCodes.length === 1 ? materialLabel(matCodes[0])
+                : 'Mixed';
+              const qtyStr = liveReqs.length > 0
+                ? Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel
+                : (p.volumeCYNeeded != null ? Number(p.volumeCYNeeded).toLocaleString() + ' CY of ' + (p.materialType || '—') + ' (planned)' : '—');
+              return (
+                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+                  <HasNeedsPill type={p.haulType} fontSize={13} />
+                  <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{qtyStr}</span>
+                </div>
+              );
+            })()}
+          </div>
+          <div style={{ minWidth: 0 }}>
+            {/* v22: replaces the LOADS + TRUCKS stacked pair with a single CY
+                metric — total cubic yards moved on the project, framed as
+                IMPORTED (for NEEDS / fill jobs) or EXPORTED (for HAS / dig
+                jobs). Falls back to a neutral "CY HAULED" label when haulType
+                is unset on legacy rows. */}
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 4 }}>
+              CY {p.haulDirection === 'Export' ? 'EXPORTED' : p.haulDirection === 'Import' ? 'IMPORTED' : 'HAULED'}
+            </div>
+            <div style={{ ...T.monoSm, color: C.ink, marginBottom: 6 }}>
+              <span style={{ ...T.h4, fontWeight: 700, color: C.ink }}>{(p.cyCompleted || 0).toLocaleString()}</span>
+              {p.cyTarget > 0 && <span style={{ color: C.inkDim }}> / {p.cyTarget.toLocaleString()}</span>}
+              {p.cyPending > 0 && <span style={{ color: C.warn, marginLeft: S[2], fontWeight: 600 }}>+{p.cyPending.toLocaleString()} pending</span>}
+            </div>
+            <ProgressBar pct={p.cyPct} color={p.healthStatus === 'critical' ? (C.danger || C.warn) : p.healthStatus === 'atrisk' ? C.warn : C.accent} />
+          </div>
+          <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[2] }}>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>AVG CYCLE</div>
+              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.avgCycleTime > 0 ? p.avgCycleTime + ' min' : '—'}</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>EST. COMPLETION</div>
+              <div style={{ ...T.body, color: C.ink, fontFamily: F.mono, fontWeight: 600 }}>{p.estimatedCompletion}</div>
+            </div>
+            <div>
+              <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAULERS</div>
+              <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{p.ops.length}</div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', gap: S[2], alignItems: 'flex-end' }}>
+            {/* v30: p.totalHours and p.totalRevenue are now both
+                canonical assignment-derived rollups — same formula as the
+                haul detail. The legacy log-clock comparison is dropped
+                because it conflated two different concepts (clock-in vs
+                billed). Single line: billed hours · total dollars. */}
+            <div style={{ ...T.caption, color: C.inkFaint, textAlign: 'right' }}>
+              {fmtHours(p.totalHours)} hrs billed <span style={{ color: C.inkFaint }}>·</span> {fmtMoney(p.totalRevenue)}
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  };
+
+  // === Live operations map — dark tactical dispatch view.
+  //   Architecture intentionally mirrors a real-map integration so the inline
+  //   SVG ROAD/CITY layers can be swapped for a Mapbox GL or MapLibre source
+  //   without rewriting the route/marker/tooltip/filter code on top:
+  //     • <BaseLayer />      → today: SVG roads + cities + terrain washes
+  //                            tomorrow: real raster/vector tiles
+  //     • <RouteLayer />     → projected pickup→dump paths with animated flow
+  //     • <PickupMarker />,
+  //       <DumpMarker />,
+  //       <TruckMarker />   → SVG primitives that ride the route paths
+  //     • <MapFilters />     → status chips (Active / Upcoming / Delayed / Completed)
+  //     • <MetricsDrawer />  → collapsible side panel summarizing visible state
+  //     • <RouteTooltip />,
+  //       <PinnedRouteCard /> → hover preview + click-to-pin info card
+  //   Real Mapbox swap, when ready: provide a public token, lift the projection
+  //   helpers to the Mapbox `lng/lat` API, render the base layer with
+  //   <mapboxgl.Map style="mapbox://styles/mapbox/dark-v11"> and keep the
+  //   route/marker/tooltip code as overlays.
+  // =====================================================================
+  // LiveOperationsTileMap — MapLibre GL JS rendering CartoCDN `dark_all` raster
+  // tiles, EXACTLY matching jobsiteexchange.com's real map look (see
+  // map-recon.md for the tile URL we pulled out of their JS bundle). Overlays
+  // pickup/dropoff markers + bezier-style straight-line routes from the v12
+  // logistics fields. Falls back to the SVG `LiveOperationsMap` if MapLibre
+  // failed to load (e.g. CDN blocked) — keeps /admin shippable in any network
+  // condition. Geocoding via `db.geocode` pre-seeded cache (no live Nominatim
+  // calls on first render — see GEOCODE_SEED in Block 2).
+  // =====================================================================
 
   const LiveOperationsMap = () => {
     // -- Front Range projection. Viewport tuned to frame Denver metro +
@@ -5867,7 +5868,7 @@ function AdminProjects({ db, setDb, navigate }) {
 
       {/* Live Map + Site Conditions row */}
       <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[6] }}>
-        <LiveOperationsTileMap />
+        <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} FallbackMap={LiveOperationsMap} />
         <SiteConditionsCard />
       </div>
 
