@@ -2628,6 +2628,43 @@ function hydrateDb(raw) {
       preCascadeCounts[k] = Array.isArray(parsed[k]) ? parsed[k].length
         : (k === 'haulers' && Array.isArray(parsed.operators) ? parsed.operators.length : 0);
     }
+    // Data-integrity hardening (idempotent, runs every hydrate — including
+    // the schemaVersion-matches fast path below):
+    //   (a) Drop haulRequests[*].assignments[] entries whose truckId no longer
+    //       resolves in db.trucks. Phantom assignments cause downstream rollup
+    //       drift (loads/hours/dollars attributed to a truck that doesn't exist).
+    //   (b) Backfill db.loads[*].date when null/missing — older payloads may
+    //       have shipped without a date, breaking the today/week filters.
+    //       Falls back to YESTERDAY_ISO (the same convention v1→v2 used).
+    //   (c) Backfill db.invoices[*].amount when null/missing — older payloads
+    //       and seed rows compute the dollar total from lineItems on the fly
+    //       at render time, but the Supabase `invoices.amount` column was
+    //       always null. Sum lineItems[].amount once at hydrate so the
+    //       canonical store always carries the dollar total.
+    try {
+      const truckIds = new Set((parsed.trucks || []).map(t => t && t.id).filter(Boolean));
+      if (Array.isArray(parsed.haulRequests)) {
+        parsed.haulRequests = parsed.haulRequests.map(r => {
+          if (!r || !Array.isArray(r.assignments)) return r;
+          const cleaned = r.assignments.filter(a => a && truckIds.has(a.truckId));
+          if (cleaned.length === r.assignments.length) return r;
+          return { ...r, assignments: cleaned };
+        });
+      }
+      if (Array.isArray(parsed.loads)) {
+        parsed.loads = parsed.loads.map(l => {
+          if (!l || l.date) return l;
+          return { ...l, date: YESTERDAY_ISO };
+        });
+      }
+      if (Array.isArray(parsed.invoices)) {
+        parsed.invoices = parsed.invoices.map(inv => {
+          if (!inv || (inv.amount != null && !Number.isNaN(Number(inv.amount)))) return inv;
+          const sum = (inv.lineItems || []).reduce((s, li) => s + (Number(li && li.amount) || 0), 0);
+          return { ...inv, amount: parseFloat(sum.toFixed(2)) };
+        });
+      }
+    } catch (e) { /* hardening must never throw */ }
     if (parsed.schemaVersion === DB_SCHEMA_VERSION) return parsed;
     if (parsed.schemaVersion > DB_SCHEMA_VERSION) return seed;
     // Schema migration. Apply each forward-step in order:
@@ -3187,7 +3224,7 @@ const SB_FIELDS_JS = {
   // Cross-device load↔haul + hours↔haul assignment is now back in sync.
   loads:        ['id','driverId','truckId','projectId','haulRequestId','material','cy','ticketNo','time','date','status','photo','notes'],
   hours:        ['id','driverId','truckId','projectId','haulRequestId','clockIn','clockOut','breakMin','status','date'],
-  invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','notes'],
+  invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','amount','notes'],
   haulRequests: ['id','projectId','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
 };
@@ -8660,6 +8697,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
+    const totalAmount = parseFloat(lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0).toFixed(2));
     const prefix = kind === 'final' ? 'INV-FIN-' : 'INV-INT-';
     const invoiceId = 'inv-' + Date.now();
     const newInvoice = {
@@ -8674,6 +8712,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       lineItems,
       loadCount: (db.loads || []).filter(l => l && l.haulRequestId === req.id).length,
       totalCY: totalCYForInv,
+      amount: totalAmount,
       notes: '',
       status: 'draft',
       kind,
@@ -11014,6 +11053,7 @@ function AdminReporting({ db, setDb, navigate }) {
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
+    const totalAmount = parseFloat(lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0).toFixed(2));
     const nowIso = new Date().toISOString();
     const myTruckIdsForCount = new Set(myAssignments.map(a => a.truckId));
     const newInvoice = {
@@ -11026,6 +11066,7 @@ function AdminReporting({ db, setDb, navigate }) {
       lineItems,
       loadCount: (db.loads || []).filter(l => l && l.haulRequestId === req.id && myTruckIdsForCount.has(l.truckId)).length,
       totalCY: totalCYForInv,
+      amount: totalAmount,
       notes: '',
       status: 'draft',
     };
@@ -13944,7 +13985,7 @@ function HaulerShell({ db, setDb, navigate, hash }) {
     <div>
       <Topbar navigate={navigate} role="Hauler" current={current} right={<ChromeMenu navigate={navigate} />} />
       {parts.length === 1 && <HaulerLanding db={db} navigate={navigate} />}
-      {parts.length === 3 && parts[1] === 'o' && <HaulerHome haulerId={parts[2]} db={db} navigate={navigate} />}
+      {parts.length === 3 && parts[1] === 'o' && <HaulerHome haulerId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'p' && <HaulerProject haulerId={parts[2]} projectId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 7 && parts[5] === 't' && <HaulerTruckView haulerId={parts[2]} projectId={parts[4]} truckId={parts[6]} db={db} setDb={setDb} navigate={navigate} />}
     </div>
