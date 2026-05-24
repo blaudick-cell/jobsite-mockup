@@ -3181,20 +3181,12 @@ const SB_FIELDS_JS = {
   haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
   drivers:      ['id','name','phone'],
   trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
-  // NOTE: `haulRequestId` is intentionally omitted from `loads` + `hours`
-  // until the matching `ALTER TABLE ... ADD COLUMN haul_request_id` lands
-  // (see outputs/supabase-migrations-needed.md, 2026-05-23 entry). The
-  // column doesn't exist in Supabase yet; including it in the whitelist
-  // makes every loads/hours upsert 400 with PGRST204, which `syncDbToCloud`
-  // swallows silently — so every load + hours edit appears to save locally
-  // but is lost on the next refresh. Robert reported this as "any edit no
-  // longer saves correctly." Local JS state still tracks `haulRequestId`
-  // for in-session load↔haul assignment; cross-device sync of that
-  // assignment is the deferred trade-off until the column ships. Restore
-  // these entries (and bump DB_SCHEMA_VERSION to invalidate the cache)
-  // after Dispatch applies the migration.
-  loads:        ['id','driverId','truckId','projectId','material','cy','ticketNo','time','date','status','photo','notes'],
-  hours:        ['id','driverId','truckId','projectId','clockIn','clockOut','breakMin','status','date'],
+  // `haulRequestId` restored after Dispatch applied the matching
+  // `ALTER TABLE loads / hours ADD COLUMN haul_request_id` migrations
+  // (stopgap removal in c102511; column landed in Supabase since).
+  // Cross-device load↔haul + hours↔haul assignment is now back in sync.
+  loads:        ['id','driverId','truckId','projectId','haulRequestId','material','cy','ticketNo','time','date','status','photo','notes'],
+  hours:        ['id','driverId','truckId','projectId','haulRequestId','clockIn','clockOut','breakMin','status','date'],
   invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','notes'],
   haulRequests: ['id','projectId','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
