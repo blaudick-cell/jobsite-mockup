@@ -95,3 +95,27 @@ Your final report MUST include, in this order, every time:
 - Anything surprising
 
 If you cannot verify any of the above because of a tool limitation, say so explicitly. Do not paper over missing data with values from your memory.
+
+## Post-deploy SMOKE TEST (edit → refresh → verify persisted)
+
+Added 2026-05-23 in response to the data-revert RCA — etag flip + marker grep proved the bundle shipped but did NOT prove writes still round-tripped to Supabase. The bug went undetected for 24h+ because no one drove a real edit through the deployed bundle. This step closes that gap.
+
+Run this AFTER the etag/marker checks above, BEFORE you write the final report.
+
+**Tool selection.** Check whether Chrome MCP (`mcp__claude-in-chrome__*`) is available:
+- If yes → run the smoke test below.
+- If no → SKIP the smoke test, and in your report note prominently: "Smoke test skipped — Chrome MCP not connected; manual verification recommended."
+
+**Smoke test steps (Chrome MCP available):**
+
+1. `mcp__claude-in-chrome__navigate` to `https://jobsite-mockup-demo.netlify.app/#/admin/requests/hreq-001` (or any other known-stable haul-request id from the seed). Allow ~3s for hydrate.
+2. Read the current pickup location name via `get_page_text` or `find` — capture the original value verbatim (you'll restore it in step 6).
+3. Append a unique test marker to it: `· deploy-smoke-test-<unix-timestamp>`. Edit the field via `form_input` or `javascript_tool` (the field is an EditableText input — click to enter edit mode, type the new value, blur to commit).
+4. Wait ~3s for the optimistic write + Supabase round-trip to land.
+5. Hard-reload the page (`navigate` to the same URL — page reload re-runs `bootstrapCloud` and re-reads from Supabase).
+6. Read the field again. **Verify the test marker is still present.** If yes → write path is healthy. Then edit the field once more to restore the original value, and wait ~3s for the cleanup write to land.
+7. If the marker is GONE after refresh → the write was lost to Supabase. The deploy bundle is broken even though the etag flipped. Report verification **FAILED**, name the failure mode (e.g. "edit did not persist across reload — likely SB_FIELDS_JS / live-schema drift; check console for [supabase][schema-audit] errors"), and do NOT declare success. Dispatch reads the report and can decide to revert.
+
+**During the smoke test, also capture browser console output** via `read_console_messages`. Quote any `[supabase]` or `[hydrateDb][audit]` lines verbatim in the report — those are the new safeguards from this same RCA, and seeing them fire post-deploy is itself diagnostic data.
+
+**Failure flag.** If smoke test fails, your report's first line must be: `VERIFICATION FAILED — <reason>`. Do not bury this. Dispatch's revert path keys off it.
