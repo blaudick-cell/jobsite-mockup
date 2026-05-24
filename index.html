@@ -2464,6 +2464,43 @@ function dollarsForRequest(req, db) {
   }
   return total;
 }
+// v31: hauler-scoped rollup. Sums everything across haul requests where
+// any assignment.haulerId === haulerId. Returns the same metric family
+// AdminProjects + AdminHaulRequestDetail use (haulsCount/totalCY/
+// totalLoads/totalHours/totalRevenue), so the Hauler Dashboard and the
+// Hauler self-serve dashboard agree with the main dash penny-for-penny.
+// Replaces the legacy db.hours/db.loads roll-up that was drifting away
+// from haul-request-driven operational reality.
+function haulerRollupV31(haulerId, db) {
+  const out = { haulsCount: 0, totalCY: 0, totalLoads: 0, totalHours: 0, totalRevenue: 0 };
+  if (!haulerId || !db) return out;
+  const projectIds = new Set();
+  const reqs = (db.haulRequests || []).filter(r =>
+    Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === haulerId)
+  );
+  for (const r of reqs) {
+    if (r.projectId) projectIds.add(r.projectId);
+    for (const a of (r.assignments || [])) {
+      if (!a || a.haulerId !== haulerId) continue;
+      const truck = (db.trucks || []).find(t => t.id === a.truckId);
+      const rate = (truck && truck.ratePerHour != null)
+        ? truck.ratePerHour
+        : ((truck && db.rates && db.rates[truck.type]) || 0);
+      for (const d of (a.days || [])) {
+        const dh = typeof d.hours === 'number' ? d.hours : 0;
+        out.totalHours += dh;
+        out.totalRevenue += dh * rate;
+        if (Array.isArray(d.loads)) {
+          out.totalLoads += d.loads.length;
+          for (const l of d.loads) out.totalCY += Number(l.cy) || 0;
+        }
+      }
+    }
+  }
+  out.haulsCount = projectIds.size;
+  return out;
+}
+
 function assignedTruckCountForRequest(req) {
   if (!req || !Array.isArray(req.assignments)) return 0;
   const ids = new Set();
@@ -9667,8 +9704,18 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     }
   };
   const truckTypeOptions = TRUCK_TYPES.map(tt => ({ value: tt.code, label: tt.label }));
-  const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  const totalRevenue = hours.reduce((s, h) => {
+  // v31: canonical hauler rollup — same formula family as AdminProjects.
+  // Legacy db.hours / db.loads totals were drifting from reality because
+  // operational data is being entered through haul_requests.assignments.
+  // Kept the `legacy*` shadows in case a downstream UI still reads them.
+  const haulerRollup = haulerRollupV31(hauler.id, db);
+  const totalHours = haulerRollup.totalHours;
+  const totalRevenue = haulerRollup.totalRevenue;
+  const totalCYDelivered = haulerRollup.totalCY;
+  const totalLoadsCount = haulerRollup.totalLoads;
+  const haulsCount = haulerRollup.haulsCount;
+  const legacyTotalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  const legacyTotalRevenue = hours.reduce((s, h) => {
     const t = trucks.find(x => x.id === h.truckId);
     return s + calcHours(h.clockIn, h.breakMin, h.clockOut) * (t ? db.rates[t.type] : 0);
   }, 0);
@@ -9914,10 +9961,10 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Hauls" value={projects.length} /></Card>
+        <Card padding={S[4]}><Stat label="Hauls" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul request` : 'assigned'} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
-        <Card padding={S[4]}><Stat label="Loads" value={loads.filter(l => l.status === 'approved').length} sub={`${loads.filter(l => l.status === 'pending').length} pending`} /></Card>
-        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs`} /></Card>
+        <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
+        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
       </div>
 
       {/* Trucks under this hauler — moved to top of the page, inline-editable, with Edit/Remove. */}
@@ -11857,7 +11904,13 @@ function HaulerHome({ haulerId, db, navigate }) {
   const myTruckIds = new Set(myTrucks.map(t => t.id));
   const myLoads = db.loads.filter(l => myTruckIds.has(l.truckId));
   const myHours = db.hours.filter(h => myTruckIds.has(h.truckId));
-  const totalHours = myHours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  // v31: canonical rollup so the hauler self-serve dash agrees with
+  // Admin's hauler detail page and the per-truck card on AdminHaulRequestDetail.
+  const haulerRollup = haulerRollupV31(op.id, db);
+  const totalHours = haulerRollup.totalHours;
+  const totalLoadsCount = haulerRollup.totalLoads;
+  const totalCYDelivered = haulerRollup.totalCY;
+  const haulsCount = Math.max(haulerRollup.haulsCount, (op.projectIds || []).length);
   const activeTrucks = myTrucks.filter(t => t.driverId && myHours.some(h => h.truckId === t.id && h.status === 'open')).length;
   const pendingCount = myLoads.filter(l => l.status === 'pending').length + myHours.filter(h => h.status === 'pending').length;
 
@@ -11879,9 +11932,9 @@ function HaulerHome({ haulerId, db, navigate }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Hauls" value={projects.length} sub="assigned" /></Card>
+        <Card padding={S[4]}><Stat label="Hauls" value={haulsCount} sub="assigned" /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={myTrucks.length} sub={`${activeTrucks} active`} /></Card>
-        <Card padding={S[4]}><Stat label="Loads" value={myLoads.filter(l => l.status === 'approved').length} sub={`${myLoads.filter(l => l.status === 'pending').length} pending`} /></Card>
+        <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(totalHours)} /></Card>
       </div>
 
