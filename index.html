@@ -3285,7 +3285,7 @@ async function bootstrapCloud(localDb) {
     }
     return { status: 'online', db: assembled, reason: didSeed ? 'seeded' : 'fetched' };
   } catch (e) {
-    console.warn('[jse] cloud bootstrap failed; offline mode:', e);
+    SyncErrorBus.push('bootstrap', 'fetch', e);
     return { status: 'offline', db: localDb, reason: 'fetch-failed' };
   }
 }
@@ -3412,9 +3412,34 @@ function diffArrayById(oldArr, newArr) {
   return { toUpsert, toDelete };
 }
 
+// SyncErrorBus: module-level event emitter the UI subscribes to so Supabase
+// failures are surfaced (top-right pill + transient toast) instead of being
+// swallowed silently. Pre-RCA the entire write path used console.warn only,
+// so a 400/PGRST204 looked successful to the user while the change was lost
+// — Robert's "any edit no longer saves correctly" report. See
+// outputs/data-revert-rca.md and outputs/safeguards-2026-05-23.md.
+const SyncErrorBus = (() => {
+  const listeners = new Set();
+  const recent = []; // newest first; capped at 20
+  return {
+    push(table, op, err) {
+      const msg = err && (err.message || err.error_description) || String(err);
+      const entry = { table, op, message: msg, at: Date.now() };
+      recent.unshift(entry);
+      if (recent.length > 20) recent.length = 20;
+      console.error('[supabase]', table, op, err);
+      listeners.forEach(fn => { try { fn(entry, recent); } catch (e) {} });
+    },
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+    recent() { return recent.slice(); },
+  };
+})();
+
 // Diff prev/next db and push changed rows to Supabase. Fire-and-forget per
 // the brief — optimistic UI already updated by the time this runs. Errors
-// log to console (network flapping shouldn't spam toasts).
+// log to console.error AND fire through SyncErrorBus so the chrome pill +
+// toast surface them; we don't ever want a silent failure on the write path
+// again (RCA: outputs/data-revert-rca.md).
 async function syncDbToCloud(prev, next) {
   if (!_sb.ready) return;
   const tasks = [];
@@ -3433,15 +3458,11 @@ async function syncDbToCloud(prev, next) {
       // schema yet. Without this round-trip, the echo would overwrite the
       // local row, wiping `pausedAt` and snapping Driver Pause back to idle.
       toUpsert.forEach(r => markLocalWrite(jsKey, r.id, sbRowToJs(jsKey, jsRowToSb(jsKey, r))));
-      tasks.push(_sb.upsertRows(jsKey, toUpsert).catch(e => {
-        console.warn('[jse] upsert failed on ' + jsKey + ':', e);
-      }));
+      tasks.push(_sb.upsertRows(jsKey, toUpsert).catch(e => SyncErrorBus.push(jsKey, 'upsert', e)));
     }
     if (toDelete.length > 0) {
       toDelete.forEach(id => markLocalWrite(jsKey, id, null));
-      tasks.push(_sb.deleteRows(jsKey, toDelete).catch(e => {
-        console.warn('[jse] delete failed on ' + jsKey + ':', e);
-      }));
+      tasks.push(_sb.deleteRows(jsKey, toDelete).catch(e => SyncErrorBus.push(jsKey, 'delete', e)));
     }
   }
 
@@ -3453,7 +3474,7 @@ async function syncDbToCloud(prev, next) {
     }
     if (Object.keys(changed).length > 0) {
       Object.entries(changed).forEach(([k, v]) => markLocalWrite('rates', k, { truck_type: k, rate_per_hour: v }));
-      tasks.push(_sb.upsertRates(changed).catch(e => console.warn('[jse] rates upsert failed:', e)));
+      tasks.push(_sb.upsertRates(changed).catch(e => SyncErrorBus.push('rates', 'upsert', e)));
     }
   }
 
@@ -3461,7 +3482,7 @@ async function syncDbToCloud(prev, next) {
   if (prev.activityLastReadAt !== next.activityLastReadAt) {
     markLocalWrite('meta', 'activity_last_read_at', next.activityLastReadAt);
     tasks.push(_sb.upsertMeta('activity_last_read_at', next.activityLastReadAt || 0)
-      .catch(e => console.warn('[jse] meta upsert failed:', e)));
+      .catch(e => SyncErrorBus.push('meta', 'upsert', e)));
   }
 
   // Don't await — let React continue. Errors already swallowed per-task.
@@ -14587,6 +14608,90 @@ const RemoteUpdateContext = React.createContext(0);
 // while bootstrapping ("Syncing...") and when the cloud is unreachable
 // ("Offline — local cache only"). Phase 3 also reuses this for the
 // "couldn't save to cloud" toast when a write fails.
+// SyncErrorOverlay: top-right pill that surfaces Supabase write/read failures
+// in-app. Companion to CloudStatusChip (bottom-right). Two surfaces:
+//   - persistent pill: "Last sync error Ns ago — tap for details" with a
+//     count badge; clicking expands a panel listing recent errors.
+//   - transient toast: when a new error arrives, a single auto-dismiss
+//     pop-up (6s) shows "Couldn't save change to <table> — see console".
+//     Coalesced — additional errors within the toast window update the
+//     same toast and bump a "+N more" suffix rather than stacking.
+// Subscribes to SyncErrorBus at the module level; rendered inside <App/>.
+function SyncErrorOverlay() {
+  const [errors, setErrors] = React.useState(SyncErrorBus.recent());
+  const [expanded, setExpanded] = React.useState(false);
+  const [toast, setToast] = React.useState(null); // { table, count, at }
+  const [, tick] = React.useState(0);
+  const toastTimerRef = React.useRef(null);
+  React.useEffect(() => {
+    const unsub = SyncErrorBus.subscribe((entry, recent) => {
+      setErrors(recent.slice());
+      setToast(prev => {
+        const now = Date.now();
+        if (prev && (now - prev.at) < 6000) {
+          return { table: entry.table, count: prev.count + 1, at: prev.at };
+        }
+        return { table: entry.table, count: 1, at: now };
+      });
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => setToast(null), 6000);
+    });
+    return () => { unsub(); if (toastTimerRef.current) clearTimeout(toastTimerRef.current); };
+  }, []);
+  // Refresh the "Ns ago" label on the pill once per second when there's an error.
+  React.useEffect(() => {
+    if (errors.length === 0) return;
+    const id = setInterval(() => tick(n => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [errors.length]);
+  if (errors.length === 0 && !toast) return null;
+  const latest = errors[0];
+  const secondsAgo = latest ? Math.max(0, Math.round((Date.now() - latest.at) / 1000)) : 0;
+  return (
+    <React.Fragment>
+      {latest && (
+        <div style={{
+          position: 'fixed', top: 16, right: 16, zIndex: 9100,
+          maxWidth: expanded ? 420 : 260,
+          padding: '8px 14px', borderRadius: 12,
+          background: 'rgba(231, 111, 81, 0.14)', border: '1px solid rgba(231, 111, 81, 0.6)',
+          color: '#E76F51', fontFamily: 'ui-monospace, "JetBrains Mono", monospace', fontSize: 12,
+          letterSpacing: 0.2, backdropFilter: 'blur(8px)',
+          boxShadow: '0 4px 18px rgba(0,0,0,0.35)', cursor: 'pointer',
+        }} role="status" aria-live="polite" onClick={() => setExpanded(e => !e)}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: '#E76F51' }} />
+            <span>{errors.length} sync error{errors.length === 1 ? '' : 's'} — last {secondsAgo}s ago</span>
+            <span style={{ opacity: 0.6 }}>{expanded ? '▴' : '▾'}</span>
+          </div>
+          {expanded && (
+            <ul style={{ margin: '8px 0 0', padding: 0, listStyle: 'none', maxHeight: 220, overflowY: 'auto' }}>
+              {errors.slice(0, 10).map((e, i) => (
+                <li key={i} style={{ padding: '4px 0', borderTop: i === 0 ? 'none' : '1px solid rgba(231, 111, 81, 0.25)' }}>
+                  <div style={{ fontWeight: 600 }}>{e.table} · {e.op}</div>
+                  <div style={{ opacity: 0.85, wordBreak: 'break-word' }}>{e.message}</div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 9101,
+          padding: '10px 18px', borderRadius: 999,
+          background: 'rgba(15, 17, 21, 0.92)', border: '1px solid rgba(231, 111, 81, 0.55)',
+          color: '#FAFAFA', fontFamily: 'ui-monospace, "JetBrains Mono", monospace', fontSize: 12,
+          letterSpacing: 0.2, boxShadow: '0 6px 24px rgba(0,0,0,0.45)',
+          pointerEvents: 'none',
+        }} role="alert" aria-live="assertive">
+          Couldn't save change to {toast.table} — see console{toast.count > 1 ? ` (+${toast.count - 1} more)` : ''}
+        </div>
+      )}
+    </React.Fragment>
+  );
+}
+
 function CloudStatusChip({ status, message }) {
   if (status === 'online') return null;
   const palette = status === 'offline'
@@ -14809,6 +14914,7 @@ function App() {
         {route === 'hauler' && <HaulerShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'driver' && <DriverShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         <CloudStatusChip status={cloudStatus} />
+        <SyncErrorOverlay />
       </div>
     </RemoteUpdateContext.Provider>
   );
