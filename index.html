@@ -2778,11 +2778,23 @@ function hydrateDb(raw) {
     // against an old hauler id are still attached to a real hauler after
     // migration. New rows referencing the kept ids (op-001..op-006) pass
     // through untouched.
+    //
+    // IDEMPOTENCY GUARD (RCA outputs/data-revert-rca.md): the cascade re-runs
+    // from v1 whenever `parsed.schemaVersion < DB_SCHEMA_VERSION`, so we have
+    // to detect "already at v15 shape" and skip the destructive reset.
+    // Without this, every page load wipes user hauler edits + resurrects
+    // deleted haulers. v15-shape = at least one hauler whose id is in the
+    // canonical seed and no legacy op-007..op-010 ids remain.
     try {
       const HAULER_ID_REMAP = { 'op-007': 'op-001', 'op-008': 'op-002', 'op-009': 'op-003', 'op-010': 'op-004' };
       const remap = (id) => (id && HAULER_ID_REMAP[id]) || id;
       const haulerNameById = (id) => { const h = HAULERS_SEED.find(x => x.id === id); return h ? h.name : null; };
-      out.haulers = HAULERS_SEED;
+      const seedIds = new Set(HAULERS_SEED.map(h => h.id));
+      const haulersArr = Array.isArray(out.haulers) ? out.haulers : [];
+      const hasLegacyId = haulersArr.some(h => h && (h.id in HAULER_ID_REMAP));
+      const hasAnySeedId = haulersArr.some(h => h && seedIds.has(h.id));
+      const alreadyV15 = haulersArr.length > 0 && !hasLegacyId && hasAnySeedId;
+      if (!alreadyV15) out.haulers = HAULERS_SEED;
       if (Array.isArray(out.trucks)) {
         out.trucks = out.trucks.map(t => {
           if (!t || typeof t !== 'object') return t;
@@ -2815,11 +2827,21 @@ function hydrateDb(raw) {
     // (same hauler may have had ['WP','GW'] which both → 'RG'). Wrapped in
     // try/catch so any v16 throw falls through to the v15 shape rather than
     // blanking state.
+    //
+    // IDEMPOTENCY GUARD (RCA outputs/data-revert-rca.md): skip the
+    // destructive reset if `out.projects` already has v16+ ids and no legacy
+    // ones. Without this guard, user project edits (HAS/NEEDS direction,
+    // contact, address, etc.) revert on every page load.
     try {
       const PROJECT_ID_REMAP = { 'WP': 'RG', 'GW': 'RG', 'CH': 'GE', 'AS': 'GE' };
       const pmap = (id) => (id && PROJECT_ID_REMAP[id]) || id;
       const remapArr = (arr) => Array.isArray(arr) ? [...new Set(arr.map(pmap))] : arr;
-      out.projects = PROJECTS_SEED;
+      const seedProjectIds = new Set(PROJECTS_SEED.map(p => p.id));
+      const projectsArr = Array.isArray(out.projects) ? out.projects : [];
+      const hasLegacyPid = projectsArr.some(p => p && (p.id in PROJECT_ID_REMAP));
+      const hasAnySeedPid = projectsArr.some(p => p && seedProjectIds.has(p.id));
+      const alreadyV16 = projectsArr.length > 0 && !hasLegacyPid && hasAnySeedPid;
+      if (!alreadyV16) out.projects = PROJECTS_SEED;
       if (Array.isArray(out.haulers)) {
         out.haulers = out.haulers.map(h => (h && Array.isArray(h.projectIds)) ? { ...h, projectIds: remapArr(h.projectIds) } : h);
       }
@@ -3237,6 +3259,18 @@ async function bootstrapCloud(localDb) {
       [tableArrays, cloudRates, cloudMeta, cloudMats] = await fetchAllCloud();
     }
     const assembled = assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb);
+    // Auto-bump cloud meta.schema_version once the migration cascade has
+    // run on this device. Without this, every new deploy bumps
+    // DB_SCHEMA_VERSION but cloud meta stays at the old value, and the
+    // cascade re-runs from v1 on every page load — re-triggering any
+    // not-fully-idempotent step (see outputs/data-revert-rca.md). Fire-
+    // and-forget; errors are non-fatal.
+    if (typeof cloudMeta.schema_version === 'number'
+        && cloudMeta.schema_version !== DB_SCHEMA_VERSION
+        && cloudMeta.schema_version < DB_SCHEMA_VERSION) {
+      _sb.upsertMeta('schema_version', DB_SCHEMA_VERSION)
+        .catch(e => console.warn('[jse] schema_version auto-bump failed:', e));
+    }
     return { status: 'online', db: assembled, reason: didSeed ? 'seeded' : 'fetched' };
   } catch (e) {
     console.warn('[jse] cloud bootstrap failed; offline mode:', e);
@@ -3310,26 +3344,42 @@ function assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb) {
 
 // ---- Phase 3: write path -----------------------------------------------
 // Per-tab map of recent local writes — used to skip Realtime echoes of
-// changes this tab just made. Key: `${jsKey}:${rowKey}`. Value: { value,
-// expiresAt }. Entries expire after 10s; any postgres_changes payload
-// arriving during that window whose value deep-equals our snapshot is
-// treated as our own echo and dropped.
+// changes this tab just made. Key: `${jsKey}:${rowKey}`. Value: Array of
+// { value, expiresAt }. Multi-slot history per row so rapid edits to the
+// same row each leave a snapshot — without this, the second edit's snapshot
+// overwrites the first, and the first's echo gets mis-classified as a
+// remote change and applied via setDbRaw (overwriting the latest state with
+// stale data — see outputs/data-revert-rca.md fix #3). Entries expire after
+// 10s.
 const recentLocalWrites = new Map();
 const RECENT_WRITE_TTL_MS = 10000;
+const RECENT_WRITE_MAX_SLOTS = 20; // hard cap so a runaway typer can't blow memory
 
 function markLocalWrite(jsKey, rowKey, value) {
-  recentLocalWrites.set(jsKey + ':' + rowKey, {
-    value, expiresAt: Date.now() + RECENT_WRITE_TTL_MS,
-  });
+  const k = jsKey + ':' + rowKey;
+  const now = Date.now();
+  const expiresAt = now + RECENT_WRITE_TTL_MS;
+  const list = recentLocalWrites.get(k) || [];
+  // Prune expired snapshots before appending.
+  const live = list.filter(e => e.expiresAt > now);
+  live.push({ value, expiresAt });
+  // Cap. Drop oldest if we're over the slot limit.
+  if (live.length > RECENT_WRITE_MAX_SLOTS) live.splice(0, live.length - RECENT_WRITE_MAX_SLOTS);
+  recentLocalWrites.set(k, live);
 }
 function isLocalEcho(jsKey, rowKey, incomingValue) {
   const k = jsKey + ':' + rowKey;
-  const entry = recentLocalWrites.get(k);
-  if (!entry) return false;
-  if (Date.now() > entry.expiresAt) { recentLocalWrites.delete(k); return false; }
-  // Deep-equal compare; null on both sides means "we just deleted this row,
-  // and Realtime is echoing the same delete."
-  return jsonEq(entry.value, incomingValue);
+  const list = recentLocalWrites.get(k);
+  if (!list || list.length === 0) return false;
+  const now = Date.now();
+  const live = list.filter(e => e.expiresAt > now);
+  if (live.length === 0) { recentLocalWrites.delete(k); return false; }
+  // Match against ANY live snapshot. null on both sides means "we just
+  // deleted this row, and Realtime is echoing the same delete."
+  const match = live.some(e => jsonEq(e.value, incomingValue));
+  // Keep the live list around (other echoes for this row may still arrive).
+  recentLocalWrites.set(k, live);
+  return match;
 }
 function jsonEq(a, b) {
   if (a === b) return true;
