@@ -15496,7 +15496,15 @@ function App() {
   const lastSerializedRef = useRef(null);
   useEffect(() => {
     try {
-      const serialized = JSON.stringify(db);
+      // EXCLUDE db.routes and db.geocode from the cross-tab/local persist
+      // payload. They're memory-only caches (never synced to Supabase) and
+      // including them caused a flicker war with peer tabs: every cache
+      // update bumped the serialized payload, fired a storage event in the
+      // peer, the peer's setDbRaw(hydrate(...)) replaced the peer's caches
+      // with ours, peer's persist wrote back, and the route-total caption
+      // oscillated at the broadcast cadence. Caches stay in-memory only.
+      const { routes: _r, geocode: _g, ...persistable } = db;
+      const serialized = JSON.stringify(persistable);
       if (lastSerializedRef.current === serialized) return;
       lastSerializedRef.current = serialized;
       window.localStorage.setItem(DB_STORAGE_KEY, serialized);
@@ -15584,30 +15592,32 @@ function App() {
     const onStorage = (e) => {
       if (e.key !== DB_STORAGE_KEY) return;
       const hydrated = hydrateDb(e.newValue);
-      // Preserve our own local-only caches (db.geocode + db.routes) across
-      // cross-tab storage events. These caches aren't synced to Supabase and
-      // shouldn't follow peer state — if a peer on a stale bundle broadcasts
-      // its serialized db (with its own narrower route cache), taking that
-      // narrower cache would drop entries we'd just fetched, the async fetch
-      // effect would re-fetch them, peer would override again, and the route
-      // total would flicker at the broadcast cadence (2026-05-24 flicker
-      // RCA, GC-disable commit). Merge: keep our entries, layer peer's on
-      // top so brand-new keys still propagate.
-      setDbRaw(prev => {
-        const next = { ...hydrated };
-        if (prev && prev.geocode) next.geocode = { ...hydrated.geocode, ...prev.geocode };
-        if (prev && prev.routes)  next.routes  = { ...hydrated.routes,  ...prev.routes };
-        return next;
-      });
+      // db.routes and db.geocode are memory-only caches (the persist write
+      // strips them too). Keep our local caches verbatim instead of taking
+      // whatever the peer's serialized state happens to carry — that's what
+      // produced the route-total flicker before the 2026-05-24 fix.
+      setDbRaw(prev => ({
+        ...hydrated,
+        geocode: (prev && prev.geocode) || hydrated.geocode,
+        routes:  (prev && prev.routes)  || hydrated.routes,
+      }));
       const nextSerialized = e.newValue == null ? null : JSON.stringify(hydrated);
       // Self-heal: if our hydrate migrated (or otherwise changed) the
       // incoming payload, write the migrated state back to localStorage so
       // peer tabs on stale cached bundles see the canonical value on their
       // next storage event.
       if (e.newValue != null && nextSerialized !== e.newValue) {
-        try { window.localStorage.setItem(DB_STORAGE_KEY, nextSerialized); } catch (e2) {}
+        try {
+          const { routes: _r, geocode: _g, ...persistable } = hydrated;
+          window.localStorage.setItem(DB_STORAGE_KEY, JSON.stringify(persistable));
+        } catch (e2) {}
       }
-      lastSerializedRef.current = nextSerialized;
+      // lastSerializedRef must reflect what our persist effect WILL serialize
+      // (without routes/geocode) so we don't double-write on the next render.
+      try {
+        const { routes: _r, geocode: _g, ...persistable } = hydrated;
+        lastSerializedRef.current = JSON.stringify(persistable);
+      } catch (e2) { lastSerializedRef.current = nextSerialized; }
       setRemoteUpdateNonce(n => n + 1);
     };
     window.addEventListener('storage', onStorage);
