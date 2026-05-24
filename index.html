@@ -3050,6 +3050,43 @@ function hydrateDb(raw) {
         out.routes = rOut;
       }
     } catch (e) { /* fall through with v18 shape; next hydrate retries */ }
+    // Idempotent geocode/routes GC — runs on every hydrate, drops cache
+    // entries no longer referenced by ANY project (address / pickup / dump),
+    // ANY hauler (address), or ANY haul request (pickup / dropoff, all
+    // statuses incl. completed). Preserves history; only sweeps truly
+    // orphaned addresses. Unlike the v18→v19 targeted list, this catches
+    // future orphans automatically as haul requests get deleted or
+    // re-addressed.
+    try {
+      const liveAddrs = new Set();
+      (out.projects || []).forEach(p => {
+        if (!p) return;
+        if (p.address) liveAddrs.add(p.address);
+        if (p.pickupLocation) liveAddrs.add(p.pickupLocation);
+        if (p.dumpLocation) liveAddrs.add(p.dumpLocation);
+      });
+      (out.haulers || []).forEach(h => { if (h && h.address) liveAddrs.add(h.address); });
+      (out.haulRequests || []).forEach(r => {
+        if (!r) return;
+        if (r.pickupLocation && r.pickupLocation.address) liveAddrs.add(r.pickupLocation.address);
+        if (r.dropoffLocation && r.dropoffLocation.address) liveAddrs.add(r.dropoffLocation.address);
+      });
+      if (out.geocode && typeof out.geocode === 'object') {
+        const gcOut = {};
+        for (const [addr, coord] of Object.entries(out.geocode)) {
+          if (liveAddrs.has(addr)) gcOut[addr] = coord;
+        }
+        out.geocode = gcOut;
+      }
+      if (out.routes && typeof out.routes === 'object') {
+        const rOut = {};
+        for (const [key, route] of Object.entries(out.routes)) {
+          const [pick, drop] = (key || '').split('|');
+          if (liveAddrs.has(pick) && liveAddrs.has(drop)) rOut[key] = route;
+        }
+        out.routes = rOut;
+      }
+    } catch (e) { /* GC must never throw — fall through with prior cache */ }
     // Post-cascade audit: did any guarded step accidentally wipe a live
     // table? Compares pre/post row counts on every HYDRATE_LIVE_DATA_TABLES
     // entry; flags the data-revert pattern (RCA outputs/data-revert-rca.md)
@@ -4612,46 +4649,51 @@ function AdminProjects({ db, setDb, navigate }) {
     const routesCache = (db && db.routes) || {};
     const resolveCoord = (addr) => (addr && geocode[addr]) || null;
 
-    const projectPoints = (db.projects || []).map(p => {
+    const projectPoints = useMemo(() => (db.projects || []).map(p => {
       const c = resolveCoord(p.address);
       if (!c) return null;
       return { id: 'proj-' + p.id, type: 'project', coord: c, label: p.name + ' · ' + (p.gc || ''), status: p.status || 'active' };
-    }).filter(Boolean);
+    }).filter(Boolean), [db.projects, db.geocode]);
 
     // v24: per-haul-REQUEST OSRM driving routes (replaces per-project routes).
     // Each req carries its own pickupLocation.address / dropoffLocation.address;
     // those addresses fall back to the parent project's pickupLocation /
-    // dumpLocation if the req hasn't been customized yet. Filter drops
-    // completed + closed hauls so the map only reflects work in flight.
-    // Color is driven by req status: 'pending' -> red, anything else (open /
-    // matched / accepted / active / approved / upcoming) -> green.
+    // dumpLocation if the req hasn't been customized yet. Filter to LIVE
+    // statuses only — drops completed/closed/cancelled so the map reflects
+    // work in flight. Color is driven by req status: 'pending' -> red,
+    // matched/accepted/active/approved/upcoming -> green.
     // v25: also drop reqs whose projectId no longer exists in db.projects —
     // defends the map against orphan-FK drift after project deletes.
-    const projectById = new Map((db.projects || []).map(p => [p.id, p]));
-    const reqRoutes = (db.haulRequests || []).map(req => {
-      if (!req) return null;
-      if (req.status === 'completed' || req.status === 'closed') return null;
-      if (!projectById.has(req.projectId)) return null;
-      const proj = projectById.get(req.projectId) || null;
-      const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
-      const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
-      if (!pickAddr || !dumpAddr) return null;
-      const key = pickAddr + '|' + dumpAddr;
-      const cached = routesCache[key];
-      const pick = resolveCoord(pickAddr);
-      const dump = resolveCoord(dumpAddr);
-      const isPending = req.status === 'pending';
-      const reqStatus = isPending ? 'pending' : 'active';
-      const lineId = req.id;
-      const label = (proj ? proj.name : '') + ' · ' + (req.volumeCY != null ? req.volumeCY + ' CY' : '');
-      if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
-        return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
-      }
-      if (pick && dump) {
-        return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
-      }
-      return null;
-    }).filter(Boolean);
+    // v26: explicit LIVE_STATUSES allowlist; memoize derived arrays so the
+    // markers effect doesn't re-render on unrelated db churn.
+    const LIVE_STATUSES = new Set(['pending', 'matched', 'accepted', 'active', 'approved', 'open', 'upcoming']);
+    const reqRoutes = useMemo(() => {
+      const projectById = new Map((db.projects || []).map(p => [p.id, p]));
+      return (db.haulRequests || []).map(req => {
+        if (!req) return null;
+        if (!LIVE_STATUSES.has(req.status)) return null;
+        if (!projectById.has(req.projectId)) return null;
+        const proj = projectById.get(req.projectId) || null;
+        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
+        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+        if (!pickAddr || !dumpAddr) return null;
+        const key = pickAddr + '|' + dumpAddr;
+        const cached = routesCache[key];
+        const pick = resolveCoord(pickAddr);
+        const dump = resolveCoord(dumpAddr);
+        const isPending = req.status === 'pending';
+        const reqStatus = isPending ? 'pending' : 'active';
+        const lineId = req.id;
+        const label = (proj ? proj.name : '') + ' · ' + (req.volumeCY != null ? req.volumeCY + ' CY' : '');
+        if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
+          return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
+        }
+        if (pick && dump) {
+          return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
+        }
+        return null;
+      }).filter(Boolean);
+    }, [db.haulRequests, db.projects, db.geocode, db.routes]);
 
     // Endpoints (pickup + dump markers) per project, derived from the same
     // address pair. Per Robert: drop the marker for the endpoint that IS the
@@ -4662,20 +4704,23 @@ function AdminProjects({ db, setDb, navigate }) {
     // edits later don't reintroduce the self-pin.
     // Dedupe by coord so two projects sharing an off-site address don't
     // double-render.
-    const norm = s => (s || '').trim().toLowerCase();
-    const projectEndpoints = [];
-    const seenEndpoint = new Set();
-    reqRoutes.forEach(rt => {
-      const projN = norm(rt.projectAddress);
-      if (rt.pick && norm(rt.pickAddr) !== projN) {
-        const k = rt.pickAddr;
-        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.reqStatus }); }
-      }
-      if (rt.dump && norm(rt.dumpAddr) !== projN) {
-        const k = rt.dumpAddr;
-        if (!seenEndpoint.has(k)) { seenEndpoint.add(k); projectEndpoints.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.reqStatus }); }
-      }
-    });
+    const projectEndpoints = useMemo(() => {
+      const norm = s => (s || '').trim().toLowerCase();
+      const out = [];
+      const seenEndpoint = new Set();
+      reqRoutes.forEach(rt => {
+        const projN = norm(rt.projectAddress);
+        if (rt.pick && norm(rt.pickAddr) !== projN) {
+          const k = rt.pickAddr;
+          if (!seenEndpoint.has(k)) { seenEndpoint.add(k); out.push({ id: rt.id + '-p', type: 'pickup', coord: rt.pick, label: rt.pickAddr, status: rt.reqStatus }); }
+        }
+        if (rt.dump && norm(rt.dumpAddr) !== projN) {
+          const k = rt.dumpAddr;
+          if (!seenEndpoint.has(k)) { seenEndpoint.add(k); out.push({ id: rt.id + '-d', type: 'dump', coord: rt.dump, label: rt.dumpAddr, status: rt.reqStatus }); }
+        }
+      });
+      return out;
+    }, [reqRoutes]);
 
     // Stable signature for the SOURCE-DATA effect: changes whenever a route's
     // coord list grows (e.g., OSRM completed and replaced the 2-pt straight
@@ -4697,11 +4742,11 @@ function AdminProjects({ db, setDb, navigate }) {
     // glance where each hauler is based. Skips haulers whose address
     // hasn't been geocoded yet (Nominatim falls through for any address
     // edited via EditableText but not yet resolved).
-    const haulerPoints = (db.haulers || []).map(h => {
+    const haulerPoints = useMemo(() => (db.haulers || []).map(h => {
       const c = resolveCoord(h.address);
       if (!c) return null;
       return { id: 'hauler-' + h.id, type: 'hauler', coord: c, label: h.name + (h.address ? ' · ' + h.address : '') };
-    }).filter(Boolean);
+    }).filter(Boolean), [db.haulers, db.geocode]);
     const haulersSignature = haulerPoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5)).join('|');
 
     // Pending-route signature for the ASYNC-FETCH effect: changes when the set
@@ -4710,8 +4755,10 @@ function AdminProjects({ db, setDb, navigate }) {
     // v24: pendingKey now scans haul REQUESTS for un-cached routes.
     const pendingKey = (() => {
       const keys = new Set();
+      const projectById = new Map((db.projects || []).map(p => [p.id, p]));
       (db.haulRequests || []).forEach(req => {
-        if (!req || req.status === 'completed' || req.status === 'closed') return;
+        if (!req) return;
+        if (!LIVE_STATUSES.has(req.status)) return;
         if (!projectById.has(req.projectId)) return;
         const proj = projectById.get(req.projectId);
         const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
@@ -4733,8 +4780,10 @@ function AdminProjects({ db, setDb, navigate }) {
       (async () => {
         const seen = new Set();
         const pairs = [];
+        const projectById = new Map((db.projects || []).map(p => [p.id, p]));
         (db.haulRequests || []).forEach(req => {
-          if (!req || req.status === 'completed' || req.status === 'closed') return;
+          if (!req) return;
+          if (!LIVE_STATUSES.has(req.status)) return;
           if (!projectById.has(req.projectId)) return;
           const proj = projectById.get(req.projectId);
           const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
