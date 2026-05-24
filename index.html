@@ -4372,6 +4372,8 @@ function SiteConditionsCard() {
 // ADMIN
 // =====================================================================
 function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
+    if (!window.__lomRenderCount) window.__lomRenderCount = 0;
+    window.__lomRenderCount++;
     const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
     const containerRef = useRef(null);
     const mapRef = useRef(null);
@@ -4716,8 +4718,12 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     }, [endpointsSignature, haulersSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
-      if (!mlAvailable || !containerRef.current) return;
-      if (mapRef.current) return;
+      if (!window.__lomMapInitFires) window.__lomMapInitFires = 0;
+      window.__lomMapInitFires++;
+      if (!mlAvailable || !containerRef.current) { window.__lomMapInitSkippedGuardA = (window.__lomMapInitSkippedGuardA || 0) + 1; return; }
+      if (mapRef.current) { window.__lomMapInitSkippedGuardB = (window.__lomMapInitSkippedGuardB || 0) + 1; return; }
+      if (!window.__lomMapInitReached) window.__lomMapInitReached = 0;
+      window.__lomMapInitReached++;
       const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
       const retina = dpr > 1 ? '@2x' : '';
       // Tile URL template matches jobsiteexchange.com's bundle exactly (per map-recon.md).
