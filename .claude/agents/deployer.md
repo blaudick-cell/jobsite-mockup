@@ -96,11 +96,35 @@ Your final report MUST include, in this order, every time:
 
 If you cannot verify any of the above because of a tool limitation, say so explicitly. Do not paper over missing data with values from your memory.
 
+## Boot check — must run FIRST (post-2026-05-24)
+
+Added in response to the `_excluded` Babel-collision incident: a destructuring rest pattern (`const { foo, ...rest } = obj`) added to App-scope code caused Babel-standalone to emit duplicate `const _excluded` declarations in the same `<script type="text/babel">` block, throwing a SyntaxError that bricked the entire React boot — page stuck on "Loading prototype…" forever. Etag flip + marker grep + render-stability spy ALL passed because they don't drive the actual page, only inspect the static bundle. The flicker fix that introduced the regression went live for ~10 minutes before Dispatch reopened the session.
+
+Run AFTER the etag/marker grep, BEFORE the edit/refresh smoke test. Same Chrome MCP availability rule applies.
+
+**Boot check steps (Chrome MCP available):**
+
+1. `mcp__claude-in-chrome__navigate` to `https://jobsite-mockup-demo.netlify.app/#/admin`. Allow ~6s for Babel transform + React mount.
+2. Read the page via `javascript_tool`:
+   ```js
+   JSON.stringify({
+     h1: (document.querySelector('h1') || {}).textContent,
+     hasLOM: !!document.querySelector('.lom-tile-map'),
+     stuckOnLoading: document.body.innerText.includes('Loading prototype'),
+     rootChildren: document.getElementById('root')?.children?.length
+   })
+   ```
+3. Expected: `h1` is non-empty (e.g. "Hauling Control Center"), `stuckOnLoading` is `false`, `rootChildren >= 1`. If `stuckOnLoading` is `true` OR `h1` is null OR `rootChildren === 0` → boot is broken.
+4. ALSO call `mcp__claude-in-chrome__read_console_messages` with pattern `"SyntaxError|TypeError|Identifier|babel|_excluded"`. If anything matches, the bundle is parse-broken even if some DOM rendered.
+5. If boot is broken, your report's first line must be: `VERIFICATION FAILED — boot broken, page stuck on loading screen` (or quote the specific console error). Dispatch will revert. Do NOT run subsequent smoke/render-stability tests — they'll produce misleading "ok" signals against a half-mounted page.
+
+**Why this catches what the others missed.** Etag + marker grep verify the bundle DEPLOYED. Edit/refresh verifies WRITES persist. Render-stability verifies the MAP doesn't churn. NONE of those touch JS parse correctness — they assume the bundle parses. The boot check is the only test that actually asserts the React tree mounted at all.
+
 ## Post-deploy SMOKE TEST (edit → refresh → verify persisted)
 
 Added 2026-05-23 in response to the data-revert RCA — etag flip + marker grep proved the bundle shipped but did NOT prove writes still round-tripped to Supabase. The bug went undetected for 24h+ because no one drove a real edit through the deployed bundle. This step closes that gap.
 
-Run this AFTER the etag/marker checks above, BEFORE you write the final report.
+Run this AFTER the boot check above, BEFORE you write the final report.
 
 **Tool selection.** Check whether Chrome MCP (`mcp__claude-in-chrome__*`) is available:
 - If yes → run the smoke test below.
