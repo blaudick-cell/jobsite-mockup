@@ -3214,7 +3214,7 @@ const SB_TABLE_LIST = Object.keys(SB_TABLES);
 // we don't model (e.g. created_at, loads_target). Writes drop JS fields we
 // don't sync (defense against accidentally upserting derived values).
 const SB_FIELDS_JS = {
-  projects:     ['id','code','name','gc','address','startDate','status','material','haulType','contactName','contactPhone','contactEmail','volumeCYNeeded','volumeCYKnown','pickupLocation','dumpLocation'],
+  projects:     ['id','name','gc','address','startDate','status','material','haulType','contactName','contactPhone','contactEmail','volumeCYNeeded','volumeCYKnown','pickupLocation','dumpLocation'],
   haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
   drivers:      ['id','name','phone'],
   trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
@@ -5976,28 +5976,14 @@ function NotFound({ navigate }) {
 }
 function AdminNewProject({ db, setDb, navigate }) {
   const [step, setStep] = useState(1);
-  const [basics, setBasics] = useState({ name: '', code: '', gc: '', address: '', startDate: '', status: 'active', materials: [] });
+  const [basics, setBasics] = useState({ name: '', gc: '', address: '', startDate: '', status: 'active', materials: [] });
   const [haulerIds, setHaulerIds] = useState([]);
   const [trucks, setTrucks] = useState([]);
   const [onlyUnassigned, setOnlyUnassigned] = useState(false);
-  const [codeTouched, setCodeTouched] = useState(false);
 
   const inputStyle = WIZARD_INPUT_STYLE;
 
-  const deriveCode = (name) => {
-    const words = (name || '').trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return '';
-    if (words.length === 1) return words[0].replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase();
-    return words.map(w => w[0]).join('').replace(/[^A-Z0-9]/gi, '').slice(0, 4).toUpperCase();
-  };
-  const effectiveCode = codeTouched ? basics.code.toUpperCase() : deriveCode(basics.name);
-
-  const existingIds = new Set(db.projects.map(p => p.id));
-  const codeDuplicate = effectiveCode && existingIds.has(effectiveCode);
-  const duplicateOwner = codeDuplicate ? db.projects.find(p => p.id === effectiveCode) : null;
-  const codeValid = effectiveCode.length >= 2 && effectiveCode.length <= 4 && !codeDuplicate;
-
-  const basicsValid = !!basics.name.trim() && codeValid && !!basics.gc.trim() && !!basics.address.trim() && !!basics.startDate && basics.materials.length > 0;
+  const basicsValid = !!basics.name.trim() && !!basics.gc.trim() && !!basics.address.trim() && !!basics.startDate && basics.materials.length > 0;
   const haulersValid = haulerIds.length > 0;
   const trucksValid = trucks.every(t => t.haulerId && haulerIds.includes(t.haulerId));
 
@@ -6021,10 +6007,11 @@ function AdminNewProject({ db, setDb, navigate }) {
   const next = () => setStep(s => Math.min(4, s + 1));
 
   const submit = () => {
-    const id = effectiveCode;
+    const existingIds = new Set(db.projects.map(p => p.id));
+    let id;
+    do { id = 'proj-' + Math.random().toString(36).substring(2, 7); } while (existingIds.has(id));
     const newProject = {
       id,
-      code: id + '-' + String(db.projects.length + 1).padStart(2, '0'),
       name: basics.name.trim(),
       gc: basics.gc.trim(),
       address: basics.address.trim(),
@@ -6090,22 +6077,6 @@ function AdminNewProject({ db, setDb, navigate }) {
               <input value={basics.name} onChange={e => setBasics(b => ({ ...b, name: e.target.value }))} placeholder="e.g., West Side Phase 2" style={inputStyle} autoFocus />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
-              <div>
-                <div style={{ ...T.caption, marginBottom: 4 }}>Code (2–4 chars)</div>
-                <input value={effectiveCode} onChange={e => {
-                  const v = e.target.value;
-                  setCodeTouched(v.length > 0);
-                  setBasics(b => ({ ...b, code: v }));
-                }} placeholder="e.g., WSP" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={4} />
-                {codeDuplicate && (
-                  <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>
-                    Code "{effectiveCode}" is already used by "{duplicateOwner.name}".
-                  </div>
-                )}
-                {!codeDuplicate && effectiveCode && effectiveCode.length < 2 && (
-                  <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>Code must be at least 2 characters.</div>
-                )}
-              </div>
               <div>
                 <div style={{ ...T.caption, marginBottom: 4 }}>Start date</div>
                 <input type="date" value={basics.startDate} onChange={e => setBasics(b => ({ ...b, startDate: e.target.value }))} style={inputStyle} />
@@ -6237,7 +6208,6 @@ function AdminNewProject({ db, setDb, navigate }) {
               <Label style={{ marginBottom: S[2] }}>Basics</Label>
               <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
                 <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Name</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.name}</div></div>
-                <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Code</div><div style={{ fontFamily: F.mono, color: C.ink }}>{effectiveCode}</div></div>
                 <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>GC</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.gc}</div></div>
                 <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Address</div><div style={{ fontFamily: F.body, color: C.ink }}>{basics.address}</div></div>
                 <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Start date</div><div style={{ fontFamily: F.mono, color: C.ink }}>{basics.startDate}</div></div>
