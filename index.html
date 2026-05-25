@@ -6687,6 +6687,16 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
       </div>
 
+      {/* 2026-05-25: SiteConditionsCard re-mounted on the haul-requests
+          landing — was previously rendered from inside AdminProjects which
+          got deleted in the projects-drop (207a80f). NWS Denver forecast +
+          mud outlook + haul-condition recommendation. Component is
+          self-contained and takes no props. Above the KPI strip per the
+          legacy dashboard placement. */}
+      <div style={{ marginBottom: S[4] }}>
+        <SiteConditionsCard />
+      </div>
+
       {/* Operations KPI strip */}
       <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
         {kpis.map(k => (
