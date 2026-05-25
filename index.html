@@ -14240,6 +14240,13 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   // lightbox; `replacePhotoRef` is the hidden file input for replace/upload.
   const [photoFor, setPhotoFor] = useState(null);
   const replacePhotoRef = useRef(null);
+  // 2026-05-25: Open Field View drawer — the trucker widget for this specific
+  // truck, opened in a right-side overlay (no navigation). Keyed by the truck
+  // record, not a driver record — the brief says "the widget operates on a
+  // TRUCK". Renders DriverHome when the truck has a driver, DriverNoTruck
+  // otherwise (the empty-state still surfaces the truck so the operator can
+  // see they opened the right one).
+  const [fieldViewOpen, setFieldViewOpen] = useState(false);
   const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   const truck = db.trucks.find(t => t.id === truckId);
@@ -14466,18 +14473,18 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
           )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-          {driver ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-              <Avatar name={driver.name} size={36} />
-              <div>
-                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}>{driver.name}</div>
-                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim }}>{driver.phone}</div>
-              </div>
-              {isAdmin && (
-                <button onClick={() => navigate(`/driver/${driver.id}`)} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase', marginLeft: S[2] }}>Widget {'↗'}</button>
-              )}
-            </div>
-          ) : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">No driver</Pill>}
+          <button
+            onClick={() => setFieldViewOpen(true)}
+            title={`Open field view for truck #${truck.plate}`}
+            style={{
+              background: C.accentSoft, border: `1px solid ${C.accent}`, color: C.accent,
+              padding: '8px 14px', borderRadius: R.pill,
+              fontFamily: F.mono, fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+              textTransform: 'uppercase', cursor: 'pointer',
+            }}
+            onMouseEnter={e => { e.currentTarget.style.background = C.accent; e.currentTarget.style.color = C.bg; }}
+            onMouseLeave={e => { e.currentTarget.style.background = C.accentSoft; e.currentTarget.style.color = C.accent; }}
+          >Open Field View {'↗'}</button>
         </div>
       </div>
 
@@ -14723,6 +14730,52 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       )}
 
       <HaulerLogLoadForm truck={truck} driver={driver} project={project} db={db} setDb={setDb} />
+
+      {/* 2026-05-25: Field View drawer — slides in from the right and renders
+          the trucker widget for THIS truck (DriverHome if a driver is on the
+          truck, DriverNoTruck otherwise). Backdrop click + close button
+          dismiss. No navigation — the widget operates inline against the
+          shared `db` so loads/hours/photos round-trip to Supabase the same
+          way the /driver/<id> route does. */}
+      {fieldViewOpen && (
+        <div
+          role="dialog" aria-modal="true" aria-label={`Field view for truck #${truck.plate}`}
+          onClick={() => setFieldViewOpen(false)}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
+            display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end' }}
+        >
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{ width: '100%', maxWidth: 420, background: C.bg, borderLeft: `1px solid ${C.ruleHi}`,
+              boxShadow: '-24px 0 64px rgba(0,0,0,0.45)', display: 'flex', flexDirection: 'column',
+              overflow: 'hidden' }}
+          >
+            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`,
+              display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3] }}>
+              <div>
+                <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5 }}>FIELD VIEW</div>
+                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 700, color: C.ink }}>
+                  Truck <span style={{ color: C.accent }}>#{truck.plate}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setFieldViewOpen(false)}
+                aria-label="Close field view"
+                style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
+                  padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
+                  fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer' }}
+              >Close</button>
+            </div>
+            <div style={{ flex: 1, overflow: 'auto' }}>
+              <Phone>
+                {driver
+                  ? <DriverHome driver={driver} truck={truck} db={db} setDb={setDb} navigate={navigate} embedded />
+                  : <DriverNoTruck driver={{ name: `Truck #${truck.plate}` }} />}
+              </Phone>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -15303,13 +15356,12 @@ function DriverShell({ db, setDb, navigate, hash }) {
   const basePrefix = urlDriverId ? `/driver/${urlDriverId}` : '/driver';
   return (
     <Phone>
+      {/* 2026-05-25: no driver picker. The widget operates on a TRUCK; the
+          eyebrow shows the truck plate the shell is currently parked on. */}
       <div style={{ padding: '4px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <select value={drId} onChange={e => { setPickedId(e.target.value); navigate(urlDriverId ? `/driver/${e.target.value}` : '/driver'); }} style={{ background: 'transparent', color: C.inkFaint, border: 'none', padding: 0, fontFamily: F.mono, fontSize: 10 }}>
-          {db.drivers.map(d => {
-            const tc = db.trucks.filter(t => t.driverId === d.id).length;
-            return <option key={d.id} value={d.id} style={{ background: C.surface }}>Demo: {d.name}{tc > 1 ? ' (' + tc + ' trucks)' : ''}</option>;
-          })}
-        </select>
+        <span style={{ color: C.inkFaint, fontFamily: F.mono, fontSize: 10, letterSpacing: 0.4 }}>
+          {trucks.length === 1 ? `Truck #${trucks[0].plate}` : trucks.length > 1 ? `${trucks.length} trucks` : 'Field view'}
+        </span>
         <ChromeMenu navigate={navigate} compact />
       </div>
       {!driver && <DriverNoTruck driver={{ name: 'Unknown driver' }} />}
@@ -15644,7 +15696,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
         type: 'load.logged',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} quick-logged ${defaultCy} CY of ${materialLabel(material)} on #${truck.plate}`,
+        summary: `Truck #${truck.plate} quick-logged ${defaultCy} CY of ${materialLabel(material)}`,
         refId: newLoad.id,
       }
     ));
@@ -15714,7 +15766,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
         type: 'shift.started',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} clocked in on #${truck.plate}`,
+        summary: `Truck #${truck.plate} clocked in`,
         refId: truck.id,
       }
     ));
@@ -15762,7 +15814,7 @@ function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOp
         type: 'shift.ended',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} ended shift on #${truck.plate}`,
+        summary: `Truck #${truck.plate} ended shift`,
         refId: truck.id,
       }
     ));
@@ -15978,7 +16030,7 @@ function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo, onSubmitt
         type: 'load.logged',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)} on #${truck.plate}`,
+        summary: `Truck #${truck.plate} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)}`,
         refId: newLoad.id,
       }
     ));
@@ -16278,7 +16330,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
         type: 'load.logged',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} quick-logged ${defaultCy} CY of ${materialLabel(material)} on #${truck.plate}`,
+        summary: `Truck #${truck.plate} quick-logged ${defaultCy} CY of ${materialLabel(material)}`,
         refId: newLoad.id,
       }
     ));
@@ -16327,7 +16379,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
         type: 'shift.started',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} clocked in on #${truck.plate}`,
+        summary: `Truck #${truck.plate} clocked in`,
         refId: truck.id,
       }
     ));
@@ -16356,7 +16408,7 @@ function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedde
         type: 'shift.ended',
         actorRole: 'driver',
         actorId: driver.id,
-        summary: `${driver.name} ended shift on #${truck.plate}`,
+        summary: `Truck #${truck.plate} ended shift`,
         refId: truck.id,
       }
     ));
