@@ -1557,7 +1557,7 @@ const DRIVERS_SEED = [
   { id: 'dr-016', name: 'W. Stenberg', phone: '(303) 555-2116' },
 ];
 
-// Hauls (v3 collection) — incoming material-hauling needs that admins
+// Haul requests (v3 collection) — incoming material-hauling needs that admins
 // match to a hauler + truck. Status flows: pending → accepted (hauler opted in) /
 // matched (admin assigned, awaiting acceptance) → completed.
 // `matchedHaulerId` / `matchedTruckId` only populated for matched/accepted/completed.
@@ -2377,14 +2377,14 @@ function materialLabel(code) {
   return m ? m.label : code;
 }
 
-// Human-friendly label for a haul used wherever the raw `hreq-NNN` id
+// Human-friendly label for a haul request used wherever the raw `hreq-NNN` id
 // previously surfaced in the UI (breadcrumbs, page titles, list rows, headers,
 // activity summaries). Falls back to a volume+material string if the project
 // can't be resolved. The underlying id (e.g. `hreq-002`) is still kept on the
 // record and used for refIds, URLs, and refId-prefix routing — only the
 // user-visible chrome switches to this name.
 function haulRequestLabel(state, req) {
-  if (!req) return 'Haul';
+  if (!req) return 'Haul Request';
   const proj = state && state.projects ? state.projects.find(p => p.id === req.projectId) : null;
   const matName = materialLabel(req.materialCode);
   if (proj) return `${proj.name} · ${req.volumeCY} CY ${matName}`;
@@ -2394,7 +2394,7 @@ function haulRequestLabel(state, req) {
 // v22: HAS/NEEDS is the haul-direction signal (was on project.haulType only).
 // Derive from the project that owns the request. Falls back to 'NEEDS' so
 // the pill always renders and the toggle has a starting state.
-// === Total billed hours for one haul =============================
+// === Total billed hours for one haul request =============================
 // v32: canonical-store reads. Sums db.hours rows matched by haulRequestId.
 // Each db.hours row is a real shift (clockIn / clockOut / breakMin) — we
 // pass through calcHours() so partial shifts (open clockOut) use NOW_MIN
@@ -2734,7 +2734,7 @@ function hydrateDb(raw) {
     //            top of user data — only backfill the new fields.
     //  v12 → v13: backfill `haulRequestId: null` on every legacy invoice. The
     //            new per-hauler-per-haul invoicing in AdminReporting (Reports
-    //            tab) attaches generated invoices to a specific haul
+    //            tab) attaches generated invoices to a specific haul request
     //            via `haulRequestId`. Pre-v12 invoices stay project-scoped
     //            (null) and surface in legacy views only.
     const { operators: legacyOperators, ...rest } = parsed;
@@ -2789,7 +2789,7 @@ function hydrateDb(raw) {
       return withDefaults;
     };
     // v11 → v12: backfill logistics fields (pickup/dropoff/timing/siteAccess) on
-    // hauls. Defaults-first spread so any existing field wins. Also
+    // haul requests. Defaults-first spread so any existing field wins. Also
     // backfills nested shapes when only the parent key exists.
     const migrateHaulRequestLogistics = (r) => {
       if (!r || typeof r !== 'object') return r;
@@ -2826,7 +2826,7 @@ function hydrateDb(raw) {
         ? rest.hours.map(h => h ? { ...h, date: isoBackfill(h.date) } : h)
         : rest.hours,
       // v6 → v7: backfill `acceptedByDriver` / `passedBy` defaults on existing
-      // hauls. v7 → v8: synthesize `assignments[]` from legacy
+      // haul requests. v7 → v8: synthesize `assignments[]` from legacy
       // `matchedTruckId` so old-shape rows behave like the new multi-truck model.
       // Spread `r` last so a v8+ payload preserves real values (including a
       // populated `assignments`); only the legacy path builds a synthesized one.
@@ -2967,7 +2967,7 @@ function hydrateDb(raw) {
         });
       }
     } catch (e) { /* fall through with v16 shape */ }
-    // v17 → v18: link loads/hours to a specific haul via
+    // v17 → v18: link loads/hours to a specific haul request via
     // `haulRequestId`. db.loads + db.hours are now the canonical source of
     // truth for every load/hours surface; the legacy
     // req.assignments[].days[].loads/.hours fields stop being read. This
@@ -3053,7 +3053,7 @@ function hydrateDb(raw) {
     // the old bad value; any user-edited address survives untouched.
     //
     // Also GC the geocode + routes caches: drop entries no longer referenced
-    // by any project or any active haul. Reduces map.derivedPoints
+    // by any project or any active haul request. Reduces map.derivedPoints
     // surface area and keeps the localStorage payload small.
     try {
       // v18 → v19 swap: delegates to the module-scope migrateHaulRequestRow
@@ -5017,7 +5017,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         // v23: route click → popup widget → drill to project's request list.
         // Hovering switches cursor to pointer for affordance. Click opens
         // a MapLibre popup with a custom DOM widget; widget click navigates
-        // to /admin/hauls?projectId=<id> (closure-captured `navigate`).
+        // to /admin/requests?projectId=<id> (closure-captured `navigate`).
         const routeLayerIds = ['routes-lines', 'routes-lines-fallback'];
         routeLayerIds.forEach(layerId => {
           map.on('mouseenter', layerId, () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -5026,7 +5026,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
             try {
               const f = ev.features && ev.features[0];
               if (!f) return;
-              // v24: features now carry reqId (specific haul).
+              // v24: features now carry reqId (specific haul request).
               const reqId = (f.properties && (f.properties.reqId || f.properties.id)) || null;
               const projId = f.properties && f.properties.projectId;
               const req = reqId ? (db && db.haulRequests ? db.haulRequests : []).find(r => r.id === reqId) : null;
@@ -5056,7 +5056,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
               el.setAttribute('tabindex', '0');
               el.style.cssText = 'cursor:pointer;min-width:240px;max-width:300px;padding:10px 12px;background:#141414;border-radius:8px;border:1px solid #2A2A2A;color:#fff;font-family:Inter,sans-serif;line-height:1.35;';
               const escape = (s) => (s || '').toString().replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
-              const heading = proj ? proj.name : (req ? ('Haul ' + req.id) : 'Haul');
+              const heading = proj ? proj.name : (req ? ('Haul ' + req.id) : 'Haul Request');
               const subhead = proj ? proj.gc : '';
               el.innerHTML = ''
                 + '<div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:-0.2px;">' + escape(heading) + '</div>'
@@ -5065,9 +5065,9 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
                 +   '<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:' + pillSoft + ';color:' + pillColor + ';font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;line-height:1.1;">' + pillLabel + '</span>'
                 +   '<span style="font-size:13px;font-weight:600;color:#fff;">' + escape(qtyStr) + '</span>'
                 + '</div>'
-                + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul &rsaquo;</div>';
-              // v24: navigate to the SPECIFIC haul page.
-              const target = reqId ? ('/admin/hauls/' + reqId) : (projId ? ('/admin/hauls?projectId=' + projId) : '/admin/hauls');
+                + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul request &rsaquo;</div>';
+              // v24: navigate to the SPECIFIC haul request page.
+              const target = reqId ? ('/admin/requests/' + reqId) : (projId ? ('/admin/requests?projectId=' + projId) : '/admin/requests');
               el.addEventListener('click', (clickEv) => {
                 clickEv.stopPropagation();
                 try { popup.remove(); } catch (e) {}
@@ -5196,7 +5196,7 @@ function AdminProjects({ db, setDb, navigate }) {
     // Loads in transit ≈ open shifts on this project's trucks (a load is "in
     // flight" while a driver is clocked-in on it).
     const loadsInTransit = trucksActive;
-    // Hauls on this project — used for target volume + dispatch queue.
+    // Haul requests on this project — used for target volume + dispatch queue.
     const reqs = (db.haulRequests || []).filter(r => r.projectId === p.id);
     // targetCY = sum of live (non-completed, non-closed) reqs' volumeCY.
     // Live filter matches the HAS/NEEDS pill in the tile so the two displays
@@ -5257,10 +5257,10 @@ function AdminProjects({ db, setDb, navigate }) {
       : matCodes.includes('CR') ? 'Aggregate Import'
       : matCodes.includes('TS') ? 'Topsoil'
       : 'Transfer';
-    // Pickup / dump pulled off the first haul that carries them
+    // Pickup / dump pulled off the first haul request that carries them
     // (schema v12+, fields `pickupLocation` / `dropoffLocation` — each is an
     // { name, address } object). Render as a single line; fall back to the
-    // project address if no haul carries logistics yet.
+    // project address if no haul request carries logistics yet.
     const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
     const firstReq = reqs.find(r => fmtLoc(r.pickupLocation) || fmtLoc(r.dropoffLocation)) || {};
     const pickupLocation = fmtLoc(firstReq.pickupLocation) || p.address || '—';
@@ -5269,18 +5269,9 @@ function AdminProjects({ db, setDb, navigate }) {
     enriched.healthStatus = healthFor(enriched);
     return enriched;
   });
-  // 2026-05-25 IA rename: hide projects with zero haul records from the
-  // Project Overview tile list. Empty projects (created via the wizard but
-  // never had a haul attached) used to render NEEDS pills + zero CY and
-  // routed users to an empty Hauls list. Now they're suppressed; the
-  // Project Overview footer surfaces a "N project(s) hidden — create a
-  // haul to surface them" CTA so they're not lost.
-  const hasReqs = (p) => Array.isArray(p.reqs) && p.reqs.length > 0;
-  const emptyProjectCount = projects.filter(p => !hasReqs(p)).length;
-  const visibleProjects = projects.filter(hasReqs);
-  const active = visibleProjects.filter(p => (p.status || 'active') === 'active');
-  const upcoming = visibleProjects.filter(p => p.status === 'upcoming');
-  const completed = visibleProjects.filter(p => p.status === 'completed');
+  const active = projects.filter(p => (p.status || 'active') === 'active');
+  const upcoming = projects.filter(p => p.status === 'upcoming');
+  const completed = projects.filter(p => p.status === 'completed');
 
   // === Top-line operational KPIs ===
   const liveTrucksAll = db.trucks.filter(t => t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')).length;
@@ -5299,7 +5290,7 @@ function AdminProjects({ db, setDb, navigate }) {
     { label: 'Avg cycle time',     value: avgCycle > 0 ? avgCycle + ' min' : '—', tone: C.accent, sub: 'per load · active hauls' },
   ];
 
-  // === Dispatch queue (pending hauls, prioritized) ===
+  // === Dispatch queue (pending haul requests, prioritized) ===
   const queueItems = (db.haulRequests || []).filter(r => r.status === 'pending').map(r => {
     const proj = db.projects.find(pp => pp.id === r.projectId);
     const mat = MATERIALS.find(m => m.code === r.materialCode);
@@ -5313,18 +5304,18 @@ function AdminProjects({ db, setDb, navigate }) {
   const HaulOperationalCard = ({ p, dim }) => {
     const tone = healthTone(p.healthStatus);
     // Click target depends on how many live hauls the project has:
-    //   0 live hauls → /admin/hauls/new?projectId=<id> (pre-fills the
+    //   0 live hauls → /admin/requests/new?projectId=<id> (pre-fills the
     //     wizard so the user can create one — was sending them to the
     //     filtered list where the project didn't appear, RCA 2026-05-25
     //     "click into Galapago haul on overview, not shown on requests page").
-    //   1 live haul  → /admin/hauls/<haulId> (direct deep-link).
-    //   2+ live hauls → /admin/hauls?projectId=<id> (filtered list).
+    //   1 live haul  → /admin/requests/<haulId> (direct deep-link).
+    //   2+ live hauls → /admin/requests?projectId=<id> (filtered list).
     const liveReqsForCard = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
     const cardHref = liveReqsForCard.length === 0
-      ? '/admin/hauls/new?projectId=' + p.id
+      ? '/admin/requests/new?projectId=' + p.id
       : liveReqsForCard.length === 1
-        ? '/admin/hauls/' + liveReqsForCard[0].id
-        : '/admin/hauls?projectId=' + p.id;
+        ? '/admin/requests/' + liveReqsForCard[0].id
+        : '/admin/requests?projectId=' + p.id;
     return (
       <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
         <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start', cursor: 'pointer' }}
@@ -5341,7 +5332,7 @@ function AdminProjects({ db, setDb, navigate }) {
             <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: 2 }}>{p.gc}</div>
             <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[3] }}>{p.address}</div>
             {/* v25: aggregate qty + material across the project's actual
-                non-completed hauls, instead of the project-level
+                non-completed haul requests, instead of the project-level
                 volumeCYNeeded + material[0]. This keeps the Hauling Overview
                 tile numerically consistent with the per-haul views (Dispatch
                 row, Haul Detail, Map popup) — sum of those rows == this row.
@@ -5355,7 +5346,7 @@ function AdminProjects({ db, setDb, navigate }) {
                 : matCodes.length === 1 ? materialLabel(matCodes[0])
                 : 'Mixed';
               // 2026-05-25: don't claim NEEDS/HAS or a CY total if no haul
-              // request exists — the hauls page shows nothing for
+              // request exists — the haul requests page shows nothing for
               // this project in that state, so the tile shouldn't imply
               // there's work to do. Card click goes to /requests/new in this
               // state (see cardHref above) so the call-to-action is honest.
@@ -6037,7 +6028,7 @@ function AdminProjects({ db, setDb, navigate }) {
                     <div style={{ gridColumn: '1 / span 2' }}>Material<br/><span style={{ ...T.body, color: C.ink, fontWeight: 700 }}>{r.materialType}</span></div>
                   </div>
                   <div style={{ marginTop: S[3], display: 'flex', justifyContent: 'flex-end', gap: S[2] }}>
-                    <Btn variant="primary" size="xs" onClick={() => navigate('/admin/hauls?projectId=' + r.id)}>Open dispatch</Btn>
+                    <Btn variant="primary" size="xs" onClick={() => navigate('/admin/requests?projectId=' + r.id)}>Open dispatch</Btn>
                   </div>
                 </div>
               </div>
@@ -6070,7 +6061,7 @@ function AdminProjects({ db, setDb, navigate }) {
             <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· dispatch online · updated 4s ago</span>
           </div>
           <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Project Overview</h1>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Control Center</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Live dispatch, truck flow, haul status, and exceptions.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2] }}>
@@ -6156,7 +6147,7 @@ function AdminProjects({ db, setDb, navigate }) {
             </thead>
             <tbody>
               {queueItems.map(({ req, proj, mat, reqAssigned, priority }) => (
-                <Tr key={req.id} onClick={() => navigate('/admin/hauls/' + req.id)}>
+                <Tr key={req.id} onClick={() => navigate('/admin/requests/' + req.id)}>
                   <Td>
                     <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{proj ? proj.name : '—'}</div>
                     <div style={{ ...T.caption, color: C.inkDim }}>{proj ? proj.gc : ''}</div>
@@ -6167,7 +6158,7 @@ function AdminProjects({ db, setDb, navigate }) {
                   <Td dim>{(req.pickupLocation && (req.pickupLocation.name || req.pickupLocation.address)) || (proj ? proj.address : '—')}</Td>
                   <Td dim>{(req.dropoffLocation && (req.dropoffLocation.name || req.dropoffLocation.address)) || '—'}</Td>
                   <Td align="right"><Pill color={priorityTone(priority)} soft={priority === 'High' ? C.warnSoft : priority === 'Med' ? C.infoSoft : 'rgba(255,255,255,0.05)'}>{priority}</Pill></Td>
-                  <Td align="right"><Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/hauls/' + req.id); }}>Assign</Btn></Td>
+                  <Td align="right"><Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); navigate('/admin/requests/' + req.id); }}>Assign</Btn></Td>
                 </Tr>
               ))}
             </tbody>
@@ -6198,7 +6189,7 @@ function AdminProjects({ db, setDb, navigate }) {
             </thead>
             <tbody>
               {completed.map(p => (
-                <Tr key={p.id} onClick={() => navigate('/admin/hauls?projectId=' + p.id)} style={{ opacity: 0.7 }}>
+                <Tr key={p.id} onClick={() => navigate('/admin/requests?projectId=' + p.id)} style={{ opacity: 0.7 }}>
                   <Td><span style={{ fontWeight: 600, color: C.ink }}>{p.name}</span></Td>
                   <Td dim>{p.gc}</Td>
                   <Td align="right" mono>{p.loadsCompleted}</Td>
@@ -6211,19 +6202,6 @@ function AdminProjects({ db, setDb, navigate }) {
           </table>
         )}
       </Card>
-
-      {emptyProjectCount > 0 && (
-        <div style={{
-          marginTop: S[5], padding: S[4], background: C.surface, border: `1px dashed ${C.ruleHi}`,
-          borderRadius: R.md, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          flexWrap: 'wrap', gap: S[3],
-        }}>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>
-            {emptyProjectCount} project{emptyProjectCount === 1 ? '' : 's'} hidden — needs at least one haul to appear here.
-          </div>
-          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/hauls/new')}>+ Create haul</Btn>
-        </div>
-      )}
     </div>
   );
 }
@@ -6233,15 +6211,15 @@ function AdminProjects({ db, setDb, navigate }) {
 // that lives more naturally on the haul-request detail page. The route is kept
 // so external bookmarks and internal references that escaped the migration
 // still land somewhere sensible: the haul-requests list filtered to this
-// project. Users with no hauls for the project see an empty filtered
+// project. Users with no haul requests for the project see an empty filtered
 // list with a one-click "clear filter" pill.
 function HaulProjectRedirect({ projectId, navigate }) {
   useEffect(() => {
-    navigate('/admin/hauls?projectId=' + projectId);
+    navigate('/admin/requests?projectId=' + projectId);
   }, [projectId, navigate]);
   return (
     <div style={{ padding: S[6], maxWidth: 600, margin: '60px auto', textAlign: 'center', color: C.inkDim }}>
-      Redirecting to hauls…
+      Redirecting to haul requests…
     </div>
   );
 }
@@ -6316,12 +6294,7 @@ function AdminNewProject({ db, setDb, navigate }) {
         refId: newProject.id,
       }
     ));
-    // 2026-05-25 IA rename: route the user straight into the new-haul wizard
-    // with the freshly-created project pre-selected. Empty projects are
-    // filtered out of Project Overview, so dumping the user on /admin would
-    // make their new project invisible. Going via /admin/hauls/new guarantees
-    // they create at least one haul before they hit the overview.
-    navigate('/admin/hauls/new?projectId=' + id);
+    navigate('/admin/requests?projectId=' + id);
   };
 
   const Chip = ({ active, onClick, children, warn }) => (
@@ -7491,7 +7464,7 @@ function AdminReports({ db, navigate }) {
             {sortedRows.map(r => {
               const sc = statusColor[r.status] || statusColor.active;
               return (
-                <Tr key={r.id} onClick={() => navigate(`/admin/hauls?projectId=${r.id}`)}>
+                <Tr key={r.id} onClick={() => navigate(`/admin/requests?projectId=${r.id}`)}>
                   <Td><span style={{ fontWeight: 600 }}>{r.name}</span></Td>
                   <Td><Pill color={sc.color} soft={sc.soft}>{sc.label}</Pill></Td>
                   <Td align="right" mono>{r.haulers}</Td>
@@ -7590,13 +7563,13 @@ function AdminReports({ db, navigate }) {
 }
 
 // =====================================================================
-// Hauls — admin views (v3)
+// Haul Requests — admin views (v3)
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const requests = db.haulRequests || [];
   // === Project filter, driven by `?projectId=<id>` on the hash ===
   // Legacy `/admin/p/:projectId` URLs redirect into this list pre-filtered
-  // to that project's hauls. The filter pill below offers a one-
+  // to that project's haul requests. The filter pill below offers a one-
   // click way out, and AdminProjects rows now jump straight here.
   const projectIdFilter = (() => {
     const params = new URLSearchParams((hash || '').split('?')[1] || '');
@@ -7744,11 +7717,11 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const deleteRequestFromList = (req) => {
     const proj = (db.projects || []).find(p => p.id === req.projectId);
     const label = haulRequestLabel(db, req) || req.id;
-    if (!confirm(`Delete this haul${proj ? ` (${proj.name})` : ''}? This cannot be undone.`)) return;
+    if (!confirm(`Delete this haul request${proj ? ` (${proj.name})` : ''}? This cannot be undone.`)) return;
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.filter(r => r.id !== req.id) },
       { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
-        summary: `Admin deleted haul ${label}`, refId: req.id }
+        summary: `Admin deleted haul request ${label}`, refId: req.id }
     ));
   };
 
@@ -7757,7 +7730,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
     const lct  = lifecycleTone(e.lifecycle);
     return (
       <div
-        onClick={() => navigate('/admin/hauls/' + e.r.id)}
+        onClick={() => navigate('/admin/requests/' + e.r.id)}
         style={{
           padding: S[4],
           borderBottom: last ? 'none' : `1px solid ${C.rule}`,
@@ -7777,8 +7750,8 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             in the handler. */}
         <button
           onClick={(ev) => { ev.stopPropagation(); deleteRequestFromList(e.r); }}
-          aria-label={`Delete haul ${haulRequestLabel(db, e.r) || e.r.id}`}
-          title="Delete haul"
+          aria-label={`Delete haul request ${haulRequestLabel(db, e.r) || e.r.id}`}
+          title="Delete haul request"
           style={{
             position: 'absolute', top: S[2], right: S[2],
             background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
@@ -7881,7 +7854,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
       {filterProject && (
         <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
           <div style={{
@@ -7894,7 +7867,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ fontWeight: 700 }}>{filterProject.name}</span>
             <button
               type="button"
-              onClick={() => navigate('/admin/hauls')}
+              onClick={() => navigate('/admin/requests')}
               aria-label="Clear haul filter"
               style={{ background: 'transparent', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}
             >&times;</button>
@@ -7909,10 +7882,10 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· {db.haulers.length} haulers connected · GPS active · updated 8s ago</span>
           </div>
           <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauls</h1>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Pending requests appear at the top with priority + waiting time.</div>
         </div>
-        <Btn variant="primary" onClick={() => navigate('/admin/hauls/new')}>+ New haul</Btn>
+        <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul request</Btn>
       </div>
 
       {/* Operations KPI strip */}
@@ -8032,8 +8005,8 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   );
 }
 
-// v18: New haul creation form. Single-step WizardShell with all the
-// fields needed to spin up a haul and land the user on its detail
+// v18: New haul request creation form. Single-step WizardShell with all the
+// fields needed to spin up a haul request and land the user on its detail
 // page. Both addresses use AddressAutocomplete (always-editing mode so the
 // inputs match the rest of the form chrome). Validation requires project,
 // material, volume > 0, both addresses, and a start date — and at submit
@@ -8045,7 +8018,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
   const projects = db.projects || [];
   // 2026-05-25: support `?projectId=<id>` deep-link from HaulOperationalCard
-  // when the user clicks a tile with 0 live hauls. Pre-selects that
+  // when the user clicks a tile with 0 live haul requests. Pre-selects that
   // project in the wizard so they don't have to re-pick from the dropdown.
   // Falls through to projects[0] when the query param is missing or invalid.
   const preselectedProjectId = (() => {
@@ -8153,14 +8126,14 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
           type: 'haul_request.created',
           actorRole: 'admin',
           actorId: null,
-          summary: 'Admin created new haul ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
+          summary: 'Admin created new haul request ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
           refId: newId,
         }
       ));
-      navigate('/admin/hauls/' + newId);
+      navigate('/admin/requests/' + newId);
     } catch (e) {
       setSubmitting(false);
-      setSubmitError('Failed to create haul: ' + (e && e.message ? e.message : 'unknown error'));
+      setSubmitError('Failed to create haul request: ' + (e && e.message ? e.message : 'unknown error'));
     }
   };
 
@@ -8172,13 +8145,13 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       navigate={navigate}
       steps={['Details']}
       currentStep={1}
-      onCancel={() => navigate('/admin/hauls')}
+      onCancel={() => navigate('/admin/requests')}
       onSubmit={submit}
       submitDisabled={!valid || submitting}
-      submitLabel={submitting ? 'Creating…' : 'Create haul'}
-      crumbs={[{ label: 'Projects', to: '/admin' }, { label: 'Hauls', to: '/admin/hauls' }, { label: 'New haul' }]}
+      submitLabel={submitting ? 'Creating…' : 'Create haul request'}
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests', to: '/admin/requests' }, { label: 'New request' }]}
       eyebrow="New request"
-      title="Create a new haul"
+      title="Create a new haul request"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
@@ -8291,13 +8264,13 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
   );
 }
 
-// Mini-map for a single haul: pickup + dropoff pins, OSRM driving
+// Mini-map for a single haul request: pickup + dropoff pins, OSRM driving
 // polyline, drive time, and an 18-CY tandem throughput estimate. Pattern
 // mirrors LiveOperationsTileMap — same CartoCDN raster tiles, same halo+dot
 // pin recipe, same `db.geocode` / `db.routes` cache pattern with Nominatim
 // + OSRM fallback fetch when an address pair is uncached.
 // Always mounted from AdminHaulRequestDetail — the Card renders for every
-// haul and self-adjusts when addresses are missing, mid-fetch, or
+// haul request and self-adjusts when addresses are missing, mid-fetch, or
 // the external geocode/route calls fail.
 function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   const mlAvailable = typeof window !== 'undefined' && typeof window.maplibregl !== 'undefined';
@@ -8372,7 +8345,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   }, [pickAddr, dropAddr]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Map init — only when we actually have an address pair to plot. Avoids
-  // mounting a MapLibre instance for hauls that have no addresses yet.
+  // mounting a MapLibre instance for haul requests that have no addresses yet.
   useEffect(() => {
     if (!mlAvailable || !hasAddresses || !containerRef.current) return undefined;
     if (mapRef.current) return undefined;
@@ -8582,9 +8555,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   // strips admin chrome — see .settlement-print-* classes near the bottom).
   const [stmtForHauler, setStmtForHauler] = useState(null);
   // v20: Edit-mode gateway for the combined haul-request tile (Project &
-  // contractor / Haul / Logistics rolled into one Card). Default
+  // contractor / Haul Request / Logistics rolled into one Card). Default
   // view is read-only; "Edit ↗" toggles editable affordances simultaneously
-  // and reveals the destructive "Delete this haul" button.
+  // and reveals the destructive "Delete this haul request" button.
   // v20.1: Cancel discards via snapshot restore — we capture the editable
   // slice of `req` on entry and rewind setDb on Cancel. Saves are still
   // atomic (auto-save via updateLogistics on each blur), so Done is a
@@ -8667,19 +8640,19 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         summary: `Admin set ${project.name} direction to ${next}`, refId: project.id }
     ));
   };
-  // v20: delete the entire haul from the combined tile's edit mode.
+  // v20: delete the entire haul request from the combined tile's edit mode.
   // Mirrors the `confirm()` precedent used by removeAssignment / removeTruck.
   // Emits a `haul_request.deleted` activity event (the feed has no type
   // registry — new types can be added freely) and navigates back to the
   // requests list since the URL's :id no longer resolves.
   const deleteHaulRequest = () => {
-    if (!confirm(`Delete this haul? This cannot be undone.`)) return;
+    if (!confirm(`Delete this haul request? This cannot be undone.`)) return;
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.filter(r => r.id !== req.id) },
       { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
-        summary: `Admin deleted haul ${haulRequestLabel(db, req)}`, refId: req.id }
+        summary: `Admin deleted haul request ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
-    navigate('/admin/hauls');
+    navigate('/admin/requests');
   };
   const pickup  = req.pickupLocation  || { name: '', address: '' };
   const dropoff = req.dropoffLocation || { name: '', address: '' };
@@ -8938,7 +8911,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const assign = (haulerId, truckId) => assignTruck(haulerId, truckId);
 
   // v23: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
-  // invoices keyed off this haul. Line items bill HOURS × hourly rate
+  // invoices keyed off this haul request. Line items bill HOURS × hourly rate
   // (truck.ratePerHour ?? db.rates[truck.type]). `deliveredCY` is carried on
   // each line for reporting only — it is not multiplied into the amount.
   // `kind` distinguishes interim from final and is also encoded into the
@@ -9035,13 +9008,13 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Projects', to: '/admin' },
-        ...(project ? [{ label: project.name, to: '/admin/hauls?projectId=' + project.id }] : [{ label: 'Hauls', to: '/admin/hauls' }]),
+        { label: 'Admin', to: '/admin' },
+        { label: 'Haul Requests', to: '/admin/requests' },
         { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
       {/* v20: Combined HAUL REQUEST tile — collapses Project & contractor /
-          Haul / Logistics into one Card with an Edit-mode gateway.
+          Haul Request / Logistics into one Card with an Edit-mode gateway.
           Read-only by default; "Edit" up top reveals all editable
           affordances simultaneously and surfaces the danger Delete button
           at the bottom. Done exits edit mode (saves are already incremental
@@ -9049,7 +9022,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       <Card padding={S[4]} style={{ marginBottom: S[4] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], marginBottom: S[3] }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <Label color={C.accent}>Haul</Label>
+            <Label color={C.accent}>Haul Request</Label>
             {isEditing && (
               <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>Tap any value to edit. Done keeps changes · Cancel rolls back.</div>
             )}
@@ -9086,7 +9059,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             </div>
           ) : (
             <button onClick={enterEditMode}
-              aria-label="Edit haul details"
+              aria-label="Edit haul request details"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
                 padding: '6px 12px', borderRadius: R.pill,
@@ -9520,7 +9493,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         {/* ── DELETE (edit mode only) ── */}
         {isEditing && (
           <div style={{ borderTop: `1px solid ${C.rule}`, paddingTop: S[3], marginTop: S[3] }}>
-            <Btn variant="danger" size="sm" onClick={deleteHaulRequest}>Delete this haul</Btn>
+            <Btn variant="danger" size="sm" onClick={deleteHaulRequest}>Delete this haul request</Btn>
           </div>
         )}
       </Card>
@@ -9963,7 +9936,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         </div>
         {invoicesForHaul.length === 0 ? (
           <div style={{ ...T.bodySm, color: C.inkDim, padding: S[4], textAlign: 'center', background: C.surfaceHi, borderRadius: R.md }}>
-            No invoices yet for this haul. Generate an interim invoice to bill the contractor for delivered CY to date, or a final invoice to close out the haul.
+            No invoices yet for this haul request. Generate an interim invoice to bill the contractor for delivered CY to date, or a final invoice to close out the haul.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
@@ -10819,8 +10792,8 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     const refLine = [
       truckCount    && `${truckCount} truck${truckCount === 1 ? '' : 's'}`,
       invoiceCount  && `${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}`,
-      matchedCount  && `${matchedCount} matched haul${matchedCount === 1 ? '' : 's'}`,
-      assignedCount && `${assignedCount} haul${assignedCount === 1 ? '' : 's'} with assignments`,
+      matchedCount  && `${matchedCount} matched haul request${matchedCount === 1 ? '' : 's'}`,
+      assignedCount && `${assignedCount} haul request${assignedCount === 1 ? '' : 's'} with assignments`,
     ].filter(Boolean).join(', ');
     const msg = refLine
       ? `Delete ${hauler.name}? ${refLine} will be unlinked (kept, hauler set to none). This can't be undone.`
@@ -11033,7 +11006,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Hauls" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul` : 'assigned'} /></Card>
+        <Card padding={S[4]}><Stat label="Hauls" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul request` : 'assigned'} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => db.hours.some(h => h.truckId === t.id && h.status === 'open')).length} active now`} /></Card>
         <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
@@ -12163,16 +12136,16 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
 
       <div className="invoice-print-hide" style={{ marginBottom: S[4] }}>
         <Crumbs items={[
-          { label: 'Projects', to: '/admin' },
-          ...(project ? [{ label: project.name, to: '/admin/hauls?projectId=' + project.id }] : [{ label: 'Hauls', to: '/admin/hauls' }]),
-          ...(req ? [{ label: haulRequestLabel(db, req), to: '/admin/hauls/' + req.id }] : []),
+          { label: 'Admin', to: '/admin' },
+          { label: 'Haul Requests', to: '/admin/requests' },
+          ...(req ? [{ label: haulRequestLabel(db, req), to: '/admin/requests/' + req.id }] : []),
           { label: inv.number || 'Invoice' },
         ]} navigate={navigate} />
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: S[3], flexWrap: 'wrap', marginTop: S[3] }}>
           <div style={{ ...T.bodySm, color: C.inkDim }}>Preview of the invoice as it will print. Use the Print button to print or save as PDF.</div>
           <div style={{ display: 'flex', gap: S[2] }}>
             {req && (
-              <Btn variant="ghost" onClick={() => navigate('/admin/hauls/' + req.id)}>{'←'} Back to haul</Btn>
+              <Btn variant="ghost" onClick={() => navigate('/admin/requests/' + req.id)}>{'←'} Back to haul request</Btn>
             )}
             <Btn variant="primary" onClick={() => window.print()}>Print this invoice</Btn>
           </div>
@@ -12216,7 +12189,7 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
             </div>
           </div>
           <div>
-            <Label style={{ marginBottom: S[2] }}>Haul</Label>
+            <Label style={{ marginBottom: S[2] }}>Haul request</Label>
             <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{project ? project.name : '—'}</div>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
               {req ? <>{req.volumeCY} CY requested<br /></> : null}
@@ -12338,7 +12311,7 @@ function AdminActivity({ db, setDb, navigate }) {
   const goRef = (evt) => {
     const id = evt.refId;
     if (!id) return;
-    if (id.startsWith('hreq-')) { navigate('/admin/hauls/' + id); return; }
+    if (id.startsWith('hreq-')) { navigate('/admin/requests/' + id); return; }
     if (id.startsWith('op-'))   { navigate('/admin/haulers/' + id); return; }
     if (id.startsWith('tk-')) {
       const tr = db.trucks.find(t => t.id === id);
@@ -12347,7 +12320,7 @@ function AdminActivity({ db, setDb, navigate }) {
     }
     if (id.startsWith('ld-')) {
       const ld = db.loads.find(l => l.id === id);
-      if (ld && ld.projectId) { navigate('/admin/hauls?projectId=' + ld.projectId); return; }
+      if (ld && ld.projectId) { navigate('/admin/requests?projectId=' + ld.projectId); return; }
       return;
     }
     if (id.startsWith('dr-')) {
@@ -12356,7 +12329,7 @@ function AdminActivity({ db, setDb, navigate }) {
     }
     // Project codes are uppercase letters/digits without a known prefix.
     if (/^[A-Z0-9]{2,6}$/.test(id) && db.projects.some(p => p.id === id)) {
-      navigate('/admin/hauls?projectId=' + id); return;
+      navigate('/admin/requests?projectId=' + id); return;
     }
   };
 
@@ -12511,7 +12484,7 @@ const BACKUP_TABLES = [
   { sb: 'projects',      pk: 'id',          label: 'Projects',      jsKey: 'projects' },
   { sb: 'drivers',       pk: 'id',          label: 'Drivers',       jsKey: 'drivers' },
   { sb: 'trucks',        pk: 'id',          label: 'Trucks',        jsKey: 'trucks' },
-  { sb: 'haul_requests', pk: 'id',          label: 'Hauls', jsKey: 'haulRequests' },
+  { sb: 'haul_requests', pk: 'id',          label: 'Haul requests', jsKey: 'haulRequests' },
   { sb: 'loads',         pk: 'id',          label: 'Loads',         jsKey: 'loads' },
   { sb: 'hours',         pk: 'id',          label: 'Hours',         jsKey: 'hours' },
   { sb: 'invoices',      pk: 'id',          label: 'Invoices',      jsKey: 'invoices' },
@@ -12934,7 +12907,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const unreadCount = activity.filter(a => a.timestamp > lastRead).length;
   const parts = (hash || '').split('/').filter(Boolean);
   const onOverview = parts.length === 1 && parts[0] === 'admin';
-  const onRequests = (parts[1] === 'hauls' || parts[1] === 'requests');
+  const onRequests = parts[1] === 'requests';
   const onActivity = parts[1] === 'activity';
   const onReporting = parts[1] === 'reporting';
   const onLiveStats = parts[1] === 'reports';
@@ -13008,16 +12981,16 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       )}
       <Item
         icon={<ProjectIcon size={20} />}
-        label="Project Overview"
+        label="Hauling Overview"
         active={onOverview}
         onClick={() => go('/admin')}
       />
       <Item
         icon={<HaulRequestIcon size={20} />}
-        label="Hauls"
+        label="Haul Requests"
         active={onRequests}
         badge={pendingCount}
-        onClick={() => go('/admin/hauls')}
+        onClick={() => go('/admin/requests')}
       />
       <Item
         icon={<ActivityIcon size={20} />}
@@ -13141,9 +13114,9 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
           {/* /admin/trucks/active route + component removed 2026-05-25. */}
-          {parts.length === 2 && (parts[1] === 'hauls' || parts[1] === 'requests') && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-          {parts.length === 3 && (parts[1] === 'hauls' || parts[1] === 'requests') && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-          {parts.length === 3 && (parts[1] === 'hauls' || parts[1] === 'requests') && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
+          {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+          {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+          {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'backup' && <AdminBackup db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
@@ -13226,7 +13199,7 @@ function HaulerLanding({ db, navigate }) {
 //      one of my trucks; "my portion" is the sum of line items whose
 //      truckPlate matches one of my fleet.
 function HaulerHome({ haulerId, db, setDb, navigate }) {
-  // The "add truck" picker is gated to a single active haul at a
+  // The "add truck" picker is gated to a single active haul request at a
   // time. Stores the haulRequestId being expanded; null means closed.
   const [addingTruckFor, setAddingTruckFor] = useState(null);
 
@@ -13426,7 +13399,7 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
               <Card key={req.id} style={{ borderLeft: `3px solid ${C.warn}` }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3], gap: S[2] }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Haul'}</div>
+                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Haul request'}</div>
                     <div style={{ ...T.caption, marginTop: S[1] }}>{proj ? proj.gc : ''}</div>
                   </div>
                   <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
@@ -13648,8 +13621,9 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
 
   const crumbs = isAdmin
     ? [
-        { label: 'Projects', to: '/admin' },
-        { label: project.name, to: `/admin/hauls?projectId=${projectId}` },
+        { label: 'Admin', to: '/admin' },
+        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name },
       ]
     : [
@@ -13796,7 +13770,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       const existing = db.hours.map(h => parseInt((h.id || '').replace(/^hr-/, ''), 10)).filter(n => !isNaN(n));
       return existing.length ? Math.max(...existing) + 1 : 1;
     })();
-    // v32: auto-link to a haul when this truck has exactly one
+    // v32: auto-link to a haul request when this truck has exactly one
     // active assignment on its project.
     const candidateReqs = (db.haulRequests || []).filter(r =>
       r && r.projectId === truck.projectId &&
@@ -13870,8 +13844,9 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
 
   const crumbs = isAdmin
     ? [
-        { label: 'Projects', to: '/admin' },
-        { label: project.name, to: `/admin/hauls?projectId=${projectId}` },
+        { label: 'Admin', to: '/admin' },
+        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name, to: `/admin/p/${projectId}/o/${haulerId}` },
         { label: `Truck #${truck.plate}` },
       ]
@@ -13997,7 +13972,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
           const dayLoads = loadsByDate.get(date) || [];
           const dayHoursRows = hoursByDate.get(date) || [];
           const dayHoursTotal = dayHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-          // v32: derive a single "current haul" for this day from
+          // v32: derive a single "current haul request" for this day from
           // the loads + hours rows on this date. If every row on the day
           // shares the same haulRequestId, that's the day's haul; otherwise
           // null (mixed). The day-header picker, when set, cascades to all
@@ -14027,7 +14002,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                       <select
                         value={dayCurrentReqId || ''}
                         onChange={e => setDayHaulReq(date, e.target.value)}
-                        title={dayReqIds.size > 1 ? 'Loads on this day belong to multiple hauls — picking one cascades.' : 'Assign every load + hours row on this day to a haul'}
+                        title={dayReqIds.size > 1 ? 'Loads on this day belong to multiple haul requests — picking one cascades.' : 'Assign every load + hours row on this day to a haul request'}
                         style={{ ...T.caption, fontFamily: F.mono, color: C.accent, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 6px', cursor: 'pointer', maxWidth: 240 }}
                       >
                         <option value="">{dayReqIds.size > 1 ? '— mixed —' : '— none —'}</option>
@@ -14111,7 +14086,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                     <select
                       value={l.haulRequestId || ''}
                       onChange={e => updateLoadHaulReq(l.id, e.target.value)}
-                      title="Link this load to a haul"
+                      title="Link this load to a haul request"
                       style={{ ...T.caption, fontFamily: F.mono, color: l.haulRequestId ? C.accent : C.inkDim, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 4px', cursor: 'pointer', maxWidth: 160, width: '100%', boxSizing: 'border-box' }}
                     >
                       <option value="">— none —</option>
@@ -14212,7 +14187,7 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
     if (!canSubmit) return;
     const existing = db.loads.map(l => parseInt((l.id || '').replace(/^ld-/, ''), 10)).filter(n => !isNaN(n));
     const nextNum = existing.length ? Math.max(...existing) + 1 : 1001;
-    // v32: auto-link to a haul when the truck is unambiguously
+    // v32: auto-link to a haul request when the truck is unambiguously
     // assigned to exactly one active request on this project. If multiple
     // candidates, leave null — the user can pick via the per-load picker.
     const candidateReqs = (db.haulRequests || []).filter(r =>
@@ -15022,14 +14997,12 @@ function App() {
     else if (h.startsWith('/admin/trucks/new')) title = 'JSE — New truck';
     else if (h.startsWith('/admin/new')) title = 'JSE — New Haul';
     else if (h.startsWith('/admin/activity')) title = 'JSE — Activity';
-    else if (h.startsWith('/admin/hauls') || h.startsWith('/admin/requests')) {
-      // /admin/requests/* is the legacy URL prefix kept as an alias post the
-      // 2026-05-25 IA rename — bookmarks still resolve, title still reads.
+    else if (h.startsWith('/admin/requests')) {
       if (parts[2] && db && db.haulRequests) {
         const r = db.haulRequests.find(x => x.id === parts[2]);
-        title = r ? `JSE — ${haulRequestLabel(db, r)}` : 'JSE — Hauls';
+        title = r ? `JSE — ${haulRequestLabel(db, r)}` : 'JSE — Haul Requests';
       } else {
-        title = 'JSE — Hauls';
+        title = 'JSE — Haul Requests';
       }
     }
     else if (h.startsWith('/admin/haulers')) {
