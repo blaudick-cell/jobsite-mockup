@@ -6687,14 +6687,19 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
       </div>
 
-      {/* 2026-05-25: SiteConditionsCard re-mounted on the haul-requests
-          landing — was previously rendered from inside AdminProjects which
-          got deleted in the projects-drop (207a80f). NWS Denver forecast +
-          mud outlook + haul-condition recommendation. Component is
-          self-contained and takes no props. Above the KPI strip per the
-          legacy dashboard placement. */}
-      <div style={{ marginBottom: S[4] }}>
-        <SiteConditionsCard />
+      {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
+          desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. Both
+          mounts were orphaned when AdminProjects got deleted in 207a80f;
+          re-mounted here so the landing matches Robert's reference screenshot
+          (map on the left, weather on the right, sitting just above the
+          operations KPI strip). */}
+      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
+        <div style={{ minWidth: 0 }}>
+          <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <SiteConditionsCard />
+        </div>
       </div>
 
       {/* Operations KPI strip */}
@@ -6739,76 +6744,15 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         </div>
       </Card>
 
-      {/* Main 2-col layout: requests | side rail */}
-      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.7fr) minmax(0, 1fr)', gap: S[4] }}>
-        <div style={{ minWidth: 0 }}>
-          <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests match the filters." />
-          <Section label="Active"    color={C.accent} rows={active}    emptyText="No active matches." />
-          <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests yet." />
-        </div>
-
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: S[4] }}>
-          {/* Recommended Matches */}
-          <Card padding={0}>
-            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
-              <Label color={C.accent}>Recommended matches</Label>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>
-                {recTarget ? `For ${haulRequestLabel(db, recTarget.r)}` : 'No pending request'}
-              </div>
-            </div>
-            {recommendations.length === 0 ? (
-              <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No haulers with available trucks right now.</div>
-            ) : (
-              <div>
-                {recommendations.map((rec, i) => (
-                  <div key={rec.hauler.id} style={{ padding: S[3], borderBottom: i < recommendations.length - 1 ? `1px solid ${C.rule}` : 'none' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
-                      <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{rec.hauler.name}</div>
-                      <Pill color={C.ok} soft={C.okSoft}>{rec.fulfillment}% fulfill</Pill>
-                    </div>
-                    <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginBottom: 6 }}>
-                      <span style={{ color: C.ink, fontWeight: 600 }}>{rec.available}</span> of {rec.totalTrucks} trucks free
-                      <span style={{ color: C.inkFaint }}> · </span>
-                      ~{rec.minsAway} min away
-                      <span style={{ color: C.inkFaint }}> · </span>
-                      est. ${rec.rateEst}/hr
-                    </div>
-                    <div style={{ display: 'flex', gap: S[2] }}>
-                      <Btn variant="primary" size="xs" onClick={() => navigate('/admin/haulers/' + rec.hauler.id)}>Assign</Btn>
-                      <Btn variant="secondary" size="xs" onClick={() => navigate('/admin/haulers/' + rec.hauler.id)}>View hauler</Btn>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          {/* Dispatch Activity feed */}
-          <Card padding={0}>
-            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <div>
-                <Label color={C.accent}>Dispatch activity</Label>
-                <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Recent assignments + log</div>
-              </div>
-              <Pill color={C.ok} soft={C.okSoft}>Live</Pill>
-            </div>
-            {activityFeed.length === 0 ? (
-              <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No recent activity.</div>
-            ) : (
-              <div style={{ maxHeight: 360, overflowY: 'auto' }}>
-                {activityFeed.map((a, i) => (
-                  <div key={a.id || i} style={{ padding: S[3], borderBottom: i < activityFeed.length - 1 ? `1px solid ${C.rule}` : 'none', display: 'flex', alignItems: 'flex-start', gap: S[2] }}>
-                    <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: '50%', background: C.accent, marginTop: 6, flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ ...T.caption, color: C.ink, lineHeight: 1.4 }}>{a.summary}</div>
-                      <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, marginTop: 2 }}>{fmtAgo(a.timestamp)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        </div>
+      {/* 2026-05-25: Side-rail (Recommended Matches + Dispatch Activity)
+          removed. a3436d8 already killed NEEDS ATTENTION + LIVE TRUCK
+          ACTIVITY; this commit completes the cleanup by dropping the two
+          remaining dashboard tiles per Robert's spec. Pending/Active/
+          Completed sections now span full width. */}
+      <div>
+        <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests match the filters." />
+        <Section label="Active"    color={C.accent} rows={active}    emptyText="No active matches." />
+        <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests yet." />
       </div>
     </div>
   );
