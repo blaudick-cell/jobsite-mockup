@@ -1945,11 +1945,13 @@ const GEOCODE_SEED = {
   '13565 County Rd 2 1/2, Brighton, CO 80603':      { lat: 40.0530, lng: -104.7530 },
   '1500 W. Thornton Pkwy #252, Thornton, CO 80260': { lat: 39.8709, lng: -105.0078 },
 };
-// v23: hourly-only billing. Every dollar value in the app is hours × rate
-// (truck.ratePerHour ?? db.rates[truck.type]). CY is reported alongside as
-// an informational column but never multiplied into money. The former
-// INVOICE_CY_RATE table is gone — see `dollarsForRequest(req, db)` for the
-// single source of truth for haul-request dollar rollups.
+// v23 + 2026-05-25 rate-chain rewrite: hourly-only billing. Every dollar
+// value in the app is hours × rate. The rate chain is
+// `assignment.ratePerHour → truck.ratePerHour → DEFAULT_RATES[truck.type]
+// → 0` (db.rates is deprecated and no longer read). CY is reported
+// alongside as an informational column but never multiplied into money.
+// The former INVOICE_CY_RATE table is gone — see `dollarsForRequest(req,
+// db)` for the single source of truth for haul-request dollar rollups.
 
 // v18: issuer block stamped on JSE-issued haul-request invoices (interim +
 // final). Hard-coded so the printable invoice always carries Robert's
@@ -9172,8 +9174,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 
   // v23: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
   // invoices keyed off this haul request. Line items bill HOURS × hourly rate
-  // (truck.ratePerHour ?? db.rates[truck.type]). `deliveredCY` is carried on
-  // each line for reporting only — it is not multiplied into the amount.
+  // resolved through the rate chain (assignment.ratePerHour →
+  // truck.ratePerHour → DEFAULT_RATES[truck.type]; db.rates deprecated).
+  // `deliveredCY` is carried on each line for reporting only — it is not
+  // multiplied into the amount.
   // `kind` distinguishes interim from final and is also encoded into the
   // number prefix so cross-tab Realtime survives missing-column migrations.
   const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
@@ -11713,8 +11717,9 @@ function AdminReporting({ db, setDb, navigate }) {
       {/* ===== Per-hauler invoicing =====
           One section per hauler. Inside each section, a row per haul the
           hauler is assigned to. Invoices auto-generate from billed hours at
-          the truck's hourly rate (truck.ratePerHour ?? db.rates[type]); CY
-          is reported alongside but never multiplied into the amount. Admin
+          the rate chain (assignment.ratePerHour → truck.ratePerHour →
+          DEFAULT_RATES[type]; db.rates deprecated). CY is reported
+          alongside but never multiplied into the amount. Admin
           then steps each invoice through draft → sent → paid. State
           persists via db.invoices (schema v12+).
       */}
