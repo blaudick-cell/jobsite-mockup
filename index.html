@@ -1426,9 +1426,21 @@ function ChevronRight({ size = 18 }) {
 function ChromeMenu({ navigate, compact = false, renderExtra }) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
+  // 2026-05-24: Robert is moving the project from demo → live with real data.
+  // The Reset button wipes Supabase + reseeds from the JS seed, which is no
+  // longer safe to expose to anyone. Gate it to local dev (localhost /
+  // 127.0.0.1) OR explicit `?debug=1` opt-in. Production users never see it.
+  // The handler stays defined so the code path remains testable in dev.
+  const isDevContext = (() => {
+    try {
+      const h = window.location.hostname;
+      if (h === 'localhost' || h === '127.0.0.1' || h === '::1') return true;
+      return /\bdebug=1\b/.test(window.location.search);
+    } catch (e) { return false; }
+  })();
   const onReset = () => {
     close();
-    if (!window.confirm('Reset all demo data (including the cloud copy seen on every device)? This will reload the page.')) return;
+    if (!window.confirm('Reset to seed data? This will WIPE Supabase + every connected device and reload the page. Dev-only — do not run against live data.')) return;
     try { window.localStorage.removeItem(DB_STORAGE_KEY); } catch (e) { /* ignore */ }
     (typeof resetDemoCloud === 'function' ? resetDemoCloud() : Promise.resolve())
       .catch(e => { console.warn('[jse] cloud reset failed (offline?):', e); })
@@ -1458,16 +1470,19 @@ function ChromeMenu({ navigate, compact = false, renderExtra }) {
                 <div style={{ height: 1, background: C.rule, margin: `${S[3]}px 0` }} />
               </>
             )}
-            <button
-              type="button"
-              onClick={onReset}
-              style={{
-                ...T.bodySm, display: 'flex', alignItems: 'center', width: '100%',
-                background: 'transparent', border: `1px solid ${C.warn}`, color: C.warn,
-                padding: `${S[2]}px ${S[3]}px`, borderRadius: R.sm, cursor: 'pointer',
-                textAlign: 'left', marginBottom: S[2], fontWeight: 600,
-              }}
-            >Reset demo data</button>
+            {isDevContext && (
+              <button
+                type="button"
+                onClick={onReset}
+                title="Wipes Supabase + every connected device. Only shown on localhost or with ?debug=1."
+                style={{
+                  ...T.bodySm, display: 'flex', alignItems: 'center', width: '100%',
+                  background: 'transparent', border: `1px solid ${C.warn}`, color: C.warn,
+                  padding: `${S[2]}px ${S[3]}px`, borderRadius: R.sm, cursor: 'pointer',
+                  textAlign: 'left', marginBottom: S[2], fontWeight: 600,
+                }}
+              >Reset to seed data (dev only)</button>
+            )}
             <button
               type="button"
               onClick={onSwitch}
