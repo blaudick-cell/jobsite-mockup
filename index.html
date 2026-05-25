@@ -4202,15 +4202,19 @@ function nwsPairDaily(periods) {
 // UI consumes for the prominent label, the header status badge, the per-day
 // pill in the 7-day strip, and the driver-friendly subtitle.
 //
-// Decision order (2026-05-24 upgrade per Robert's brief):
-//   1. low <= 32°F OR snow            → Freeze Risk    (light blue)
-//   2. precip >= 70% OR storm OR wind>=35 → Delay Risk (red-orange)
-//   3. precip >= 40% OR rain          → Wet / Mud Risk (orange)
-//   4. precip 20-39%                  → Drying          (yellow)
-//   5. otherwise                      → Dry             (green)
+// Decision order (refined 2026-05-24): NWS shortForecast text can say
+// "thunderstorm" even at 10–20% probability, so the text alone is too
+// aggressive a delay trigger. Probability is the primary signal; text only
+// promotes severity when probability also crosses a moderate threshold.
+//   1. low <= 32°F OR wx==='snow'           → Freeze Risk    (light blue)
+//   2. precip >= 70% OR (storm AND pct >=50)
+//      OR wind >= 35                        → Delay Risk     (red-orange)
+//   3. precip >= 40% OR (rain AND pct >=25) → Wet / Mud Risk (orange)
+//   4. precip >= 20% (any condition)        → Drying          (yellow)
+//   5. otherwise                            → Dry             (green)
 //
-// Header status badge collapses: dry → OPTIMAL, drying → CAUTION,
-// wet/freeze → CAUTION, delay → HOLD.
+// Header status badge collapses: dry → OPTIMAL, drying/wet/freeze → CAUTION,
+// delay → HOLD.
 //
 // NWS-limit-aware wording: "mud risk", "haul condition", "based on forecast"
 // — never claims field-verified site state.
@@ -4221,10 +4225,10 @@ function haulConditionFromNws({ wx, precipPct, windMph, tempLo, tempHi }) {
   if (low <= 32 || wx === 'snow') {
     return { key: 'freeze', label: 'Freeze Risk',   short: 'FREEZE', driverNote: 'Early start', sub: 'sub-freezing — watch for ice', grade: 'CAUTION', tone: WX_COLORS.freeze, soft: WX_COLORS_SOFT.freeze };
   }
-  if (pct >= 70 || wx === 'storm' || wind >= 35) {
+  if (pct >= 70 || (wx === 'storm' && pct >= 50) || wind >= 35) {
     return { key: 'delay',  label: 'Delay Risk',    short: 'DELAY',  driverNote: 'Watch',       sub: 'severe weather likely',         grade: 'HOLD',    tone: WX_COLORS.delay,  soft: WX_COLORS_SOFT.delay };
   }
-  if (pct >= 40 || wx === 'rain') {
+  if (pct >= 40 || (wx === 'rain' && pct >= 25)) {
     return { key: 'wet',    label: 'Wet / Mud Risk',short: 'WET',    driverNote: 'Mud Risk',    sub: 'soft ground likely',            grade: 'CAUTION', tone: WX_COLORS.wet,    soft: WX_COLORS_SOFT.wet };
   }
   if (pct >= 20) {
