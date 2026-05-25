@@ -2389,9 +2389,12 @@ function appendActivity(state, evt) {
 }
 
 // Small lookup helpers used to build activity summary strings.
+// `driverName` retained as a defensive fallback for any legacy caller —
+// returns the generic "Truck operator" so no driver name leaks into a
+// new event 2026-05-25 (Driver-removal pass). The drivers table itself
+// stays nullable in Supabase for a future re-add.
 function driverName(state, id) {
-  const d = state && state.drivers ? state.drivers.find(x => x.id === id) : null;
-  return d ? d.name : 'A driver';
+  return 'Truck operator';
 }
 function haulerName(state, id) {
   const h = state && state.haulers ? state.haulers.find(x => x.id === id) : null;
@@ -12783,15 +12786,38 @@ function AdminActivity({ db, setDb, navigate }) {
   // the actor's display name is so it produces sensible initials.
   const actorNameFor = (evt) => {
     if (evt.actorRole === 'admin') return 'Admin User';
-    if (evt.actorRole === 'driver' && evt.actorId) {
-      const d = db.drivers.find(x => x.id === evt.actorId);
-      if (d) return d.name;
-    }
+    // 2026-05-25 Driver-removal: activity rows with actorRole 'driver' are
+    // legacy data in Supabase. Surface them as "Truck operator" so the avatar
+    // label doesn't expose a driver name.
+    if (evt.actorRole === 'driver') return 'Truck operator';
     if (evt.actorRole === 'hauler' && evt.actorId) {
       const h = db.haulers.find(x => x.id === evt.actorId);
       if (h) return h.name;
     }
     return '?';
+  };
+  // Normalize display-time summary text for legacy driver-attributed rows
+  // (Supabase already has them written; mutating server data is destructive,
+  // so we strip the driver names at render time). Patterns:
+  //   "X. Lastname [verb] ... on #PLATE"  → "Truck #PLATE [verb] ..."
+  //   "X. Lastname [verb] X CY ..."       → "Truck [verb] X CY ..."
+  //   "A driver [verb] ... on #PLATE"     → "Truck #PLATE [verb] ..."
+  //   "Admin added driver X. Lastname"    → "Admin added a truck operator"
+  //   "... for X. Lastname"               → "... for a truck operator"
+  const normalizeActivitySummary = (s) => {
+    if (!s || typeof s !== 'string') return s;
+    let out = s;
+    // "A driver <verb> ... on #PLATE"
+    out = out.replace(/^A driver (\w+(?:-\w+)?)\s+(.+?)\s+on\s+(#\S.+)$/i, 'Truck $3 $1 $2');
+    // "Initial. Lastname <verb> ... on #PLATE"
+    out = out.replace(/^[A-Z]\.\s*[A-Z][a-z]+\s+(\w+(?:-\w+)?)\s+(.+?)\s+on\s+(#\S.+)$/, 'Truck $3 $1 $2');
+    // "Initial. Lastname <verb> ..."  (no truck in line)
+    out = out.replace(/^[A-Z]\.\s*[A-Z][a-z]+\s+(logged|clocked|ended|quick-logged|started|paused|approved|rejected)\b/, 'Truck operator $1');
+    // "Admin added driver X. Lastname"
+    out = out.replace(/Admin added driver [A-Z]\.\s*[A-Z][a-z]+/, 'Admin added a truck operator');
+    // Trailing "... for X. Lastname"
+    out = out.replace(/\bfor\s+[A-Z]\.\s*[A-Z][a-z]+\b/, 'for a truck operator');
+    return out;
   };
 
   return (
@@ -12836,7 +12862,7 @@ function AdminActivity({ db, setDb, navigate }) {
                       <div style={{ ...T.monoSm, color: C.inkFaint, width: 44, flexShrink: 0, paddingTop: 6 }}>{fmtTime(evt.timestamp)}</div>
                       <Avatar name={actorNameFor(evt)} color={actorColorFor(evt.actorRole)} size={32} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{evt.summary}</div>
+                        <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{normalizeActivitySummary(evt.summary)}</div>
                         <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{evt.type}</div>
                       </div>
                     </div>
@@ -14619,7 +14645,7 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
         type: 'load.logged',
         actorRole: 'driver',
         actorId: newLoad.driverId,
-        summary: `${driver ? driver.name : 'A driver'} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)} on #${truck.plate}`,
+        summary: `Truck #${truck.plate} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)}`,
         refId: newLoad.id,
       }
     ));
