@@ -365,6 +365,20 @@ Additive, idempotent, safe to re-run. Dispatch can auto-apply.
 
 ---
 
+## v22 follow-up — flat-haul contractor + project label on haul_requests (2026-05-25)
+
+The flat-Hauls unwind drops the Project dropdown from the create-haul form. Contractor and project label are now free-text on the haul row itself.
+
+```sql
+-- v22: flat hauls — contractor + project label live on haul_requests directly
+ALTER TABLE haul_requests ADD COLUMN IF NOT EXISTS contractor_name text;
+ALTER TABLE haul_requests ADD COLUMN IF NOT EXISTS project_label  text;
+```
+
+`SB_FIELDS_JS.haulRequests` already lists `contractorName` + `projectLabel` (index.html 3342). camelToSnake adapter handles the rename. Additive, idempotent, safe to re-run.
+
+---
+
 ## v21 follow-up — clock-in photo on hours (2026-05-25)
 
 The restored driver widget adds an optional "Add a photo" prompt at clock-in (truck condition, dump body, gear check). One photo per shift, stored on the hours row.

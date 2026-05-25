@@ -2427,6 +2427,9 @@ function haulRequestLabel(state, req) {
   const proj = state && state.projects ? state.projects.find(p => p.id === req.projectId) : null;
   const matName = materialLabel(req.materialCode);
   if (proj) return `${proj.name} · ${req.volumeCY} CY ${matName}`;
+  // flat-Hauls: fall back to free-text projectLabel on the haul itself, then
+  // volume+material if neither is set.
+  if (req.projectLabel) return `${req.projectLabel} · ${req.volumeCY} CY ${matName}`;
   return `${req.volumeCY} CY ${matName}`;
 }
 
@@ -3339,7 +3342,7 @@ const SB_FIELDS_JS = {
   // local row is untouched (existing failure mode for unknown columns).
   hours:        ['id','driverId','truckId','projectId','haulRequestId','clockIn','clockOut','breakMin','status','date','photo'],
   invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','amount','notes'],
-  haulRequests: ['id','projectId','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
+  haulRequests: ['id','projectId','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
 };
 
@@ -8093,7 +8096,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Pending requests appear at the top with priority + waiting time.</div>
         </div>
-        <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul request</Btn>
+        <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
       </div>
 
       {/* Operations KPI strip */}
@@ -8225,20 +8228,22 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 // land in lockstep.
 function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
   const projects = db.projects || [];
-  // 2026-05-25: support `?projectId=<id>` deep-link from HaulOperationalCard
-  // when the user clicks a tile with 0 live haul requests. Pre-selects that
-  // project in the wizard so they don't have to re-pick from the dropdown.
-  // Falls through to projects[0] when the query param is missing or invalid.
-  const preselectedProjectId = (() => {
+  // 2026-05-25: flat-Hauls unwind — hauls are no longer nested under projects.
+  // The Project dropdown is gone; contractor + project label are free-text on
+  // the haul itself. Legacy ?projectId=<id> deep-link still resolves so the
+  // contractor / label / addresses pre-fill from the project as a convenience,
+  // but `projectId` is no longer persisted on new hauls.
+  const preselectedProject = (() => {
     try {
       const q = (hash || '').split('?')[1] || '';
       const m = q.split('&').map(p => p.split('=')).find(([k]) => k === 'projectId');
       if (!m || !m[1]) return null;
       const id = decodeURIComponent(m[1]);
-      return projects.some(p => p.id === id) ? id : null;
+      return projects.find(p => p.id === id) || null;
     } catch (e) { return null; }
   })();
-  const [projectId, setProjectId] = useState(preselectedProjectId || (projects[0] ? projects[0].id : ''));
+  const [contractorName, setContractorName] = useState(preselectedProject ? (preselectedProject.gc || '') : '');
+  const [projectLabel, setProjectLabel]     = useState(preselectedProject ? (preselectedProject.name || '') : '');
   // 2026-05-25: materials are free-text. Seed with the legacy-code label so
   // the input renders 'Clean Fill' instead of 'CF'.
   const [materialCode, setMaterialCode] = useState(materialLabel('CF'));
@@ -8247,10 +8252,14 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
     const now = new Date();
     return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
   });
-  const [pickup, setPickup] = useState({ name: '', address: '' });
-  const [dropoff, setDropoff] = useState({ name: '', address: '' });
-  const [pickupTouched, setPickupTouched] = useState(false);
-  const [dropoffTouched, setDropoffTouched] = useState(false);
+  const [pickup, setPickup] = useState({
+    name: '',
+    address: preselectedProject ? (preselectedProject.pickupLocation || '') : '',
+  });
+  const [dropoff, setDropoff] = useState({
+    name: '',
+    address: preselectedProject ? (preselectedProject.dumpLocation || '') : '',
+  });
   const [timing, setTiming] = useState({ startDate: TODAY_ISO, endDate: '' });
   const [loadingSite, setLoadingSite] = useState({ notes: '', equipment: '' });
   const [dumpingSite, setDumpingSite] = useState({ notes: '', equipment: '' });
@@ -8258,19 +8267,8 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
-  // Pre-fill pickup/dropoff from the chosen project's locations as a hint.
-  // Skip if the user has already touched the field (avoid clobbering input
-  // when they change project mid-fill).
-  useEffect(() => {
-    const p = projects.find(pr => pr.id === projectId);
-    if (!p) return;
-    if (!pickupTouched)  setPickup(s => ({ name: s.name, address: p.pickupLocation || s.address || '' }));
-    if (!dropoffTouched) setDropoff(s => ({ name: s.name, address: p.dumpLocation || s.address || '' }));
-  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const volumeNum = parseFloat(volumeCY);
   const valid =
-    !!projectId &&
     !!materialCode &&
     Number.isFinite(volumeNum) && volumeNum > 0 &&
     !!(pickup.address || '').trim() &&
@@ -8305,7 +8303,9 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
     const matLabel = (MATERIALS.find(m => m.code === materialCode) || {}).label || materialCode;
     const newReq = {
       id: newId,
-      projectId,
+      projectId: null,
+      contractorName: (contractorName || '').trim(),
+      projectLabel: (projectLabel || '').trim(),
       materialCode,
       volumeCY: volumeNum,
       requestedAt,
@@ -8336,14 +8336,14 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
           type: 'haul_request.created',
           actorRole: 'admin',
           actorId: null,
-          summary: 'Admin created new haul request ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
+          summary: 'Admin created new haul ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
           refId: newId,
         }
       ));
       navigate('/admin/requests/' + newId);
     } catch (e) {
       setSubmitting(false);
-      setSubmitError('Failed to create haul request: ' + (e && e.message ? e.message : 'unknown error'));
+      setSubmitError('Failed to create haul: ' + (e && e.message ? e.message : 'unknown error'));
     }
   };
 
@@ -8358,22 +8358,56 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       onCancel={() => navigate('/admin/requests')}
       onSubmit={submit}
       submitDisabled={!valid || submitting}
-      submitLabel={submitting ? 'Creating…' : 'Create haul request'}
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests', to: '/admin/requests' }, { label: 'New request' }]}
-      eyebrow="New request"
-      title="Create a new haul request"
+      submitLabel={submitting ? 'Creating…' : 'Create haul'}
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls', to: '/admin/requests' }, { label: 'New haul' }]}
+      eyebrow="New haul"
+      title="Create a new haul"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+        {/* 2026-05-25: flat-Hauls unwind. Contractor + project label are now
+            free-text on the haul (no Project dropdown). Autocomplete suggests
+            from existing haul-request values and from db.projects.gc/name as a
+            convenience — picking a suggestion still leaves it as free text. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Project</div>
-            <select value={projectId} onChange={e => setProjectId(e.target.value)} style={fInputStyle}>
-              {projects.length === 0 && <option value="">— no projects —</option>}
-              {projects.map(p => (
-                <option key={p.id} value={p.id}>{p.name} — {p.gc || '—'}</option>
-              ))}
-            </select>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Contractor</div>
+            <input
+              list="new-haul-contractor-list"
+              value={contractorName}
+              onChange={e => setContractorName(e.target.value)}
+              placeholder="e.g. Acme Construction"
+              style={fInputStyle} />
+            <datalist id="new-haul-contractor-list">
+              {(() => {
+                const set = new Set();
+                (db.haulRequests || []).forEach(r => { if (r && r.contractorName) set.add(r.contractorName); });
+                (db.projects || []).forEach(p => { if (p && p.gc) set.add(p.gc); });
+                return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
+                  .map(s => <option key={s} value={s} />);
+              })()}
+            </datalist>
           </div>
+          <div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Project label</div>
+            <input
+              list="new-haul-project-label-list"
+              value={projectLabel}
+              onChange={e => setProjectLabel(e.target.value)}
+              placeholder="e.g. Foothills mass-grade"
+              style={fInputStyle} />
+            <datalist id="new-haul-project-label-list">
+              {(() => {
+                const set = new Set();
+                (db.haulRequests || []).forEach(r => { if (r && r.projectLabel) set.add(r.projectLabel); });
+                (db.projects || []).forEach(p => { if (p && p.name) set.add(p.name); });
+                return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
+                  .map(s => <option key={s} value={s} />);
+              })()}
+            </datalist>
+          </div>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
           <div>
             <div style={{ ...T.caption, marginBottom: 4 }}>Material</div>
             {/* 2026-05-25: free-text material with autocomplete from existing
@@ -8419,7 +8453,7 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
               placeholder="Start typing a street address…"
               alwaysEditing={true}
               inputStyle={aaInputStyle}
-              onSave={(v) => { setPickupTouched(true); setPickup(p => ({ ...p, address: v })); }}
+              onSave={(v) => { setPickup(p => ({ ...p, address: v })); }}
             />
           </div>
           <div>
@@ -8434,7 +8468,7 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
               placeholder="Start typing a street address…"
               alwaysEditing={true}
               inputStyle={aaInputStyle}
-              onSave={(v) => { setDropoffTouched(true); setDropoff(d => ({ ...d, address: v })); }}
+              onSave={(v) => { setDropoff(d => ({ ...d, address: v })); }}
             />
           </div>
         </div>
@@ -9309,20 +9343,20 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
           gap: S[3], rowGap: S[3],
         }}>
-          {/* Project */}
+          {/* Project — falls back to req.projectLabel on flat hauls */}
           <div>
             <Label color={C.inkDim}>Project</Label>
             <div style={{ marginTop: 4 }}>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project ? project.name : '—'}</div>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project ? project.name : (req.projectLabel || '—')}</div>
               <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{project ? (project.address || '—') : '—'}</div>
             </div>
           </div>
 
-          {/* Contractor */}
+          {/* Contractor — falls back to req.contractorName on flat hauls */}
           <div>
             <Label color={C.inkDim}>Contractor</Label>
             <div style={{ marginTop: 4 }}>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project && project.gc ? project.gc : '—'}</div>
+              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project && project.gc ? project.gc : (req.contractorName || '—')}</div>
               <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
                 <span>{project && project.contactName ? project.contactName : '—'}</span>
                 {project && project.contactPhone ? (
