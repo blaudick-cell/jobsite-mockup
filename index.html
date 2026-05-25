@@ -567,6 +567,19 @@ const TRUCK_TYPES = [
 ];
 const RATES_INIT = Object.fromEntries(TRUCK_TYPES.map(t => [t.code, t.rate]));
 
+// 2026-05-25 simplification: assignment-level ratePerHour is now the source of
+// truth for billing. `rateForAssignment(a, truck)` walks the fallback chain:
+//   assignment.ratePerHour → truck.ratePerHour → DEFAULT_RATES[type] → 0
+// These are the floor defaults used when neither the assignment nor the truck
+// carries a rate override (e.g. brand-new haul before any inline edit).
+const DEFAULT_RATES = { TAN: 85, SD: 90, ED: 90, BD: 90, HS: 110 };
+
+// @deprecated 2026-05-25 — kept only for one hydrate pass that maps legacy
+// 2-letter `materialCode` / `loads.material` strings to their human labels.
+// Materials are now free-text on haulRequests.materialCode + loads.material;
+// the EditableMaterial dropdown was replaced by an EditableText with autocomplete
+// suggestions pulled from the unique existing values. Drop this const after
+// the next deploy cycle once every cached payload has rolled over.
 const MATERIALS = [
   { code: 'CF', label: 'Clean Fill' },
   { code: 'TS', label: 'Topsoil' },
@@ -1097,61 +1110,63 @@ function EditableSelect({ value, options, onSave, style = {} }) {
   );
 }
 
-// Click-to-edit material picker — wraps EditableSelect's pattern but adds
-// an "Other…" sentinel option that switches the control to a free-text
-// input. Lets users either pick from MATERIALS or type a custom material
-// name that survives end-to-end as the raw materialCode string. Display
-// resolves through materialLabel() so a custom name renders verbatim.
-function EditableMaterial({ value, onSave, style = {} }) {
-  const knownMat = MATERIALS.find(m => m.code === value);
-  // 'view' | 'select' | 'other'
-  const [mode, setMode] = useState('view');
-  const [otherText, setOtherText] = useState(knownMat ? '' : (value || ''));
-  useEffect(() => { if (mode === 'view') setOtherText(knownMat ? '' : (value || '')); }, [value, mode, knownMat]);
+// 2026-05-25: click-to-edit material control — now a free-text input with
+// a `<datalist>` populated from the unique existing material strings in
+// `db.haulRequests`. Picks autocomplete entries OR accepts any new free-text
+// label (e.g. "Crushed Asphalt 1.5\""). Display uses materialLabel(value) so
+// legacy 2-letter codes still render as their human label until the
+// materialsHydrated_v1 migration rewrites them; new entries render verbatim.
+function EditableMaterial({ value, onSave, db, style = {} }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value || '');
+  useEffect(() => { if (!editing) setDraft(value || ''); }, [value, editing]);
 
-  if (mode === 'select') {
-    return (
-      <select autoFocus value={knownMat ? value : '__other__'}
-        onChange={e => {
-          const v = e.target.value;
-          if (v === '__other__') { setMode('other'); return; }
-          if (v !== value) onSave(v);
-          setMode('view');
-        }}
-        onBlur={() => setMode('view')}
-        onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
-        style={{ background: C.bg, color: C.ink, border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', ...style }}>
-        {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
-        <option value="__other__">Other…</option>
-      </select>
-    );
-  }
+  // Unique non-empty material strings from every haul request — live,
+  // sorted, deduped. Each instance generates a stable id so multiple
+  // datalist elements on the same page don't collide. (React 18 useId.)
+  const listId = React.useId();
+  const suggestions = useMemo(() => {
+    const raw = (db && Array.isArray(db.haulRequests))
+      ? db.haulRequests.map(r => r && r.materialCode).filter(s => s != null && String(s).trim() !== '')
+      : [];
+    const set = new Set(raw.map(s => materialLabel(s))); // surface labels not codes
+    return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)));
+  }, [db]);
 
-  if (mode === 'other') {
+  if (editing) {
     const commit = () => {
-      const next = (otherText || '').trim();
-      if (next && next !== value) onSave(next);
-      setMode('view');
+      const next = (draft || '').trim();
+      if (next !== (value || '')) onSave(next);
+      setEditing(false);
     };
-    const cancel = () => { setOtherText(knownMat ? '' : (value || '')); setMode('view'); };
+    const cancel = () => { setDraft(value || ''); setEditing(false); };
     return (
-      <input autoFocus value={otherText}
-        onChange={e => setOtherText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); commit(); }
-          if (e.key === 'Escape') cancel();
-        }}
-        onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}
-        placeholder="Custom material name…"
-        style={{ background: C.bg, color: 'inherit', border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', minWidth: 220, ...style }} />
+      <>
+        <input
+          autoFocus
+          list={listId}
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => {
+            if (e.key === 'Enter') { e.preventDefault(); commit(); }
+            if (e.key === 'Escape') cancel();
+          }}
+          onClick={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
+          placeholder="Material…"
+          style={{ background: C.bg, color: 'inherit', border: `1px solid ${C.accent}`, padding: '4px 8px', borderRadius: R.sm, fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 'inherit', letterSpacing: 'inherit', minWidth: 200, ...style }} />
+        <datalist id={listId}>
+          {suggestions.map(s => <option key={s} value={s} />)}
+        </datalist>
+      </>
     );
   }
 
-  const displayLabel = knownMat ? knownMat.label : (value || '—');
+  const displayLabel = materialLabel(value) || (value || '—');
   return (
     <span
-      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setMode('select'); }}
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); setEditing(true); }}
       onMouseDown={e => e.stopPropagation()}
       style={{ cursor: 'pointer', padding: '3px 6px', margin: '-3px -6px', borderRadius: R.xs, transition: 'background 80ms', display: 'inline-block', minWidth: 18, ...style }}
       onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.12)'}
@@ -1160,56 +1175,45 @@ function EditableMaterial({ value, onSave, style = {} }) {
   );
 }
 
-// Permanent-edit-mode material picker. Renders as a dropdown by default;
-// picking "Other…" swaps to a text input for a custom material name.
-// Unknown values (custom strings) survive as a "(custom)" option so they
-// stay selectable.
-function MaterialField({ value, onSave, style = {} }) {
-  const knownMat = MATERIALS.find(m => m.code === value);
-  const [isEditingCustom, setIsEditingCustom] = useState(false);
-  const [draftText, setDraftText] = useState(value || '');
+// 2026-05-25: permanent edit-mode material field. Now a free-text input
+// with a `<datalist>` autocomplete sourced from unique existing values in
+// db.haulRequests. Same UX shell as the previous select+Other flow — type
+// to filter; pick a suggestion or accept anything you type.
+function MaterialField({ value, onSave, db, style = {} }) {
+  const [draftText, setDraftText] = useState(materialLabel(value) || '');
+  useEffect(() => setDraftText(materialLabel(value) || ''), [value]);
   const fieldStyle = { ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box', ...style };
+  const listId = React.useId();
+  const suggestions = useMemo(() => {
+    const raw = (db && Array.isArray(db.haulRequests))
+      ? db.haulRequests.map(r => r && r.materialCode).filter(s => s != null && String(s).trim() !== '')
+      : [];
+    const set = new Set(raw.map(s => materialLabel(s)));
+    return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)));
+  }, [db]);
 
-  if (isEditingCustom) {
-    const commit = () => {
-      const next = (draftText || '').trim();
-      if (next && next !== value) onSave(next);
-      setIsEditingCustom(false);
-    };
-    return (
-      <div style={{ display: 'flex', gap: S[2], alignItems: 'center' }}>
-        <input autoFocus value={draftText}
-          onChange={e => setDraftText(e.target.value)}
-          onBlur={commit}
-          onKeyDown={e => {
-            if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
-            if (e.key === 'Escape') { setDraftText(value || ''); setIsEditingCustom(false); }
-          }}
-          placeholder="Custom material name…"
-          style={fieldStyle} />
-        <button type="button" onMouseDown={e => e.preventDefault()}
-          onClick={() => { setDraftText(value || ''); setIsEditingCustom(false); }}
-          style={{ ...T.caption, background: 'transparent', border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '4px 10px', color: C.inkDim, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-          cancel
-        </button>
-      </div>
-    );
-  }
+  const commit = () => {
+    const next = (draftText || '').trim();
+    const current = materialLabel(value) || (value || '');
+    if (next !== current) onSave(next);
+  };
 
-  const isCustom = !knownMat && value;
   return (
-    <select value={isCustom ? '__current__' : (value || '')}
-      onChange={e => {
-        const v = e.target.value;
-        if (v === '__other__') { setDraftText(isCustom ? value : ''); setIsEditingCustom(true); return; }
-        if (v === '__current__') return;
-        if (v !== value) onSave(v);
-      }}
-      style={{ ...fieldStyle, cursor: 'pointer' }}>
-      {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
-      {isCustom && <option value="__current__">{value} (custom)</option>}
-      <option value="__other__">Other…</option>
-    </select>
+    <>
+      <input value={draftText}
+        onChange={e => setDraftText(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
+          if (e.key === 'Escape') setDraftText(materialLabel(value) || '');
+        }}
+        list={listId}
+        placeholder="Material…"
+        style={fieldStyle} />
+      <datalist id={listId}>
+        {suggestions.map(s => <option key={s} value={s} />)}
+      </datalist>
+    </>
   );
 }
 
@@ -1900,7 +1904,7 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 19;
+const DB_SCHEMA_VERSION = 20;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
@@ -2373,8 +2377,43 @@ function truckPlate(state, id) {
   return t ? t.plate : '?';
 }
 function materialLabel(code) {
+  // 2026-05-25: materials are now free-text. If `code` matches a legacy
+  // 2-letter MATERIALS entry, return the human label; otherwise return
+  // `code` unchanged so user-typed strings like "Clean Fill" render as-is.
+  if (code == null || code === '') return code;
   const m = MATERIALS.find(x => x.code === code);
   return m ? m.label : code;
+}
+
+// 2026-05-25: source-of-truth rate lookup for a single (assignment, truck)
+// pair. Chain: assignment.ratePerHour → truck.ratePerHour → DEFAULT_RATES[type]
+// → 0. Used everywhere billing dollars are computed (dollarsForRequest,
+// invoice generators, settlement statement). Pre-2026-05-25 the chain
+// terminated at `db.rates[type]`; rates table is now deprecated and the
+// per-haul ratePerHour replaces it as the editable source of truth.
+function rateForAssignment(assignment, truck) {
+  if (assignment && assignment.ratePerHour != null && Number.isFinite(Number(assignment.ratePerHour))) {
+    return Number(assignment.ratePerHour);
+  }
+  if (truck && truck.ratePerHour != null && Number.isFinite(Number(truck.ratePerHour))) {
+    return Number(truck.ratePerHour);
+  }
+  if (truck && truck.type && DEFAULT_RATES[truck.type] != null) {
+    return DEFAULT_RATES[truck.type];
+  }
+  return 0;
+}
+
+// Helper for hours-row-keyed dollar sums (dollarsForRequest, haulerRollupV31):
+// resolves the truck + assignment from a single hours row and returns the
+// effective rate. Picks the first assignment matching (req.id, truckId) — in
+// practice there's at most one per (req,truck), but the data model permits
+// multiple so we take the first deterministic one.
+function rateForHoursRow(h, req, db) {
+  if (!h || !req || !db) return 0;
+  const truck = (db.trucks || []).find(t => t.id === h.truckId) || null;
+  const assignment = (req.assignments || []).find(a => a && a.truckId === h.truckId) || null;
+  return rateForAssignment(assignment, truck);
 }
 
 // Human-friendly label for a haul request used wherever the raw `hreq-NNN` id
@@ -2434,10 +2473,7 @@ function dollarsForRequest(req, db) {
   let total = 0;
   for (const h of db.hours) {
     if (!h || h.haulRequestId !== req.id) continue;
-    const truck = (db.trucks || []).find(t => t.id === h.truckId);
-    const rate = (truck && truck.ratePerHour != null)
-      ? truck.ratePerHour
-      : ((truck && db.rates && db.rates[truck.type]) || 0);
+    const rate = rateForHoursRow(h, req, db);
     total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut) * rate;
   }
   return total;
@@ -2463,12 +2499,13 @@ function haulerRollupV31(haulerId, db) {
     out.totalLoads += 1;
     out.totalCY += Number(l.cy) || 0;
   }
+  // Index reqs by id so rateForHoursRow can resolve the per-haul assignment
+  // without rescanning db.haulRequests for each hours row.
+  const reqsById = new Map(reqs.map(r => [r.id, r]));
   for (const h of (db.hours || [])) {
     if (!h || !reqIds.has(h.haulRequestId)) continue;
-    const truck = (db.trucks || []).find(t => t.id === h.truckId);
-    const rate = (truck && truck.ratePerHour != null)
-      ? truck.ratePerHour
-      : ((truck && db.rates && db.rates[truck.type]) || 0);
+    const reqForHr = reqsById.get(h.haulRequestId);
+    const rate = rateForHoursRow(h, reqForHr, db);
     const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
     out.totalHours += hrs;
     out.totalRevenue += hrs * rate;
@@ -2634,16 +2671,43 @@ const STALE_HAUL_ADDR_SWAPS = {
 // (per-row Supabase echo path).
 function migrateHaulRequestRow(r) {
   if (!r || typeof r !== 'object') return r;
-  const swap = STALE_HAUL_ADDR_SWAPS[r.id];
-  if (!swap) return r;
   let next = r;
-  if (swap.pick && r.pickupLocation && r.pickupLocation.address === swap.pick.from) {
-    next = { ...next, pickupLocation: { ...(next.pickupLocation || {}), address: swap.pick.to, name: swap.pick.name } };
+  // v18 → v19: address swaps for retired pre-v16 projects.
+  const swap = STALE_HAUL_ADDR_SWAPS[r.id];
+  if (swap) {
+    if (swap.pick && next.pickupLocation && next.pickupLocation.address === swap.pick.from) {
+      next = { ...next, pickupLocation: { ...(next.pickupLocation || {}), address: swap.pick.to, name: swap.pick.name } };
+    }
+    if (swap.drop && next.dropoffLocation && next.dropoffLocation.address === swap.drop.from) {
+      next = { ...next, dropoffLocation: { ...(next.dropoffLocation || {}), address: swap.drop.to, name: swap.drop.name } };
+    }
   }
-  if (swap.drop && r.dropoffLocation && r.dropoffLocation.address === swap.drop.from) {
-    next = { ...next, dropoffLocation: { ...(next.dropoffLocation || {}), address: swap.drop.to, name: swap.drop.name } };
+  // v19 → v20: materialCode legacy-code → free-text label. Idempotent —
+  // materialLabel() returns its input unchanged when not in the const map.
+  if (next.materialCode != null) {
+    const labelled = materialLabel(next.materialCode);
+    if (labelled !== next.materialCode) {
+      next = { ...next, materialCode: labelled };
+    }
   }
+  // v19 → v20: assignments[*].ratePerHour. The per-row path can only fill
+  // missing rates from a default — it doesn't have the live db.trucks /
+  // db.rates lookup map (the hydrate-path cascade does). For Realtime safety
+  // we leave missing assignment.ratePerHour as-is here; rateForAssignment()
+  // already does the chain at read time (truck.ratePerHour → DEFAULT_RATES),
+  // so a missing field just resolves to the same default the hydrate would
+  // have backfilled. This means we don't ping-pong over rates from stale
+  // peers — they read the same chain too.
   return next;
+}
+
+// Per-row materials migration for the loads table. Used by hydrateDb +
+// applyRealtimeChange so a cross-tab Supabase echo doesn't revert a freshly
+// migrated row (same pattern as migrateHaulRequestRow). Idempotent.
+function migrateLoadRow(l) {
+  if (!l || typeof l !== 'object' || l.material == null) return l;
+  const labelled = materialLabel(l.material);
+  return labelled === l.material ? l : { ...l, material: labelled };
 }
 
 function hydrateDb(raw) {
@@ -3100,6 +3164,64 @@ function hydrateDb(raw) {
         out.routes = rOut;
       }
     } catch (e) { /* fall through with v18 shape; next hydrate retries */ }
+    // v19 → v20: materials free-text + assignment-level ratePerHour.
+    //   (a) Rewrite haulRequests[*].materialCode + loads[*].material via
+    //       materialLabel() so legacy 2-letter codes ("CF" / "EX") become
+    //       their human label ("Clean Fill" / "Export / Spoils"). Idempotent
+    //       — materialLabel returns the input unchanged for non-code strings,
+    //       so re-running on already-labeled rows is a no-op.
+    //   (b) Backfill assignment.ratePerHour for every haulRequests.assignments[]
+    //       entry that lacks one. Pulls the truck's ratePerHour first, then
+    //       falls back to the old (about-to-be-deprecated) db.rates[type], so
+    //       cached payloads from before this commit get a sensible per-haul
+    //       default seeded down. Idempotent — only writes when missing.
+    // Both steps survive being re-run on already-v20 data; wrapped in try/catch
+    // so a malformed row doesn't blank the rest of the migration cascade.
+    try {
+      if (Array.isArray(out.haulRequests)) {
+        out.haulRequests = out.haulRequests.map(r => {
+          if (!r || typeof r !== 'object') return r;
+          let next = r;
+          // (a) materialCode → human label string
+          if (next.materialCode != null) {
+            const labelled = materialLabel(next.materialCode);
+            if (labelled !== next.materialCode) {
+              next = { ...next, materialCode: labelled };
+            }
+          }
+          // (b) assignments[*].ratePerHour backfill
+          if (Array.isArray(next.assignments) && next.assignments.length > 0) {
+            const nextAsgs = next.assignments.map(a => {
+              if (!a || typeof a !== 'object') return a;
+              if (a.ratePerHour != null) return a; // already set — skip
+              const truck = (out.trucks || []).find(t => t && t.id === a.truckId);
+              let copied = null;
+              if (truck && truck.ratePerHour != null && Number.isFinite(Number(truck.ratePerHour))) {
+                copied = Number(truck.ratePerHour);
+              } else if (out.rates && truck && truck.type && out.rates[truck.type] != null) {
+                copied = Number(out.rates[truck.type]);
+              } else if (truck && truck.type && DEFAULT_RATES[truck.type] != null) {
+                copied = DEFAULT_RATES[truck.type];
+              }
+              if (copied == null) return a; // nothing useful to copy — leave as-is
+              return { ...a, ratePerHour: copied };
+            });
+            // Only allocate a new request object if assignments actually changed.
+            if (nextAsgs.some((a, i) => a !== next.assignments[i])) {
+              next = { ...next, assignments: nextAsgs };
+            }
+          }
+          return next;
+        });
+      }
+      if (Array.isArray(out.loads)) {
+        out.loads = out.loads.map(l => {
+          if (!l || typeof l !== 'object' || l.material == null) return l;
+          const labelled = materialLabel(l.material);
+          return labelled === l.material ? l : { ...l, material: labelled };
+        });
+      }
+    } catch (e) { /* fall through with v19 shape; next hydrate retries */ }
     // Idempotent geocode/routes GC — DISABLED 2026-05-24.
     // Was: drop cache entries no longer referenced by any live address.
     // Why disabled: running on every hydrate (including cross-tab storage
@@ -3284,24 +3406,18 @@ const _sb = {
     if (error) throw error;
     return (data || []).map(r => sbRowToJs(jsKey, r));
   },
-  async fetchRates() {
-    const { data, error } = await this.client.from('rates').select('truck_type, rate_per_hour').limit(1000);
-    if (error) throw error;
-    const out = {};
-    (data || []).forEach(r => { out[r.truck_type] = r.rate_per_hour; });
-    return out;
-  },
+  // 2026-05-25: fetchRates / upsertRates / fetchMaterials / upsertMaterials
+  // were removed when db.rates and db.materials were deprecated. Source of
+  // truth for rates is now assignment.ratePerHour → truck.ratePerHour →
+  // DEFAULT_RATES. Materials are free-text on haulRequests.materialCode +
+  // loads.material. The `rates` + `materials` Supabase tables remain as
+  // dead data per the schema-preservation pattern (no destructive ALTER).
   async fetchMeta() {
     const { data, error } = await this.client.from('meta').select('*').limit(1000);
     if (error) throw error;
     const out = {};
     (data || []).forEach(r => { out[r.key] = r.value; });
     return out;
-  },
-  async fetchMaterials() {
-    const { data, error } = await this.client.from('materials').select('code, label').limit(1000);
-    if (error) throw error;
-    return data || [];
   },
   async upsertRows(jsKey, rows) {
     if (!rows || rows.length === 0) return { count: 0 };
@@ -3311,23 +3427,10 @@ const _sb = {
     if (error) throw error;
     return { count: sbRows.length };
   },
-  async upsertRates(rates) {
-    if (!rates || typeof rates !== 'object') return { count: 0 };
-    const sbRows = Object.entries(rates).map(([truck_type, rate_per_hour]) => ({ truck_type, rate_per_hour }));
-    const { error } = await this.client.from('rates').upsert(sbRows, { onConflict: 'truck_type' });
-    if (error) throw error;
-    return { count: sbRows.length };
-  },
   async upsertMeta(key, value) {
     const { error } = await this.client.from('meta')
       .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' });
     if (error) throw error;
-  },
-  async upsertMaterials(list) {
-    if (!list || list.length === 0) return { count: 0 };
-    const { error } = await this.client.from('materials').upsert(list, { onConflict: 'code' });
-    if (error) throw error;
-    return { count: list.length };
   },
   async deleteRows(jsKey, ids) {
     if (!ids || ids.length === 0) return { count: 0 };
@@ -3338,10 +3441,11 @@ const _sb = {
   },
   async truncateAll() {
     // PostgREST requires a filter on DELETE; `gte('', '')` matches everything.
+    // 2026-05-25: rates + materials no longer in the truncate set — they're
+    // deprecated as live data sources. Leaving rows in those tables is
+    // harmless (no UI reads them) so Reset Demo no longer wipes them.
     const tables = [
       ...SB_TABLE_LIST.map(k => ({ sb: SB_TABLES[k].sb, pk: SB_TABLES[k].pk })),
-      { sb: 'rates',     pk: 'truck_type' },
-      { sb: 'materials', pk: 'code' },
     ];
     for (const t of tables) {
       const { error } = await this.client.from(t.sb).delete().gte(t.pk, '');
@@ -3386,16 +3490,19 @@ async function bootstrapCloud(localDb) {
     return { status: 'offline', db: localDb, reason: 'sdk-missing' };
   }
   try {
-    let [tableArrays, cloudRates, cloudMeta, cloudMats] = await fetchAllCloud();
+    // 2026-05-25: rates + materials are no longer fetched from cloud — the
+    // backing tables stay but are dead data; rate lookups now chain
+    // assignment.ratePerHour → truck.ratePerHour → DEFAULT_RATES.
+    let [tableArrays, cloudMeta] = await fetchAllCloud();
     // Per-table empty-check seed. Robust against the case where a previous
     // browser tab partial-seeded (closed mid-flight) and 4 of the 13 tables
     // never landed. We backfill ONLY the empty ones; tables with user data
     // are never overwritten.
-    const didSeed = await seedMissingTables(tableArrays, cloudRates, cloudMats, cloudMeta);
+    const didSeed = await seedMissingTables(tableArrays, cloudMeta);
     if (didSeed) {
-      [tableArrays, cloudRates, cloudMeta, cloudMats] = await fetchAllCloud();
+      [tableArrays, cloudMeta] = await fetchAllCloud();
     }
-    const assembled = assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb);
+    const assembled = assembleDbFromCloud(tableArrays, cloudMeta, localDb);
     // Auto-bump cloud meta.schema_version once the migration cascade has
     // run on this device. Without this, every new deploy bumps
     // DB_SCHEMA_VERSION but cloud meta stays at the old value, and the
@@ -3446,20 +3553,18 @@ async function bootstrapCloud(localDb) {
 }
 
 async function fetchAllCloud() {
+  // 2026-05-25: rates + materials cloud fetches removed. Those tables stay
+  // in Supabase as dead data per the schema-preservation pattern.
   const results = await Promise.all([
     ...SB_TABLE_LIST.map(k => _sb.fetchAll(k)),
-    _sb.fetchRates(),
     _sb.fetchMeta(),
-    _sb.fetchMaterials(),
   ]);
   const tableArrays = results.slice(0, SB_TABLE_LIST.length);
-  const cloudRates  = results[SB_TABLE_LIST.length];
-  const cloudMeta   = results[SB_TABLE_LIST.length + 1];
-  const cloudMats   = results[SB_TABLE_LIST.length + 2];
-  return [tableArrays, cloudRates, cloudMeta, cloudMats];
+  const cloudMeta   = results[SB_TABLE_LIST.length];
+  return [tableArrays, cloudMeta];
 }
 
-async function seedMissingTables(tableArrays, cloudRates, cloudMats, cloudMeta) {
+async function seedMissingTables(tableArrays, cloudMeta) {
   const seed = buildSeed();
   const byKey = {};
   SB_TABLE_LIST.forEach((k, i) => { byKey[k] = tableArrays[i]; });
@@ -3469,20 +3574,21 @@ async function seedMissingTables(tableArrays, cloudRates, cloudMats, cloudMeta) 
       ops.push(_sb.upsertRows(k, seed[k]));
     }
   }
-  if (Object.keys(cloudRates).length === 0)      ops.push(_sb.upsertRates(seed.rates));
-  if (cloudMats.length === 0)                    ops.push(_sb.upsertMaterials(MATERIALS));
   if (typeof cloudMeta.schema_version !== 'number') ops.push(_sb.upsertMeta('schema_version', DB_SCHEMA_VERSION));
   if (ops.length === 0) return false;
   await Promise.all(ops);
   return true;
 }
 
-function assembleDbFromCloud(tableArrays, cloudRates, cloudMeta, localDb) {
+function assembleDbFromCloud(tableArrays, cloudMeta, localDb) {
   const byKey = {};
   SB_TABLE_LIST.forEach((k, i) => { byKey[k] = tableArrays[i]; });
-  // Merge cloud rates over RATES_INIT so any TRUCK_TYPES added since the
-  // last cloud seed still light up with their default.
-  const rates = { ...RATES_INIT, ...cloudRates };
+  // 2026-05-25: db.rates kept around as back-compat shell (RATES_INIT only;
+  // no cloud read). Read sites have been refactored to DEFAULT_RATES, but
+  // the empty-object reference stays defined so any uncaught legacy access
+  // doesn't throw. Dead UI components (HaulerTrucks, HaulerInvoices) read
+  // truck.ratePerHour with the DEFAULT_RATES fallback now.
+  const rates = { ...RATES_INIT };
   const schemaVersion = typeof cloudMeta.schema_version === 'number'
     ? cloudMeta.schema_version : DB_SCHEMA_VERSION;
   const activityLastReadAt = typeof cloudMeta.activity_last_read_at === 'number'
@@ -3621,17 +3727,10 @@ async function syncDbToCloud(prev, next) {
     }
   }
 
-  // Rates: flat object → row-per-truck-type upsert for changed keys only.
-  if (prev.rates !== next.rates && next.rates) {
-    const changed = {};
-    for (const k of Object.keys(next.rates)) {
-      if (!prev.rates || prev.rates[k] !== next.rates[k]) changed[k] = next.rates[k];
-    }
-    if (Object.keys(changed).length > 0) {
-      Object.entries(changed).forEach(([k, v]) => markLocalWrite('rates', k, { truck_type: k, rate_per_hour: v }));
-      tasks.push(_sb.upsertRates(changed).catch(e => SyncErrorBus.push('rates', 'upsert', e)));
-    }
-  }
+  // 2026-05-25: rates sync block removed. assignment.ratePerHour rides on
+  // haulRequests.assignments (jsonb column) and goes through the normal
+  // haulRequests upsert above; truck.ratePerHour rides on trucks rows.
+  // The legacy `rates` table is no longer written.
 
   // Scalar meta field.
   if (prev.activityLastReadAt !== next.activityLastReadAt) {
@@ -3673,6 +3772,20 @@ function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
       }
       jsRow = migrated;
     }
+    // v19 → v20: same per-row migration for loads (materialCode legacy
+    // 2-letter codes → human label strings). Self-heal the cloud row so
+    // peer tabs on stale bundles stop re-broadcasting raw codes.
+    if (jsKey === 'loads') {
+      const migrated = migrateLoadRow(jsRow);
+      if (migrated !== jsRow) {
+        try {
+          markLocalWrite('loads', migrated.id, sbRowToJs('loads', jsRowToSb('loads', migrated)));
+          _sb.upsertRows('loads', [migrated])
+            .catch(e => SyncErrorBus.push('loads', 'realtime-heal', e));
+        } catch (e) { /* heal is best-effort */ }
+      }
+      jsRow = migrated;
+    }
     rowKey = jsRow.id;
     jsRowForCompare = jsRow;
   }
@@ -3695,20 +3808,7 @@ function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
   bumpRemote();
 }
 
-function applyRealtimeRates(payload, setDbRaw, bumpRemote) {
-  const event = payload.eventType;
-  if (event === 'DELETE') return; // we don't model rate deletes in the JS shape
-  const row = payload.new;
-  if (!row || !row.truck_type) return;
-  const incoming = { truck_type: row.truck_type, rate_per_hour: row.rate_per_hour };
-  if (isLocalEcho('rates', row.truck_type, incoming)) return;
-  setDbRaw(prev => {
-    const rates = prev.rates || {};
-    if (rates[row.truck_type] === row.rate_per_hour) return prev;
-    return { ...prev, rates: { ...rates, [row.truck_type]: row.rate_per_hour } };
-  });
-  bumpRemote();
-}
+// 2026-05-25: applyRealtimeRates removed — db.rates is no longer cloud-synced.
 
 function applyRealtimeMeta(payload, setDbRaw, bumpRemote) {
   if (payload.eventType === 'DELETE') return;
@@ -3726,9 +3826,10 @@ function applyRealtimeMeta(payload, setDbRaw, bumpRemote) {
   // owns that value; cross-tab schema bumps require a page reload.
 }
 
-// Subscribe to postgres_changes across every JSE table + rates + meta. The
-// returned `cleanup` removes the channel — Realtime channels are connection-
-// scoped, so leaving one open after the component unmounts would leak.
+// Subscribe to postgres_changes across every JSE table + meta. The returned
+// `cleanup` removes the channel — Realtime channels are connection-scoped,
+// so leaving one open after the component unmounts would leak.
+// 2026-05-25: rates channel removed — db.rates is no longer cloud-synced.
 function subscribeRealtime(setDbRaw, bumpRemote) {
   if (!_sb.ready || !_sb.client) return () => {};
   const channel = _sb.client.channel('jse-db-realtime');
@@ -3738,9 +3839,6 @@ function subscribeRealtime(setDbRaw, bumpRemote) {
       { event: '*', schema: 'public', table: sbTable },
       (payload) => applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote));
   }
-  channel.on('postgres_changes',
-    { event: '*', schema: 'public', table: 'rates' },
-    (payload) => applyRealtimeRates(payload, setDbRaw, bumpRemote));
   channel.on('postgres_changes',
     { event: '*', schema: 'public', table: 'meta' },
     (payload) => applyRealtimeMeta(payload, setDbRaw, bumpRemote));
@@ -3759,11 +3857,13 @@ async function resetDemoCloud() {
   if (!_sb.ready) return false;
   await _sb.truncateAll();
   // Re-seed every table from the JS constants (idempotent upsert).
+  // 2026-05-25: rates + materials no longer seeded — those Supabase tables
+  // are dead data. Source of truth is now assignment.ratePerHour /
+  // truck.ratePerHour / DEFAULT_RATES for rates, and free-text
+  // haulRequests.materialCode for materials.
   const seed = buildSeed();
   await Promise.all([
     ...SB_TABLE_LIST.map(k => _sb.upsertRows(k, seed[k] || [])),
-    _sb.upsertRates(seed.rates),
-    _sb.upsertMaterials(MATERIALS),
     _sb.upsertMeta('schema_version', DB_SCHEMA_VERSION),
     _sb.upsertMeta('activity_last_read_at', 0),
   ]);
@@ -8031,7 +8131,9 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
     } catch (e) { return null; }
   })();
   const [projectId, setProjectId] = useState(preselectedProjectId || (projects[0] ? projects[0].id : ''));
-  const [materialCode, setMaterialCode] = useState('CF');
+  // 2026-05-25: materials are free-text. Seed with the legacy-code label so
+  // the input renders 'Clean Fill' instead of 'CF'.
+  const [materialCode, setMaterialCode] = useState(materialLabel('CF'));
   const [volumeCY, setVolumeCY] = useState('');
   const [requestedAt, setRequestedAt] = useState(() => {
     const now = new Date();
@@ -8166,9 +8268,25 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
           </div>
           <div>
             <div style={{ ...T.caption, marginBottom: 4 }}>Material</div>
-            <select value={materialCode} onChange={e => setMaterialCode(e.target.value)} style={fInputStyle}>
-              {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
-            </select>
+            {/* 2026-05-25: free-text material with autocomplete from existing
+                haul request values. Same shape as EditableMaterial — pick a
+                suggestion or type a new label outright. */}
+            <input
+              list="new-haul-req-material-list"
+              value={materialCode}
+              onChange={e => setMaterialCode(e.target.value)}
+              placeholder="e.g. Clean Fill, Topsoil…"
+              style={fInputStyle} />
+            <datalist id="new-haul-req-material-list">
+              {(() => {
+                const raw = (db && Array.isArray(db.haulRequests))
+                  ? db.haulRequests.map(r => r && r.materialCode).filter(s => s != null && String(s).trim() !== '')
+                  : [];
+                const set = new Set(raw.map(s => materialLabel(s)));
+                return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
+                  .map(s => <option key={s} value={s} />);
+              })()}
+            </datalist>
           </div>
           <div>
             <div style={{ ...T.caption, marginBottom: 4 }}>Volume (CY)</div>
@@ -8930,9 +9048,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       const hours = (db.hours || [])
         .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
         .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
-      const ratePerHour = (truck && truck.ratePerHour != null)
-        ? truck.ratePerHour
-        : ((truck && db.rates && db.rates[truck.type]) || 0);
+      // 2026-05-25: assignment-scoped rate (Rate (this haul) inline edit).
+      const ratePerHour = rateForAssignment(a, truck);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
@@ -9148,7 +9265,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                       title="Click to edit quantity"
                       style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 80, textAlign: 'center', boxSizing: 'border-box' }} />
                     <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
-                    <MaterialField value={req.materialCode}
+                    <MaterialField value={req.materialCode} db={db}
                       onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
                       style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
                   </div>
@@ -9628,9 +9745,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             // tracked per load — daily d.hours is the billing source of truth
             // (Start to finish elapsed time); dollars derive from h × rate.
             const typeMeta = TRUCK_TYPES.find(x => x.code === (t && t.type)) || null;
-            const hourlyRate = (t && t.ratePerHour != null)
-              ? t.ratePerHour
-              : ((t && db.rates && db.rates[t.type]) || (typeMeta && typeMeta.rate) || 0);
+            // 2026-05-25: assignment-level ratePerHour is the source of truth.
+            // rateForAssignment walks: a.ratePerHour → t.ratePerHour → DEFAULT_RATES[type] → 0.
+            const hourlyRate = rateForAssignment(a, t);
             const totalHoursForTruck = (db.hours || [])
               .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
               .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
@@ -9743,7 +9860,13 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                         </div>
                       </div>
 
-                      {/* HOURLY RATE — informational */}
+                      {/* RATE (THIS HAUL) — inline editable on the assignment.
+                          2026-05-25: assignment.ratePerHour is now the billing
+                          source of truth. Edits here propagate through
+                          rateForAssignment → dollarsForRequest / invoices /
+                          settlement statements. Falls back to truck.ratePerHour
+                          then DEFAULT_RATES[type] when assignment.ratePerHour
+                          isn't set. */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
                         <span aria-hidden="true" style={{
                           width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
@@ -9751,9 +9874,30 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                           border: `1.5px solid ${C.info}`, color: C.info, fontSize: 14,
                         }}>🏷</span>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtUSD(hourlyRate)}</div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Hourly rate</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>For information</div>
+                          <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1, display: 'inline-flex', alignItems: 'baseline' }}>
+                            $<EditableText
+                              value={String(Math.round(hourlyRate))}
+                              onSave={(v) => {
+                                const cleaned = String(v == null ? '' : v).replace(/[^0-9.]/g, '');
+                                const n = parseFloat(cleaned);
+                                const next = (cleaned !== '' && Number.isFinite(n) && n > 0) ? n : null;
+                                if (next === a.ratePerHour) return;
+                                updateReq(r => ({
+                                  ...r,
+                                  assignments: r.assignments.map(x => x.truckId === a.truckId
+                                    ? { ...x, ratePerHour: next }
+                                    : x),
+                                }));
+                              }}
+                              mono />
+                            <span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>/HR</span>
+                          </div>
+                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Rate (this haul)</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>
+                            {a.ratePerHour != null
+                              ? 'Per-haul override'
+                              : (t && t.ratePerHour != null ? 'From truck default' : 'From type default')}
+                          </div>
                         </div>
                       </div>
 
@@ -10042,10 +10186,8 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         for (const a of settleAssignments) {
           const t = (db.trucks || []).find(x => x.id === a.truckId);
           if (!t) continue;
-          const typeMeta = TRUCK_TYPES.find(x => x.code === t.type) || null;
-          const hourlyRate = (t.ratePerHour != null)
-            ? t.ratePerHour
-            : ((db.rates && db.rates[t.type]) || (typeMeta && typeMeta.rate) || 0);
+          // 2026-05-25: assignment-scoped rate (Rate (this haul) inline edit).
+          const hourlyRate = rateForAssignment(a, t);
           const hoursRows = (db.hours || []).filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId);
           for (const h of hoursRows) {
             const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
@@ -10739,7 +10881,6 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const attachments = hauler.attachments || [];
   const updateHauler = (patch) => setDb(prev => ({ ...prev, haulers: prev.haulers.map(o => o.id === hauler.id ? { ...o, ...patch } : o) }));
   const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
-  const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
   const removeTruck = (id) => {
     if (!confirm('Remove this truck from the hauler? This will detach it from any haul assignment.')) return;
     setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
@@ -11015,7 +11156,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       {/* Trucks under this hauler — moved to top of the page, inline-editable, with Edit/Remove. */}
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
         <Label>Trucks under this hauler</Label>
-        <span style={{ ...T.bodySm, color: C.inkDim }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} · click any value to edit · rate updates all trucks of that type</span>
+        <span style={{ ...T.bodySm, color: C.inkDim }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} · click any value to edit · rate is a per-truck default; assigning to a haul still lets you override per-haul</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
         {trucks.length === 0 ? (
@@ -11026,11 +11167,27 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
             <tbody>
               {trucks.map(t => {
                 const project = db.projects.find(p => p.id === t.projectId);
+                // 2026-05-25: db.rates is deprecated. Display truck.ratePerHour
+                // with DEFAULT_RATES[type] as the floor. Editing writes back to
+                // the truck record (per-truck default); assignment.ratePerHour
+                // is edited inline on the haul detail page.
+                const effectiveTruckRate = (t.ratePerHour != null && Number.isFinite(Number(t.ratePerHour)))
+                  ? Number(t.ratePerHour)
+                  : (DEFAULT_RATES[t.type] != null ? DEFAULT_RATES[t.type] : 0);
                 return (
                   <Tr key={t.id}>
                     <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
                     <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={truckTypeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
-                    <Td align="right" mono>$<EditableText value={String(db.rates[t.type] || 0)} onSave={(v) => updateRate(t.type, v)} mono />/hr</Td>
+                    <Td align="right" mono>$<EditableText
+                      value={String(effectiveTruckRate)}
+                      onSave={(v) => {
+                        const cleaned = String(v == null ? '' : v).replace(/[^0-9.]/g, '');
+                        const n = parseFloat(cleaned);
+                        const next = (cleaned !== '' && Number.isFinite(n) && n > 0) ? n : null;
+                        if (next === t.ratePerHour) return;
+                        updateTruck(t.id, { ratePerHour: next });
+                      }}
+                      mono />/hr</Td>
                     <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
                     <Td align="right">
                       <div style={{ display: 'inline-flex', gap: S[2] }}>
@@ -11288,9 +11445,8 @@ function AdminReporting({ db, setDb, navigate }) {
       const hours = (db.hours || [])
         .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
         .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
-      const ratePerHour = (truck && truck.ratePerHour != null)
-        ? truck.ratePerHour
-        : ((truck && db.rates && db.rates[truck.type]) || 0);
+      // 2026-05-25: assignment-scoped rate (Rate (this haul) inline edit).
+      const ratePerHour = rateForAssignment(a, truck);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
@@ -13831,9 +13987,12 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   ];
   const todayCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  // Per-truck rate override — falls back to the type-level rate from db.rates.
-  // Same fallback rule applies anywhere rate matters (revenue calc below).
-  const effectiveRate = truck.ratePerHour != null ? truck.ratePerHour : db.rates[truck.type];
+  // 2026-05-25: per-truck rate is now a default (was the source of truth);
+  // assignment.ratePerHour overrides it per haul. Fall back to DEFAULT_RATES
+  // when neither is set.
+  const effectiveRate = (truck.ratePerHour != null && Number.isFinite(Number(truck.ratePerHour)))
+    ? Number(truck.ratePerHour)
+    : (DEFAULT_RATES[truck.type] != null ? DEFAULT_RATES[truck.type] : 0);
   const rate = effectiveRate;
   // Admin-only edit helpers. Hauler viewer still gets the read-only layout
   // we shipped before — type/rate/make/model are business-config concerns,
@@ -14277,17 +14436,20 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
     if (!confirm('Remove this truck from the haul?')) return;
     setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
   };
+  // 2026-05-25: legacy/dead component. db.rates deprecated; rate edits go
+  // to truck.ratePerHour (per-truck default). Kept compiling for safety.
+  const rateFallback = (type) => (DEFAULT_RATES[type] != null ? DEFAULT_RATES[type] : 0);
   const beginEditTruck = (t) => {
     setEditingId(t.id);
-    setDraft({ plate: t.plate, type: t.type, rate: String(db.rates[t.type] || 0) });
+    setDraft({ plate: t.plate, type: t.type, rate: String(t.ratePerHour != null ? t.ratePerHour : rateFallback(t.type)) });
   };
   const cancelEditTruck = () => { setEditingId(null); };
   const saveEditTruck = (id) => {
     const rateNum = parseInt(draft.rate);
+    const nextRate = Number.isFinite(rateNum) && rateNum > 0 ? rateNum : null;
     setDb(prev => ({
       ...prev,
-      trucks: prev.trucks.map(t => t.id === id ? { ...t, plate: draft.plate.trim() || t.plate, type: draft.type } : t),
-      rates: Number.isFinite(rateNum) && rateNum > 0 ? { ...prev.rates, [draft.type]: rateNum } : prev.rates,
+      trucks: prev.trucks.map(t => t.id === id ? { ...t, plate: draft.plate.trim() || t.plate, type: draft.type, ratePerHour: nextRate } : t),
     }));
     setEditingId(null);
   };
@@ -14312,7 +14474,7 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
                     <Td mono><span style={{ color: C.accent }}>#</span><input value={draft.plate} onChange={e => setDraft(d => ({ ...d, plate: e.target.value }))} style={inlineInput} /></Td>
                     <Td align="right" mono>$<input value={draft.rate} onChange={e => setDraft(d => ({ ...d, rate: e.target.value }))} style={{ ...inlineInput, width: 70 }} />/hr</Td>
                     <Td>
-                      <select value={draft.type} onChange={e => setDraft(d => ({ ...d, type: e.target.value, rate: String(db.rates[e.target.value] || 0) }))} style={{ ...inlineInput, fontFamily: F.body, width: 'auto' }}>
+                      <select value={draft.type} onChange={e => setDraft(d => ({ ...d, type: e.target.value, rate: String(rateFallback(e.target.value)) }))} style={{ ...inlineInput, fontFamily: F.body, width: 'auto' }}>
                         {TRUCK_TYPES.map(tt => <option key={tt.code} value={tt.code}>{tt.label}</option>)}
                       </select>
                     </Td>
@@ -14328,7 +14490,7 @@ function HaulerTrucks({ projectId, opId, trucks, db, setDb }) {
               return (
                 <Tr key={t.id}>
                   <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
-                  <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
+                  <Td align="right" mono>${t.ratePerHour != null ? t.ratePerHour : rateFallback(t.type)}/hr</Td>
                   <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{(TRUCK_TYPES.find(tt => tt.code === t.type) || {}).label || t.type}</Pill></Td>
                   <Td align="right">
                     <div style={{ display: 'flex', gap: S[1], justifyContent: 'flex-end' }}>
@@ -14497,7 +14659,10 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
       const hr = hours.find(h => h.truckId === t.id);
       const driver = db.drivers.find(d => d.id === t.driverId);
       const truckHours = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
-      const rate = db.rates[t.type];
+      // 2026-05-25: db.rates deprecated. Use truck.ratePerHour with DEFAULT_RATES fallback.
+      const rate = (t.ratePerHour != null && Number.isFinite(Number(t.ratePerHour)))
+        ? Number(t.ratePerHour)
+        : (DEFAULT_RATES[t.type] != null ? DEFAULT_RATES[t.type] : 0);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: t.plate, truckType: t.type, driverName: driver ? driver.name : '—',
