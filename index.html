@@ -12863,7 +12863,7 @@ function AdminActivity({ db, setDb, navigate }) {
                       <Avatar name={actorNameFor(evt)} color={actorColorFor(evt.actorRole)} size={32} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{normalizeActivitySummary(evt.summary)}</div>
-                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{evt.type}</div>
+                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{(evt.type || '').replace(/^driver\./, 'truck.')}</div>
                       </div>
                     </div>
                   );
