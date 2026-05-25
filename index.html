@@ -181,7 +181,7 @@
         padding: 8px 12px !important;
       }
       .topbar > div { gap: 12px !important; }
-      /* Driver phone frame fills the actual phone */
+      /* Phone-frame mockup fills the actual phone screen on mobile. */
       .phone-frame-outer {
         padding: 0 !important;
         background: #0A0A0A !important;
@@ -225,9 +225,8 @@
       }
     }
 
-    /* DriverShell mini-KPI grids should stay 3-col on phone, not collapse via the global 1fr rule.
-       More specific than [style*="display: grid"]. Matches the explicit 3-col templates used in
-       DriverTruckDetail and DriverMultiTruckHome. */
+    /* 3-col mini-KPI grids should stay 3-col on phone, not collapse via the global 1fr rule.
+       More specific than [style*="display: grid"]. */
     @media (max-width: 600px) {
       [style*="grid-template-columns: 1fr 1fr 1fr"],
       [style*="gridTemplateColumns: 1fr 1fr 1fr"] {
@@ -246,8 +245,8 @@
       }
     }
 
-    /* DriverLogLoad photo placeholder: on very narrow phones, switch from fixed 140px height
-       to aspect-ratio so the icon+labels never feel cramped at 320–360px viewports. */
+    /* Log-load photo placeholder: on very narrow phones, switch from fixed 140px height
+       to aspect-ratio so the icon+labels never feel cramped at 320-360px viewports. */
     @media (max-width: 600px) {
       button[style*="height: 140px"][style*="dashed"] {
         height: auto !important;
@@ -1214,25 +1213,7 @@ function MaterialField({ value, onSave, style = {} }) {
   );
 }
 
-function PhonePreview({ children, label = 'Phone view', scale = 0.78 }) {
-  const W = 360 * scale, H = 740 * scale;
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: S[2] }}>
-      <Label>{label}</Label>
-      <div style={{ width: W + 20 * scale, height: H + 20 * scale, background: '#000', borderRadius: 48 * scale, padding: 10 * scale, boxShadow: '0 16px 40px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
-        <div style={{ width: '100%', height: '100%', background: C.bg, borderRadius: 40 * scale, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          <div style={{ position: 'absolute', top: 8 * scale, left: '50%', transform: 'translateX(-50%)', width: 104 * scale, height: 24 * scale, background: '#000', borderRadius: R.md * scale, zIndex: 100 }} />
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${14 * scale}px ${26 * scale}px ${4 * scale}px`, fontFamily: F.body, fontSize: 12 * scale, color: C.ink, fontWeight: 600 }}>
-            <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
-          </div>
-          <div style={{ flex: 1, transform: `scale(${scale})`, transformOrigin: 'top center', width: `${100 / scale}%` }}>
-            {children}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+/* PhonePreview removed 2026-05-25 — no callers. */
 
 function Topbar({ navigate, role, current, right }) {
   return (
@@ -1277,16 +1258,6 @@ function HaulerIcon({ size = 28 }) {
       <rect x="6" y="5" width="16" height="20" rx="2" />
       <path d="M10 5 V3.5 H18 V5" />
       <path d="M10 11 H18 M10 15 H18 M10 19 H15" />
-    </svg>
-  );
-}
-function DriverIcon({ size = 28 }) {
-  // Steering wheel — "vehicle / behind the wheel"
-  return (
-    <svg width={size} height={size} viewBox="0 0 28 28" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="14" cy="14" r="10" />
-      <circle cx="14" cy="14" r="2.5" />
-      <path d="M14 11.5 V4.5 M11.7 16 L6 21 M16.3 16 L22 21" />
     </svg>
   );
 }
@@ -1587,11 +1558,11 @@ const DRIVERS_SEED = [
 ];
 
 // Hauls (v3 collection) — incoming material-hauling needs that admins
-// match to a hauler + truck. Status flows: pending → accepted (driver opted in) /
-// matched (admin assigned, awaiting driver) → completed.
+// match to a hauler + truck. Status flows: pending → accepted (hauler opted in) /
+// matched (admin assigned, awaiting acceptance) → completed.
 // `matchedHaulerId` / `matchedTruckId` only populated for matched/accepted/completed.
-// `acceptedByDriver` set when the driver taps Accept (v7). `passedBy` tracks
-// driver IDs who passed on a pending request so we don't show it to them again.
+// `acceptedByDriver` / `passedBy` columns are legacy schema fields preserved
+// for backwards compatibility (not surfaced in the current UI).
 // Empty defaults for logistics fields (v12). Spread into rows that don't have
 // realistic seed values so every row carries the shape; the v11 → v12 migration
 // uses the same defaults for legacy payloads.
@@ -2389,13 +2360,6 @@ function appendActivity(state, evt) {
 }
 
 // Small lookup helpers used to build activity summary strings.
-// `driverName` retained as a defensive fallback for any legacy caller —
-// returns the generic "Truck operator" so no driver name leaks into a
-// new event 2026-05-25 (Driver-removal pass). The drivers table itself
-// stays nullable in Supabase for a future re-add.
-function driverName(state, id) {
-  return 'Truck operator';
-}
 function haulerName(state, id) {
   const h = state && state.haulers ? state.haulers.find(x => x.id === id) : null;
   return h ? h.name : 'A hauler';
@@ -2581,10 +2545,9 @@ const ACTIVITY_SEED = (() => {
   const DAY = 24 * HOUR;
   return [
     // Today
-    // 2026-05-25 Driver-removal: activity summaries rewritten to be
-    // truck-attributed instead of driver-attributed. actorRole + actorId
-    // preserved so the row still links into the hauler timeline; the visible
-    // text just no longer surfaces driver names.
+    // Activity summaries are truck-attributed (not person-attributed).
+    // actorRole + actorId preserved so the row still links into the hauler
+    // timeline; the visible text doesn't surface operator names.
     { id: 'act-001', type: 'load.logged',       actorRole: 'hauler', actorId: 'op-001', summary: 'Truck #447 logged 18 CY of Clean Fill',                          refId: 'ld-1042', timestamp: now - 0.5*HOUR },
     { id: 'act-002', type: 'shift.started',     actorRole: 'hauler', actorId: 'op-002', summary: 'Truck #155 clocked in',                                          refId: 'tk-155',  timestamp: now - 1*HOUR },
     { id: 'act-003', type: 'load.approved',     actorRole: 'hauler', actorId: 'op-002', summary: 'Priya Sharma approved 22 CY of Topsoil on Winter Park',         refId: 'ld-1038', timestamp: now - 2*HOUR },
@@ -3648,7 +3611,7 @@ async function syncDbToCloud(prev, next) {
       // jsonEq compare matches and the echo is dropped — preserving JS-only
       // fields like hours.pausedAt / hours.pausedMs that aren't on the SB
       // schema yet. Without this round-trip, the echo would overwrite the
-      // local row, wiping `pausedAt` and snapping Driver Pause back to idle.
+      // local row, wiping `pausedAt` and snapping a paused shift back to idle.
       toUpsert.forEach(r => markLocalWrite(jsKey, r.id, sbRowToJs(jsKey, jsRowToSb(jsKey, r))));
       tasks.push(_sb.upsertRows(jsKey, toUpsert).catch(e => SyncErrorBus.push(jsKey, 'upsert', e)));
     }
@@ -4227,7 +4190,7 @@ function nwsPairDaily(periods) {
 
 // Derive haul-readiness from a day's NWS fields. Returns a rich object the
 // UI consumes for the prominent label, the header status badge, the per-day
-// pill in the 7-day strip, and the driver-friendly subtitle.
+// pill in the 7-day strip, and the haul-condition subtitle.
 //
 // Decision order (refined 2026-05-24): NWS shortForecast text can say
 // "thunderstorm" even at 10–20% probability, so the text alone is too
@@ -4250,25 +4213,25 @@ function haulConditionFromNws({ wx, precipPct, windMph, tempLo, tempHi }) {
   const wind = windMph == null ? 0 : windMph;
   const low = tempLo == null ? (tempHi == null ? 50 : tempHi) : tempLo;
   if (low <= 32 || wx === 'snow') {
-    return { key: 'freeze', label: 'Freeze Risk',   short: 'FREEZE', driverNote: 'Early start', sub: 'sub-freezing — watch for ice', grade: 'CAUTION', tone: WX_COLORS.freeze, soft: WX_COLORS_SOFT.freeze };
+    return { key: 'freeze', label: 'Freeze Risk',   short: 'FREEZE', haulNote: 'Early start', sub: 'sub-freezing — watch for ice', grade: 'CAUTION', tone: WX_COLORS.freeze, soft: WX_COLORS_SOFT.freeze };
   }
   if (pct >= 70 || (wx === 'storm' && pct >= 50) || wind >= 35) {
-    return { key: 'delay',  label: 'Delay Risk',    short: 'DELAY',  driverNote: 'Watch',       sub: 'severe weather likely',         grade: 'HOLD',    tone: WX_COLORS.delay,  soft: WX_COLORS_SOFT.delay };
+    return { key: 'delay',  label: 'Delay Risk',    short: 'DELAY',  haulNote: 'Watch',       sub: 'severe weather likely',         grade: 'HOLD',    tone: WX_COLORS.delay,  soft: WX_COLORS_SOFT.delay };
   }
   if (pct >= 40 || (wx === 'rain' && pct >= 25)) {
-    return { key: 'wet',    label: 'Wet / Mud Risk',short: 'WET',    driverNote: 'Mud Risk',    sub: 'soft ground likely',            grade: 'CAUTION', tone: WX_COLORS.wet,    soft: WX_COLORS_SOFT.wet };
+    return { key: 'wet',    label: 'Wet / Mud Risk',short: 'WET',    haulNote: 'Mud Risk',    sub: 'soft ground likely',            grade: 'CAUTION', tone: WX_COLORS.wet,    soft: WX_COLORS_SOFT.wet };
   }
   if (pct >= 20) {
-    return { key: 'drying', label: 'Drying',        short: 'DRYING', driverNote: 'Better',      sub: 'ground recovering',             grade: 'CAUTION', tone: WX_COLORS.drying, soft: WX_COLORS_SOFT.drying };
+    return { key: 'drying', label: 'Drying',        short: 'DRYING', haulNote: 'Better',      sub: 'ground recovering',             grade: 'CAUTION', tone: WX_COLORS.drying, soft: WX_COLORS_SOFT.drying };
   }
-  return   { key: 'dry',    label: 'Dry',           short: 'DRY',    driverNote: 'Excellent',   sub: 'no mud or freeze risk',         grade: 'OPTIMAL', tone: WX_COLORS.dry,    soft: WX_COLORS_SOFT.dry };
+  return   { key: 'dry',    label: 'Dry',           short: 'DRY',    haulNote: 'Excellent',   sub: 'no mud or freeze risk',         grade: 'OPTIMAL', tone: WX_COLORS.dry,    soft: WX_COLORS_SOFT.dry };
 }
 
-// Driver-recommendation strip (bottom of card). Looks at the next 48 hours
+// Haul-recommendation strip (bottom of card). Looks at the next 48 hours
 // (today + tomorrow) and produces a sentence the dispatcher reads at a
 // glance. NWS-limit-aware — frames everything as a forecast-based outlook,
 // never as field-verified state.
-function getDriverRecommendation(days) {
+function getHaulRecommendation(days) {
   if (!days || days.length === 0) return 'Forecast unavailable — coordinate with dispatch before mobilizing.';
   const next48 = days.slice(0, 2);
   const keys = next48.map(d => d.cond && d.cond.key).filter(Boolean);
@@ -4453,7 +4416,7 @@ function SiteConditionsCard() {
 
   // Pair NWS periods into per-day buckets, then derive the haul condition for
   // each day. Each enriched entry carries cond + the inputs used to compute it
-  // so the bottom Driver Recommendation + Mud Outlook strip don't recompute.
+  // so the bottom Haul Recommendation + Mud Outlook strip don't recompute.
   const rawDays = nwsPairDaily(forecast.periods);
   const days = rawDays.map(d => {
     const primary = d.day || d.night;
@@ -4469,7 +4432,7 @@ function SiteConditionsCard() {
   const todayTempNow = today && today.primary ? today.primary.temperature : null;
   const todayWindDir = (today && today.primary && today.primary.windDirection) || '';
   const cond = today ? today.cond : haulConditionFromNws({ wx: 'cloud', precipPct: 0, windMph: 0 });
-  const driverRec = getDriverRecommendation(days);
+  const haulRec = getHaulRecommendation(days);
   const mudOutlook = getMudOutlook(days);
 
   const now = new Date();
@@ -4517,7 +4480,7 @@ function SiteConditionsCard() {
         </div>
       </div>
 
-      {/* 7-day forecast: dow / colored icon / hi · lo / haul-condition pill / driver subtitle. */}
+      {/* 7-day forecast: dow / colored icon / hi · lo / haul-condition pill / haul subtitle. */}
       <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
         <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[2] }}>7-DAY FORECAST</div>
         <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, overflowX: 'auto' }}>
@@ -4553,14 +4516,14 @@ function SiteConditionsCard() {
                   lineHeight: 1.3,
                   whiteSpace: 'nowrap',
                 }}>{d.cond.short}</div>
-                <div style={{ ...T.micro, color: C.inkDim, fontSize: 9, lineHeight: 1.2, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{d.cond.driverNote}</div>
+                <div style={{ ...T.micro, color: C.inkDim, fontSize: 9, lineHeight: 1.2, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{d.cond.haulNote}</div>
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Driver Recommendation + Mud Outlook strip. Both derive from `days`. */}
+      {/* Haul Recommendation + Mud Outlook strip. Both derive from `days`. */}
       <div style={{ borderTop: `1px solid ${C.rule}`, padding: S[4], display: 'grid', gridTemplateColumns: '1fr', gap: S[3] }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
           <span aria-hidden="true" style={{
@@ -4572,7 +4535,7 @@ function SiteConditionsCard() {
           }}>✓</span>
           <div style={{ minWidth: 0 }}>
             <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>HAUL RECOMMENDATION</div>
-            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{driverRec}</div>
+            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{haulRec}</div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
@@ -6791,107 +6754,6 @@ function AdminNewHauler({ db, setDb, navigate }) {
 }
 
 // =====================================================================
-// AdminNewDriver — single-step wizard. /admin/drivers/new
-// Fields: name (required), licenseNumber (optional), phone (required),
-// default truck (optional — assigns this driver to a currently-unassigned
-// truck on submit).
-// =====================================================================
-function AdminNewDriver({ db, setDb, navigate }) {
-  const [name, setName] = useState('');
-  const [licenseNumber, setLicenseNumber] = useState('');
-  const [phone, setPhone] = useState('');
-  const [defaultTruckId, setDefaultTruckId] = useState('');
-
-  const inputStyle = WIZARD_INPUT_STYLE;
-  const detailsValid = !!name.trim() && !!phone.trim();
-  // 2026-05-24 sweep: also drop orphan trucks (haulerId missing / points at a
-  // deleted hauler). The new-driver "default truck" picker shouldn't surface
-  // ghost trucks from retired haulers.
-  const _haulerByIdAND = new Map((db.haulers || []).map(o => [o.id, o]));
-  const unassignedTrucks = db.trucks.filter(t => !t.driverId && t.haulerId && _haulerByIdAND.has(t.haulerId));
-
-  const cancel = () => navigate('/admin/haulers');
-  const submit = () => {
-    const newId = 'dr-' + Math.random().toString(36).substring(2, 7);
-    const newDriver = {
-      id: newId,
-      name: name.trim(),
-      phone: phone.trim(),
-      ...(licenseNumber.trim() ? { licenseNumber: licenseNumber.trim() } : {}),
-    };
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        drivers: [...prev.drivers, newDriver],
-        trucks: defaultTruckId
-          ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: newId } : t)
-          : prev.trucks,
-      },
-      {
-        type: 'driver.created',
-        actorRole: 'admin',
-        actorId: null,
-        summary: `Admin added driver ${newDriver.name}`,
-        refId: newId,
-      }
-    ));
-    // If a truck was selected, land on that truck's hauler page when known;
-    // otherwise return to the haulers list (no flat driver index exists).
-    if (defaultTruckId) {
-      const t = db.trucks.find(x => x.id === defaultTruckId);
-      if (t && t.haulerId) { navigate('/admin/haulers/' + t.haulerId); return; }
-    }
-    navigate('/admin/haulers');
-  };
-
-  return (
-    <WizardShell
-      navigate={navigate}
-      steps={['Details']}
-      currentStep={1}
-      onCancel={cancel}
-      onSubmit={submit}
-      submitDisabled={!detailsValid}
-      submitLabel="Create driver"
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New driver' }]}
-      eyebrow="New driver"
-      title="Add a driver to your network"
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-        <Label>Driver details</Label>
-        <div>
-          <div style={{ ...T.caption, marginBottom: 4 }}>Name</div>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Jane Smith" style={inputStyle} autoFocus />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Phone</div>
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g., (303) 555-0150" style={inputStyle} />
-          </div>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>License number (optional)</div>
-            <input value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} placeholder="e.g., CDL-A 12345678" style={{ ...inputStyle, fontFamily: F.mono }} />
-          </div>
-        </div>
-        <div>
-          <div style={{ ...T.caption, marginBottom: 4 }}>Default truck (optional)</div>
-          <select value={defaultTruckId} onChange={e => setDefaultTruckId(e.target.value)} style={inputStyle}>
-            <option value="">— Leave unassigned —</option>
-            {unassignedTrucks.map(t => {
-              const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
-              return <option key={t.id} value={t.id}>#{t.plate} · {typeLabel} · {t.hauler || 'Bench'}</option>;
-            })}
-          </select>
-          {unassignedTrucks.length === 0 && (
-            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>No trucks are currently unassigned. You can assign this driver to a truck later.</div>
-          )}
-        </div>
-      </div>
-    </WizardShell>
-  );
-}
-
-// =====================================================================
 // AdminNewTruck — 3-step wizard. /admin/trucks/new
 //   1. Details (plate, type, hauler-company text, optional make/model/cap)
 //   2. Assignments (optional project + hauler from existing records)
@@ -7711,8 +7573,7 @@ function AdminReports({ db, navigate }) {
                   <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 2 }}>{t.type}</div>
                 </div>
                 <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ ...T.bodySm, color: C.ink }}>{t.driverName}</div>
-                  <div style={{ ...T.caption, marginTop: 2 }}>{t.projectName}</div>
+                  <div style={{ ...T.bodySm, color: C.ink }}>{t.projectName}</div>
                 </div>
                 <StatusPill status={t.status} />
                 <div style={{ textAlign: 'right', minWidth: 64 }}>
@@ -10215,12 +10076,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           const hoursRows = (db.hours || []).filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId);
           for (const h of hoursRows) {
             const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-            const driverName = (db.drivers || []).find(dr => dr.id === h.driverId)?.name || '—';
             lines.push({
               key: h.id || (a.truckId + '|' + h.date + '|' + (h.clockIn || '')),
               truckPlate: t.plate,
               truckType: t.type,
-              driver: driverName,
               date: h.date,
               hours: hrs,
               rate: hourlyRate,
@@ -10484,15 +10343,11 @@ function AdminHaulers({ db, setDb, navigate }) {
 
   // === Operational KPI strip data ===
   // 2026-05-24 sweep: every truck KPI here filters out orphan trucks (no
-  // haulerId / hauler deleted). Pre-fix, `trucksOffline` inflated by counting
-  // orphans as "no driver"; `totalTrucks` was unused but still misleading
-  // as a debug var, so we drop it.
+  // haulerId / hauler deleted).
   const _haulerByIdKpi = new Map((db.haulers || []).map(o => [o.id, o]));
   const realTrucks = db.trucks.filter(t => t && t.haulerId && _haulerByIdKpi.has(t.haulerId));
-  // 2026-05-25 Driver-removal: dropped the `t.driverId` requirement from
-  // every active/available/offline derivation since drivers are no longer
-  // an admin concept. A truck is "active" if it has an open shift; the
-  // hauler is responsible for which truck is on the clock.
+  // A truck is "active" iff it has an open shift. The hauler is responsible
+  // for which truck is on the clock.
   const trucksActiveAll = realTrucks.filter(t =>
     db.hours.some(h => h.truckId === t.id && h.status === 'open')
   ).length;
@@ -10555,7 +10410,7 @@ function AdminHaulers({ db, setDb, navigate }) {
     offline:   { label: 'Offline',          tone: C.inkFaint, soft: 'rgba(255,255,255,0.04)' },
   };
   const FleetMiniViz = ({ h, max = 10 }) => {
-    // Render small dots: green=active, blue=assigned-not-clocked, gray=no driver,
+    // Render small dots: green=active, blue=assigned-not-clocked, gray=unassigned,
     // red=on a delayed project. Pad to max with very-dim placeholder dots.
     const trucks = h.trucks.slice(0, max);
     const padCount = Math.max(0, Math.min(max, h.trucks.length) - trucks.length);
@@ -10610,9 +10465,7 @@ function AdminHaulers({ db, setDb, navigate }) {
                   const shift = h.openShifts.find(s => s.truckId === t.id);
                   const proj = shift ? db.projects.find(p => p.id === shift.projectId) : null;
                   const tt = TRUCK_TYPES.find(x => x.code === t.type);
-                  // 2026-05-25 Driver-removal: truck "Offline" status no longer
-                  // gates on driverId since drivers are out of the UI. Status
-                  // now reflects shift state only.
+                  // Status reflects shift state only.
                   const status = !shift ? 'Available' : 'En route';
                   const statusColor = status === 'En route' ? C.ok : C.info;
                   return (
@@ -10832,7 +10685,6 @@ function AdminHaulers({ db, setDb, navigate }) {
         </div>
         <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
           <Btn variant="secondary" size="sm" onClick={() => window.alert('TODO: invite-carrier modal')}>Invite carrier</Btn>
-          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/trucks/active')}>Dispatch board</Btn>
           <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ Add hauler</Btn>
         </div>
       </div>
@@ -10916,7 +10768,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const updateTruck = (id, patch) => setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === id ? { ...t, ...patch } : t) }));
   const updateRate = (type, newRate) => setDb(prev => ({ ...prev, rates: { ...prev.rates, [type]: parseInt(newRate) || 0 } }));
   const removeTruck = (id) => {
-    if (!confirm('Remove this truck from the hauler? This will detach it from any haul or driver assignment.')) return;
+    if (!confirm('Remove this truck from the hauler? This will detach it from any haul assignment.')) return;
     setDb(prev => ({ ...prev, trucks: prev.trucks.filter(t => t.id !== id) }));
   };
   const editTruck = (t) => {
@@ -11174,7 +11026,6 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </div>
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
-{/* "+ Add driver" removed 2026-05-25 — driver concept eliminated from UI. */}
             <Btn variant="primary"   size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck</Btn>
             <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
           </div>
@@ -12404,7 +12255,6 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
                   <tr key={li.id} className="invoice-print-line" style={{ borderBottom: '1px solid ' + C.rule }}>
                     <Td>
                       <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>Truck #{li.truckPlate} ({li.truckType})</div>
-                      <div style={{ ...T.caption, color: C.inkDim }}>{li.driverName || '—'}</div>
                     </Td>
                     <Td align="right" mono>{cyCell}</Td>
                     <Td align="right" mono>{liHours.toFixed(2)}</Td>
@@ -12457,238 +12307,6 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
           Thank you for your business. Questions? Contact {JSE_INVOICE_ISSUER.contactName} at {JSE_INVOICE_ISSUER.phone} or {JSE_INVOICE_ISSUER.email}.
         </div>
       </Card>
-    </div>
-  );
-}
-
-// =====================================================================
-// AdminActiveTrucks — live grid of driver widgets at /admin/trucks/active.
-// Reuses DriverHome (and DriverMultiTruckHome) inside a smaller phone-frame
-// wrapper so the admin sees exactly what the driver sees, and the same
-// clock-in / clock-out / pause / log-load buttons mutate the same db state.
-// Cross-tab sync ([[jse-realtime]]) means a real driver's actions reflect
-// here instantly and vice versa.
-// =====================================================================
-function MiniPhone({ children, label, badge, badgeColor = C.accent, onClick }) {
-  // 320x600 scaled phone widget for embedding in the admin grid.
-  // When `onClick` is provided, the label/badge header row becomes a
-  // clickable affordance AND we surface an explicit "Edit \u2197" pill so
-  // admins can see they can drill into the truck's full edit panel.
-  const headerInner = (
-    <>
-      {label && <Label>{label}</Label>}
-      {badge && <Pill color={badgeColor} soft={badgeColor === C.accent ? C.accentSoft : (badgeColor === C.warn ? C.warnSoft : 'rgba(255,255,255,0.06)')}>{badge}</Pill>}
-      {onClick && (
-        <span
-          aria-hidden="true"
-          style={{
-            ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase',
-            color: C.accent, border: `1px solid ${C.rule}`, borderRadius: R.pill,
-            padding: '3px 9px', fontWeight: 700, marginLeft: 2,
-            display: 'inline-flex', alignItems: 'center', gap: 4, lineHeight: 1.1,
-            background: 'rgba(0,0,0,0.35)',
-          }}
-        >
-          Edit <span style={{ fontSize: '1.05em' }}>{'\u2197'}</span>
-        </span>
-      )}
-    </>
-  );
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: S[2] }}>
-      {onClick ? (
-        <button
-          onClick={onClick}
-          title="Open truck detail (full edit panel)"
-          aria-label={label ? `Open ${label} truck detail` : 'Open truck detail'}
-          style={{ display: 'flex', alignItems: 'center', gap: S[2], background: 'transparent', border: 'none', color: 'inherit', padding: '4px 8px', borderRadius: R.sm, cursor: 'pointer', font: 'inherit' }}
-          onMouseEnter={e => e.currentTarget.style.background = 'rgba(179,230,53,0.10)'}
-          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-        >
-          {headerInner}
-        </button>
-      ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>{headerInner}</div>
-      )}
-      <div style={{ width: 280, background: '#000', borderRadius: 32, padding: 8, boxShadow: '0 12px 32px rgba(0,0,0,0.45), 0 0 0 1.5px #1a1a1a' }}>
-        <div style={{ width: '100%', background: C.bg, borderRadius: 26, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 540 }}>
-          <div style={{ position: 'absolute', top: 6, left: '50%', transform: 'translateX(-50%)', width: 88, height: 20, background: '#000', borderRadius: R.md, zIndex: 100 }} />
-          <div style={{ ...T.caption, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 22px 4px', color: C.ink, fontWeight: 600, fontSize: 9 }}>
-            <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
-          </div>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function AdminActiveTrucks({ db, setDb, navigate }) {
-  // Only consider trucks owned by a real hauler. Trucks whose haulerId no
-  // longer resolves (e.g. after a hauler delete cascade-nulls the FK) are
-  // orphans — rendering them produced un-clickable phantom tiles.
-  const haulerById = new Map(db.haulers.map(h => [h.id, h]));
-  const all = db.trucks.filter(t => t.haulerId && haulerById.has(t.haulerId));
-  const openShifts = (db.hours || []).filter(h => h.status === 'open');
-  const truckHrMap = new Map(openShifts.map(h => [h.truckId, h]));
-
-  // Modal state: { driver, truck } when admin is logging a load on someone's
-  // behalf. Embedded DriverHome / DriverTruckDetail open the modal via the
-  // onOpenLogLoad prop instead of navigating to /driver/log.
-  const [logFor, setLogFor] = useState(null);
-
-  const withDriver = all.filter(t => t.driverId).map(t => {
-    const driver = db.drivers.find(d => d.id === t.driverId);
-    const hr = truckHrMap.get(t.id);
-    const isPaused = !!(hr && hr.pausedAt);
-    return { truck: t, driver, hr, status: hr ? (isPaused ? 'paused' : 'active') : 'idle' };
-  }).filter(x => x.driver);
-
-  // Sort: active > paused > idle, then plate
-  const order = { active: 0, paused: 1, idle: 2 };
-  withDriver.sort((a, b) => order[a.status] - order[b.status] || a.truck.plate.localeCompare(b.truck.plate));
-
-  const benchedTrucks = all.filter(t => !t.driverId);
-
-  // Embedded driver widgets always stay inside admin — never delegate to /driver/*.
-  // No-op for navigation calls from inside the embed; the modal handles log-load
-  // and the back-link / DriverIncomingRequests are hidden by the `embedded` prop.
-  const noopNavigate = () => {};
-
-  const activeCount = withDriver.filter(w => w.status === 'active').length;
-  const pausedCount = withDriver.filter(w => w.status === 'paused').length;
-  const idleCount   = withDriver.filter(w => w.status === 'idle').length;
-
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Active Trucks' }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
-        <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Active Trucks</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What every driver sees, right now.</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any widget action to clock in/out, log a load, or pause on behalf of the driver. Changes flow back to their phone via cross-tab sync.</div>
-        </div>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="clocked in, not paused" /></Card>
-        <Card padding={S[4]}><Stat label="Paused" value={pausedCount} sub="on break" /></Card>
-        <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not clocked in" /></Card>
-        <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
-      </div>
-
-      {withDriver.length === 0 ? (
-        <Card padding={S[5]} style={{ textAlign: 'center' }}>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>No drivers assigned to any trucks. Assign a driver from a hauler page to see their widget here.</div>
-        </Card>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(296px, 1fr))',
-          gap: S[5],
-          justifyItems: 'center',
-        }}>
-          {withDriver.map(({ truck, driver, hr, status }) => {
-            const project = db.projects.find(p => p.id === truck.projectId);
-            const driverTrucks = db.trucks.filter(t => t.driverId === driver.id);
-            const badge = status === 'active' ? 'On the clock' : status === 'paused' ? 'Paused' : 'Idle';
-            const badgeColor = status === 'active' ? C.accent : status === 'paused' ? C.warn : C.inkDim;
-            return (
-              <MiniPhone
-                key={truck.id}
-                label={`${driver.name} · #${truck.plate}`}
-                badge={badge}
-                badgeColor={badgeColor}
-                onClick={() => {
-                  if (truck.projectId && truck.haulerId) {
-                    navigate(`/admin/p/${truck.projectId}/o/${truck.haulerId}/t/${truck.id}`);
-                  } else if (truck.haulerId) {
-                    navigate(`/admin/haulers/${truck.haulerId}`);
-                  }
-                }}
-              >
-                {driverTrucks.length === 1
-                  ? <DriverHome driver={driver} truck={truck} db={db} setDb={setDb} navigate={noopNavigate} embedded onOpenLogLoad={(tk) => setLogFor({ driver, truck: tk })} />
-                  : <DriverTruckDetail driver={driver} truck={truck} trucks={driverTrucks} db={db} setDb={setDb} navigate={noopNavigate} embedded onOpenLogLoad={(tk) => setLogFor({ driver, truck: tk })} />}
-              </MiniPhone>
-            );
-          })}
-        </div>
-      )}
-
-      {benchedTrucks.length > 0 && (
-        <div style={{ marginTop: S[6] }}>
-          <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
-          <Card padding={0}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
-              <tbody>
-                {benchedTrucks.map(t => {
-                  const h = db.haulers.find(x => x.id === t.haulerId);
-                  const p = db.projects.find(x => x.id === t.projectId);
-                  return (
-                    <Tr key={t.id}>
-                      <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
-                      <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
-                      <Td align="right" mono>${db.rates[t.type] || 0}/hr</Td>
-                      <Td>{h ? h.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
-                      <Td>{p ? p.name : <span style={{ color: C.inkFaint }}>— bench</span>}</Td>
-                      <Td align="right"><Btn variant="secondary" size="xs" onClick={() => navigate(h ? `/admin/haulers/${h.id}` : '/admin/haulers')}>Assign driver</Btn></Td>
-                    </Tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-      )}
-
-      {logFor && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Log load for ${logFor.driver.name} on truck #${logFor.truck.plate}`}
-          onClick={() => setLogFor(null)}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              background: C.bg, borderRadius: R.lg, width: 'min(480px, 100%)', maxHeight: '90vh',
-              overflow: 'hidden', display: 'flex', flexDirection: 'column',
-              border: `1px solid ${C.ruleHi}`, boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
-              <div>
-                <Label color={C.accent}>Log load (admin)</Label>
-                <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>{logFor.driver.name} · #{logFor.truck.plate}</div>
-              </div>
-              <button onClick={() => setLogFor(null)} aria-label="Close" style={{
-                background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                width: 32, height: 32, borderRadius: R.sm, fontSize: 22, lineHeight: 1, padding: 0,
-              }}
-                onMouseEnter={e => { e.currentTarget.style.color = C.ink; e.currentTarget.style.background = C.surfaceHi; }}
-                onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
-              >×</button>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-              <DriverLogLoad
-                driver={logFor.driver}
-                truck={logFor.truck}
-                db={db}
-                setDb={setDb}
-                navigate={() => {}}
-                onSubmitted={() => setLogFor(null)}
-                onCancel={() => setLogFor(null)}
-              />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -12786,9 +12404,8 @@ function AdminActivity({ db, setDb, navigate }) {
   // the actor's display name is so it produces sensible initials.
   const actorNameFor = (evt) => {
     if (evt.actorRole === 'admin') return 'Admin User';
-    // 2026-05-25 Driver-removal: activity rows with actorRole 'driver' are
-    // legacy data in Supabase. Surface them as "Truck operator" so the avatar
-    // label doesn't expose a driver name.
+    // Legacy rows in Supabase may still carry the old actorRole — surface
+    // them generically so no person-name leaks into the avatar label.
     if (evt.actorRole === 'driver') return 'Truck operator';
     if (evt.actorRole === 'hauler' && evt.actorId) {
       const h = db.haulers.find(x => x.id === evt.actorId);
@@ -12796,14 +12413,13 @@ function AdminActivity({ db, setDb, navigate }) {
     }
     return '?';
   };
-  // Normalize display-time summary text for legacy driver-attributed rows
-  // (Supabase already has them written; mutating server data is destructive,
-  // so we strip the driver names at render time). Patterns:
-  //   "X. Lastname [verb] ... on #PLATE"  → "Truck #PLATE [verb] ..."
-  //   "X. Lastname [verb] X CY ..."       → "Truck [verb] X CY ..."
-  //   "A driver [verb] ... on #PLATE"     → "Truck #PLATE [verb] ..."
-  //   "Admin added driver X. Lastname"    → "Admin added a truck operator"
-  //   "... for X. Lastname"               → "... for a truck operator"
+  // Normalize legacy person-attributed summaries at render time (Supabase
+  // already holds them; mutating server data is destructive). Patterns:
+  //   "X. Lastname [verb] ... on #PLATE"  -> "Truck #PLATE [verb] ..."
+  //   "X. Lastname [verb] X CY ..."       -> "Truck [verb] X CY ..."
+  //   "A {operator} [verb] ... on #PLATE" -> "Truck #PLATE [verb] ..."
+  //   "Admin added {operator} X. Lastname"-> "Admin added a truck operator"
+  //   "... for X. Lastname"               -> "... for a truck operator"
   const normalizeActivitySummary = (s) => {
     if (!s || typeof s !== 'string') return s;
     let out = s;
@@ -12835,7 +12451,7 @@ function AdminActivity({ db, setDb, navigate }) {
         <EmptyState
           icon={<ActivityIcon size={36} />}
           title="No activity yet"
-          body="Events will appear here as drivers log loads, haulers approve, and admins assign requests."
+          body="Events will appear here as loads are logged, haulers approve, and admins assign requests."
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
@@ -13440,9 +13056,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
           >+ Add hauler</button>
         </div>
       )}
-      {/* "Active Trucks" hidden 2026-05-25 — the page is a wall of embedded
-          driver widgets, which is incompatible with the Driver-removal pass.
-          Route handler stays in code; nav entry removed. */}
+      {/* "Active Trucks" nav entry hidden 2026-05-25 (operator role retired). */}
       <Item
         icon={<ReportingIcon size={20} />}
         label="Reports"
@@ -13526,7 +13140,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
-          {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
+          {/* /admin/trucks/active route + component removed 2026-05-25. */}
           {parts.length === 2 && (parts[1] === 'hauls' || parts[1] === 'requests') && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && (parts[1] === 'hauls' || parts[1] === 'requests') && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && (parts[1] === 'hauls' || parts[1] === 'requests') && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
@@ -13536,7 +13150,6 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks'  && parts[2] === 'new' && <AdminNewTruck  db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 5 && parts[1] === 'trucks'  && parts[2] === 'new' && parts[3] === 'for' && <AdminNewTruck db={db} setDb={setDb} navigate={navigate} prefillHaulerId={parts[4]} />}
-          {/* /admin/drivers/new route removed 2026-05-25 per Driver-removal brief. AdminNewDriver function body retained as dead code for the eventual re-add. */}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] !== 'new' && <AdminHaulerDetail db={db} setDb={setDb} navigate={navigate} haulerId={parts[2]} />}
           {parts.length === 3 && parts[1] === 'p' && <HaulProjectRedirect projectId={parts[2]} navigate={navigate} />}
           {parts.length === 5 && parts[3] === 'o' && <HaulerProject haulerId={parts[4]} projectId={parts[2]} db={db} setDb={setDb} navigate={navigate} viewer="admin" />}
@@ -13907,7 +13520,6 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                               <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truck ? truck.plate : '?'}</span>
                               {truck && <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{truck.type}</Pill>}
                             </div>
-                            <div style={{ ...T.caption, color: C.inkDim }}>{driver ? driver.name : '— unassigned'}</div>
                             <div style={{ ...T.micro, color: C.inkFaint, marginTop: S[1] }}>{truckLoadCount} load{truckLoadCount === 1 ? '' : 's'} logged</div>
                           </button>
                         );
@@ -14027,7 +13639,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   const totalCY = loads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
-  const activeTrucks = trucks.filter(t => t.driverId && hours.some(h => h.truckId === t.id && h.status === 'open')).length;
+  const activeTrucks = trucks.filter(t => hours.some(h => h.truckId === t.id && h.status === 'open')).length;
   const pendingLoads = loads.filter(l => l.status === 'pending').length;
 
   const truckLink = (tId) => isAdmin
@@ -14337,20 +13949,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
             </>
           )}
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-          {driver ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-              <Avatar name={driver.name} size={36} />
-              <div>
-                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}>{driver.name}</div>
-                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim }}>{driver.phone}</div>
-              </div>
-              {isAdmin && (
-                <button onClick={() => navigate(`/driver/${driver.id}`)} title={`Open driver widget for ${driver.name}`} style={{ background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.accent, padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 10, fontWeight: 600, cursor: 'pointer', letterSpacing: 0.4, textTransform: 'uppercase', marginLeft: S[2] }}>Widget {'↗'}</button>
-              )}
-            </div>
-          ) : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">No driver</Pill>}
-        </div>
+        {/* Operator block in truck header removed 2026-05-25. */}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -14440,11 +14039,8 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                 {dayHoursRows.length > 0 ? (
                   <div style={{ marginTop: S[2], display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {dayHoursRows.map(h => {
-                      const dr = db.drivers.find(x => x.id === h.driverId);
                       return (
                         <div key={h.id} style={{ ...T.bodySm, color: C.inkDim, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                          <span style={{ fontFamily: F.display }}>{dr ? dr.name : <span style={{ color: C.inkFaint }}>—</span>}</span>
-                          <span style={{ color: C.inkFaint }}>·</span>
                           <span style={{ fontFamily: F.mono }}><EditableText value={h.clockIn || ''} onSave={(v) => updateHours(h.id, { clockIn: v })} mono placeholder="HH:MM" /></span>
                           <span style={{ fontFamily: F.mono, color: C.inkFaint }}>{'→'}</span>
                           <span style={{ fontFamily: F.mono }}><EditableText value={h.clockOut || ''} onSave={(v) => updateHours(h.id, { clockOut: v || null })} mono placeholder="HH:MM" /></span>
@@ -14643,8 +14239,8 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
       { ...prev, loads: [...prev.loads, newLoad] },
       {
         type: 'load.logged',
-        actorRole: 'driver',
-        actorId: newLoad.driverId,
+        actorRole: 'hauler',
+        actorId: truck.haulerId || null,
         summary: `Truck #${truck.plate} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)}`,
         refId: newLoad.id,
       }
@@ -14799,66 +14395,6 @@ function AddTruckForm({ onAdd, onCancel }) {
         </div>
       </div>
     </Card>
-  );
-}
-
-function HaulerDrivers({ projectId, trucks, db, setDb }) {
-  const assignedIds = new Set(trucks.filter(t => t.driverId).map(t => t.driverId));
-  const available = db.drivers.filter(d => !assignedIds.has(d.id));
-  const assign = (truckId, driverId) => {
-    setDb(prev => ({ ...prev, trucks: prev.trucks.map(t => t.id === truckId ? { ...t, driverId } : t) }));
-  };
-  const updateDriver = (id, patch) => setDb(prev => ({ ...prev, drivers: prev.drivers.map(d => d.id === id ? { ...d, ...patch } : d) }));
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <div style={{ marginBottom: S[4] }}>
-        <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, margin: 0, color: C.ink }}>Driver assignments</h1>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[1] }}>Assign one driver to each truck. Click name or phone to edit.</div>
-      </div>
-      <Card padding={0}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead><tr><Th>Truck</Th><Th>Assigned driver</Th><Th>Phone</Th><Th></Th></tr></thead>
-          <tbody>
-            {trucks.map(t => {
-              const driver = db.drivers.find(d => d.id === t.driverId);
-              const choices = [...(driver ? [driver] : []), ...available];
-              return (
-                <Tr key={t.id}>
-                  <Td mono><span style={{ color: C.accent }}>#{t.plate}</span> <span style={{ ...T.micro, color: C.inkDim}}>{t.type}</span></Td>
-                  <Td>
-                    <select value={t.driverId || ''} onChange={e => assign(t.id, e.target.value || null)} style={{ ...T.bodySm, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '8px 12px', borderRadius: R.sm, minWidth: 180 }}>
-                      <option value="">-- Unassigned --</option>
-                      {choices.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                    </select>
-                    {driver && <span style={{ marginLeft: S[2] }}><EditableText value={driver.name} onSave={(v) => updateDriver(driver.id, { name: v })} /></span>}
-                  </Td>
-                  <Td mono dim>{driver ? <EditableText value={driver.phone} onSave={(v) => updateDriver(driver.id, { phone: v })} mono /> : '—'}</Td>
-                  <Td align="right">{driver && <Btn variant="ghost" size="xs" onClick={() => assign(t.id, null)}>Unassign</Btn>}</Td>
-                </Tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </Card>
-      {available.length > 0 && (
-        <div style={{ marginTop: S[6] }}>
-          <Label style={{ marginBottom: S[3] }}>Available drivers ({available.length})</Label>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: S[3] }}>
-            {available.map(d => (
-              <Card key={d.id} padding={S[3]}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-                  <Avatar name={d.name} />
-                  <div>
-                    <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600 }}><EditableText value={d.name} onSave={(v) => updateDriver(d.id, { name: v })} /></div>
-                    <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}><EditableText value={d.phone} onSave={(v) => updateDriver(d.id, { phone: v })} mono /></div>
-                  </div>
-                </div>
-              </Card>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
   );
 }
 
@@ -15175,976 +14711,9 @@ function HaulerShell({ db, setDb, navigate, hash }) {
   </script>
 
   <script type="text/babel" data-presets="react">
-// === BLOCK 6: DRIVER ===
-function Phone({ children }) {
-  return (
-    <div className="phone-frame-outer" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: S[5], minHeight: '100vh', background: C.bgDeep }}>
-      <div className="phone-frame-caption" style={{ ...T.caption, marginBottom: S[3], textAlign: 'center'}}>Driver view — what a field user sees in the field.</div>
-      <div className="brand-frame-chrome" style={{ marginBottom: S[3] }}><Brand size="sm" /></div>
-      <div className="phone-bezel" style={{ width: 360, minHeight: 760, background: '#000', borderRadius: 48, padding: 10, boxShadow: '0 24px 64px rgba(0,0,0,0.5), 0 0 0 1.5px #1a1a1a', position: 'relative' }}>
-        <div className="phone-screen" style={{ width: '100%', height: '100%', minHeight: 740, background: C.bg, borderRadius: 40, overflow: 'hidden', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-          <div className="phone-notch" style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 104, height: 24, background: '#000', borderRadius: R.md, zIndex: 100 }} />
-          <div style={{ ...T.caption, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 26px 4px', color: C.ink, fontWeight: 600 }}>
-            <span>11:05</span><span style={{ opacity: 0.75 }}>5G</span>
-          </div>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DriverShell({ db, setDb, navigate, hash }) {
-  // Hash forms supported:
-  //   /driver                              -> picker default (dr-001)
-  //   /driver/<driverId>                   -> deep-link to a driver
-  //   /driver/<driverId>/truck/<truckId>   -> driver's truck detail
-  //   /driver/<driverId>/log/<truckId>     -> log-load for that truck
-  //   /driver/truck/<truckId>              -> legacy form (uses pickedId)
-  //   /driver/log/<truckId>                -> legacy form
-  const parts = hash.split('/').filter(Boolean); // ['driver', ...]
-  // A driver id has the prefix 'dr-'; sub-routes ('home','truck','log') do not.
-  const urlDriverId = parts[1] && parts[1].startsWith('dr-') ? parts[1] : null;
-  const [pickedId, setPickedId] = useState('dr-001');
-  const drId = urlDriverId || pickedId;
-  // Keep pickedId in sync when the URL changes externally
-  useEffect(() => { if (urlDriverId && urlDriverId !== pickedId) setPickedId(urlDriverId); }, [urlDriverId]);
-  const driver = db.drivers.find(d => d.id === drId);
-  const trucks = db.trucks.filter(t => t.driverId === drId);
-  const subIdx = urlDriverId ? 2 : 1;
-  const sub = parts[subIdx] || 'home';
-  const subArg = parts[subIdx + 1];
-  const basePrefix = urlDriverId ? `/driver/${urlDriverId}` : '/driver';
-  return (
-    <Phone>
-      <div style={{ padding: '4px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <select value={drId} onChange={e => { setPickedId(e.target.value); navigate(urlDriverId ? `/driver/${e.target.value}` : '/driver'); }} style={{ background: 'transparent', color: C.inkFaint, border: 'none', padding: 0, fontFamily: F.mono, fontSize: 10 }}>
-          {db.drivers.map(d => {
-            const tc = db.trucks.filter(t => t.driverId === d.id).length;
-            return <option key={d.id} value={d.id} style={{ background: C.surface }}>Demo: {d.name}{tc > 1 ? ' (' + tc + ' trucks)' : ''}</option>;
-          })}
-        </select>
-        <ChromeMenu navigate={navigate} compact />
-      </div>
-      {!driver && <DriverNoTruck driver={{ name: 'Unknown driver' }} />}
-      {driver && trucks.length === 0 && <DriverNoTruck driver={driver} />}
-      {driver && trucks.length === 1 && sub === 'home' && <DriverHome driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
-      {driver && trucks.length === 1 && sub === 'log' && !subArg && <DriverLogLoad driver={driver} truck={trucks[0]} db={db} setDb={setDb} navigate={navigate} />}
-      {driver && trucks.length > 1 && sub === 'home' && <DriverMultiTruckHome driver={driver} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />}
-      {driver && trucks.length >= 1 && sub === 'truck' && (() => {
-        const tId = subArg;
-        const truck = trucks.find(t => t.id === tId);
-        if (!truck) return <DriverTruckNotFound navigate={navigate} />;
-        return <DriverTruckDetail driver={driver} truck={truck} trucks={trucks} db={db} setDb={setDb} navigate={navigate} />;
-      })()}
-      {driver && trucks.length >= 1 && sub === 'log' && subArg && (() => {
-        const tId = subArg;
-        const truck = trucks.find(t => t.id === tId);
-        if (!truck) return <DriverTruckNotFound navigate={navigate} />;
-        return <DriverLogLoad driver={driver} truck={truck} db={db} setDb={setDb} navigate={navigate} returnTo={`${basePrefix}/truck/${truck.id}`} />;
-      })()}
-    </Phone>
-  );
-}
-
-function DriverNoTruck({ driver }) {
-  return (
-    <div style={{ flex: 1, padding: S[4], display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-      <EmptyState
-        icon={<TruckIcon size={44} />}
-        title="No truck assigned yet"
-        body={`Hi ${driver.name.split(' ')[0]}. Your dispatcher hasn't put you on a truck for today's shift. It'll show up here once they do.`}
-      />
-    </div>
-  );
-}
-
-function DriverTruckNotFound({ navigate }) {
-  return (
-    <div style={{ flex: 1, padding: S[5], display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center' }}>
-      <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginBottom: 6 }}>Truck not found</div>
-      <div style={{ ...T.bodySm, color: C.inkDim, lineHeight: 1.5, marginBottom: S[4] }}>That truck isn't on your assignment list.</div>
-      <button onClick={() => navigate('/driver')} style={{
-        ...T.mono, background: C.accent, color: C.bg, border: 'none', padding: '10px 18px',
-        borderRadius: R.pill, cursor: 'pointer', letterSpacing: 0.4,
-      }}>Back to my trucks</button>
-    </div>
-  );
-}
-
-function DriverHome({ driver, truck, db, setDb, navigate, embedded = false, onOpenLogLoad }) {
-  const project = db.projects.find(p => p.id === truck.projectId);
-  const truckType = TRUCK_TYPES.find(t => t.code === truck.type);
-  const hr = db.hours.find(h => h.truckId === truck.id && h.driverId === driver.id && h.status === 'open');
-  const todayLoads = db.loads.filter(l => l.driverId === driver.id && l.truckId === truck.id && isToday(l.date));
-  const isPaused = !!(hr && hr.pausedAt);
-  const isOpen = !!(hr && hr.status === 'open');
-
-  // v33: derive a sensible default CY for one-tap logging. truck.capacityCY is
-  // the explicit field; truckType.cap is a range string like '10-12 yd' — take
-  // the upper end. Floor to 16 if neither parses.
-  const parseCapUpper = (s) => {
-    if (!s) return null;
-    const nums = String(s).match(/\d+(?:\.\d+)?/g);
-    if (!nums || nums.length === 0) return null;
-    return parseFloat(nums[nums.length - 1]);
-  };
-  const defaultCy = (truck.capacityCY && parseFloat(truck.capacityCY))
-    || parseCapUpper(truckType && truckType.cap)
-    || 16;
-
-  // v33: active hauls for this truck (hauler-confirmed via assignments[].truckId)
-  const myActiveAssignments = (db.haulRequests || []).filter(r => {
-    if (!r || r.status === 'completed') return false;
-    if (!Array.isArray(r.assignments)) return false;
-    return r.assignments.some(a => a && a.truckId === truck.id);
-  });
-
-  // v33: quick-log one load at truck capacity. Stamps haulRequestId when
-  // exactly one active assignment is unambiguous.
-  const quickLog = () => {
-    if (!hr || isPaused) return;
-    const haulReqId = myActiveAssignments.length === 1 ? myActiveAssignments[0].id : null;
-    const material = (haulReqId && myActiveAssignments[0].materialCode)
-      || (project && project.material && project.material[0])
-      || 'CF';
-    const now = new Date();
-    const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    const newLoad = {
-      id: 'ld-' + Math.random().toString(36).substring(2, 7),
-      driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-      material, cy: defaultCy, photo: null, time: hhmm, date: TODAY_ISO,
-      status: 'pending', haulRequestId: haulReqId,
-    };
-    setDb(prev => appendActivity(
-      { ...prev, loads: [...prev.loads, newLoad] },
-      {
-        type: 'load.logged',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} quick-logged ${defaultCy} CY of ${materialLabel(material)} on #${truck.plate}`,
-        refId: newLoad.id,
-      }
-    ));
-  };
-
-  // v33: day-summary economics. truck.ratePerHour > db.rates[type] > 0.
-  const hourlyRate = (truck.ratePerHour != null ? truck.ratePerHour : ((db.rates && db.rates[truck.type]) || 0));
-  const todayCY = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
-
-  // Live ticker — re-render every second while clocked in (and not paused)
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (!isOpen) return;
-    const id = setInterval(() => force(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [isOpen, isPaused, hr ? hr.id : null]);
-
-  // Compute elapsed milliseconds since clock-in, minus any paused time
-  let elapsedMs = 0;
-  if (hr) {
-    if (hr.clockedInAt) {
-      let pausedMs = hr.pausedMs || 0;
-      if (hr.pausedAt) pausedMs += Date.now() - hr.pausedAt;
-      const end = hr.clockedOutAt || Date.now();
-      elapsedMs = Math.max(0, end - hr.clockedInAt - pausedMs);
-    } else {
-      // Fallback for seed data without timestamps
-      elapsedMs = Math.floor(calcHours(hr.clockIn, hr.breakMin, hr.clockOut) * 3600 * 1000);
-    }
-  }
-  const fmtElapsed = (ms) => {
-    const t = Math.floor(ms / 1000);
-    const h = Math.floor(t / 3600);
-    const m = Math.floor((t % 3600) / 60);
-    const s = t % 60;
-    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-  };
-  const fmtClock = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-
-  const clockIn = () => {
-    const now = Date.now();
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        hours: [
-          ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
-          {
-            id: 'hr-' + Math.random().toString(36).substring(2, 7),
-            driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-            clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-            breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
-          },
-        ],
-      },
-      {
-        type: 'shift.started',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} clocked in on #${truck.plate}`,
-        refId: truck.id,
-      }
-    ));
-  };
-
-  const togglePause = () => {
-    if (!hr) return;
-    if (hr.pausedAt) {
-      const addedMs = Date.now() - hr.pausedAt;
-      setDb(prev => ({
-        ...prev,
-        hours: prev.hours.map(h => h.id === hr.id ? {
-          ...h, pausedMs: (h.pausedMs || 0) + addedMs, pausedAt: null,
-          breakMin: Math.round(((h.pausedMs || 0) + addedMs) / 60000),
-        } : h),
-      }));
-    } else {
-      setDb(prev => ({
-        ...prev,
-        hours: prev.hours.map(h => h.id === hr.id ? { ...h, pausedAt: Date.now() } : h),
-      }));
-    }
-  };
-
-  const clockOut = () => {
-    if (!hr) return;
-    if (!confirm('End your shift?')) return;
-    const now = Date.now();
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        hours: prev.hours.map(h => {
-          if (h.id !== hr.id) return h;
-          let pausedMs = h.pausedMs || 0;
-          if (h.pausedAt) pausedMs += now - h.pausedAt;
-          return {
-            ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
-            pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
-            status: 'pending',
-          };
-        }),
-      },
-      {
-        type: 'shift.ended',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} ended shift on #${truck.plate}`,
-        refId: truck.id,
-      }
-    ));
-  };
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px` }}>
-      {!embedded && (
-        <div style={{ marginBottom: S[3] }}>
-          <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
-          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
-        </div>
-      )}
-
-      {/* Truck card */}
-      <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
-          <Label>Your truck</Label>
-          {!hr && <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off the clock</Pill>}
-          {isOpen && !isPaused && <StatusPill status="open" />}
-          {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
-          {hr && hr.status !== 'open' && <Pill color={C.inkDim} soft="rgba(255,255,255,0.06)">Shift ended</Pill>}
-        </div>
-        <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType.label} · {truckType.cap} · {truck.hauler}</div>
-        <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-          <Label style={{ marginBottom: 4 }}>On haul</Label>
-          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project.name}</div>
-          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project.address}</div>
-        </div>
-      </div>
-
-      {/* v33: Today's hauler-confirmed assignments for this truck */}
-      <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
-          <Label>Today's assignments</Label>
-          <Pill color={myActiveAssignments.length > 0 ? C.accent : C.inkDim} soft={myActiveAssignments.length > 0 ? C.accentSoft : 'rgba(255,255,255,0.06)'}>{myActiveAssignments.length}</Pill>
-        </div>
-        {myActiveAssignments.length === 0 ? (
-          <div style={{ ...T.bodySm, color: C.inkDim }}>No active hauls today.</div>
-        ) : myActiveAssignments.map((r, i) => {
-          const rProj = db.projects.find(p => p.id === r.projectId);
-          const matLabel = materialLabel(r.materialCode);
-          const pickup = (r.pickupLocation && r.pickupLocation.name) || (rProj ? rProj.address : '—');
-          const dropoff = (r.dropoffLocation && r.dropoffLocation.name) || '—';
-          const deliveredCY = (db.loads || [])
-            .filter(l => l.haulRequestId === r.id && l.truckId === truck.id)
-            .reduce((s, l) => s + (l.cy || 0), 0);
-          return (
-            <div key={r.id} style={{ padding: `${S[3]}px 0`, borderTop: i === 0 ? 'none' : `1px solid ${C.rule}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
-                <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{rProj ? rProj.name : '—'}</div>
-                <StatusPill status={r.status || 'pending'} />
-              </div>
-              <div style={{ ...T.micro, color: C.inkDim, marginBottom: 4 }}>{pickup} {'→'} {dropoff}</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-                <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
-                <span style={{ ...T.monoSm, color: C.inkDim }}>{deliveredCY} of {r.volumeCY || 0} CY</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Running clock or off-state */}
-      {hr ? (
-        <div style={{ background: isPaused ? C.warnSoft : C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3], border: isPaused ? `1px solid ${C.warn}` : 'none' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: S[2] }}>
-            <Label color={isPaused ? C.warn : C.accent}>{isPaused ? 'Paused' : (isOpen ? 'On the clock' : 'Shift submitted')}</Label>
-            <span style={{ ...T.monoSm, color: C.inkDim }}>started {hr.clockIn}{hr.clockOut ? ' · ended ' + hr.clockOut : ''}</span>
-          </div>
-          <div style={{ ...T.h1, fontFamily: F.mono, fontWeight: 700, color: isPaused ? C.warn : C.accent, lineHeight: 1, fontVariantNumeric: 'tabular-nums' }}>
-            {fmtElapsed(elapsedMs)}
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: S[3], alignItems: 'flex-end' }}>
-            <div>
-              <Label style={{ marginBottom: 4 }}>Loads</Label>
-              <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <Label style={{ marginBottom: 4 }}>Total CY</Label>
-              <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.reduce((s, l) => s + (l.cy || 0), 0)}</div>
-            </div>
-            <div style={{ textAlign: 'right' }}>
-              <Label style={{ marginBottom: 4 }}>Break</Label>
-              <div style={{ ...T.h4, fontWeight: 700, color: C.inkDim, lineHeight: 1 }}>{Math.round(((hr.pausedMs || 0) + (hr.pausedAt ? Date.now() - hr.pausedAt : 0)) / 60000)}m</div>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div style={{ background: C.surfaceHi, borderRadius: R.lg, padding: S[4], marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[3] }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: C.inkFaint }} />
-          <div><Label>Status</Label><div style={{ ...T.bodyLg, fontFamily: F.display, color: C.inkDim, fontWeight: 600, marginTop: 2 }}>Not clocked in</div></div>
-        </div>
-      )}
-
-      <div style={{ flex: 1 }} />
-
-      {!hr && (
-        <button onClick={clockIn} style={{ ...T.statValue, width: '100%', height: 84, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.6 }}>Clock in</button>
-      )}
-      {isOpen && (
-        <>
-          {/* v33: Row 1 — one-tap quick log + custom-load fallback */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], marginBottom: S[2] }}>
-            <button onClick={quickLog} disabled={isPaused} style={{ ...T.h4, height: 84, border: 'none', cursor: isPaused ? 'not-allowed' : 'pointer', background: isPaused ? C.surfaceHi : C.accent, color: isPaused ? C.inkFaint : C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Log {defaultCy} CY</button>
-            <button onClick={() => embedded ? (onOpenLogLoad && onOpenLogLoad(truck)) : navigate('/driver/log')} disabled={isPaused} style={{ ...T.h4, height: 84, border: `1px solid ${isPaused ? C.ruleHi : C.accent}`, cursor: isPaused ? 'not-allowed' : 'pointer', background: 'transparent', color: isPaused ? C.inkFaint : C.accent, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Custom load</button>
-          </div>
-          {/* v33: Row 2 — pause + end-shift */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], marginBottom: S[2] }}>
-            <button onClick={togglePause} style={{ ...T.bodyLg, height: 56, border: `1px solid ${isPaused ? C.accent : C.warn}`, cursor: 'pointer', background: isPaused ? C.accentSoft : 'transparent', color: isPaused ? C.accent : C.warn, borderRadius: R.lg, fontFamily: F.display, fontWeight: 600 }}>{isPaused ? 'Resume' : 'Pause'}</button>
-            <button onClick={clockOut} style={{ ...T.bodyLg, height: 56, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontWeight: 600 }}>End shift</button>
-          </div>
-        </>
-      )}
-
-      {todayLoads.length > 0 && (
-        <div style={{ marginTop: S[4] }}>
-          <Label style={{ marginBottom: S[2] }}>Today's loads</Label>
-          {todayLoads.slice().reverse().slice(0, 6).map(l => {
-            const m = MATERIALS.find(m => m.code === l.material);
-            return (
-              <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
-                  <div>
-                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m.label}</div>
-                    <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
-                  </div>
-                </div>
-                <StatusPill status={l.status} />
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {/* v33: End-of-day summary card — 4 stats (loads, CY, hours, est. earned) */}
-      <div style={{ marginTop: S[4], background: C.surface, borderRadius: R.lg, padding: S[4] }}>
-        <Label style={{ marginBottom: S[3] }}>Today</Label>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3] }}>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Loads</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>CY</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayCY}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Hours</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Earned</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: hr && hourlyRate > 0 ? C.accent : C.inkDim, lineHeight: 1 }}>{hr && hourlyRate > 0 ? fmtMoney((elapsedMs / 3600000) * hourlyRate) : '—'}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DriverLogLoad({ driver, truck, db, setDb, navigate, returnTo, onSubmitted, onCancel }) {
-  const back = returnTo || '/driver';
-  const goBack = () => { if (onCancel) onCancel(); else navigate(back); };
-  const afterSubmit = () => { if (onSubmitted) onSubmitted(); else navigate(back); };
-  const proj = db.projects.find(p => p.id === truck.projectId);
-  const [material, setMaterial] = useState((proj && proj.material[0]) || 'CF');
-  const [cy, setCy] = useState('');
-  const [photo, setPhoto] = useState(null);
-  const fileRef = useRef(null);
-
-  const onPick = (e) => {
-    const f = e.target.files && e.target.files[0];
-    if (!f) return;
-    const reader = new FileReader();
-    reader.onload = ev => setPhoto(ev.target.result);
-    reader.readAsDataURL(f);
-  };
-
-  const submit = () => {
-    if (!canSubmit) return;
-    const now = new Date();
-    const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    // v33: auto-stamp haulRequestId when this truck has exactly one active
-    // hauler-confirmed assignment. Mirrors the HaulerLogLoadForm pattern.
-    const candidateReqs = (db.haulRequests || []).filter(r =>
-      r && Array.isArray(r.assignments) &&
-      r.assignments.some(a => a && a.truckId === truck.id) &&
-      r.status !== 'completed' && r.status !== 'closed'
-    );
-    const autoHaulReqId = candidateReqs.length === 1 ? candidateReqs[0].id : null;
-    const newLoad = {
-      id: 'ld-' + Math.random().toString(36).substring(2, 7),
-      driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-      material, cy: parseFloat(cy), photo, time: hhmm, date: TODAY_ISO, status: 'pending',
-      haulRequestId: autoHaulReqId,
-    };
-    setDb(prev => appendActivity(
-      { ...prev, loads: [...prev.loads, newLoad] },
-      {
-        type: 'load.logged',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} logged ${newLoad.cy} CY of ${materialLabel(newLoad.material)} on #${truck.plate}`,
-        refId: newLoad.id,
-      }
-    ));
-    afterSubmit();
-  };
-
-  const canSubmit = cy && parseFloat(cy) > 0;
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
-      <button onClick={goBack} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← Back</button>
-      <Label color={C.accent} style={{ marginBottom: 6 }}>New load · #{truck.plate} · {proj ? proj.name : ''}</Label>
-      <div style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, letterSpacing: -0.6, marginBottom: S[4] }}>Log a load</div>
-
-      <Label style={{ marginBottom: 6 }}>Material</Label>
-      <select value={material} onChange={e => setMaterial(e.target.value)} style={{ ...T.bodyLg, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '16px 16px', fontFamily: F.display, fontWeight: 600, marginBottom: S[4], appearance: 'menulist', width: '100%', boxSizing: 'border-box' }}>
-        {MATERIALS.map(m => (
-          <option key={m.code} value={m.code}>{m.label}</option>
-        ))}
-      </select>
-
-      <Label style={{ marginBottom: 6 }}>Cubic yards (CY)</Label>
-      <input type="number" inputMode="decimal" value={cy} onChange={e => setCy(e.target.value)} placeholder="e.g. 16" min="0" step="0.5" autoFocus
-        style={{ ...T.h2, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.md, padding: '18px 16px', fontFamily: F.mono, fontWeight: 700, marginBottom: S[4], textAlign: 'center', letterSpacing: -0.6, boxSizing: 'border-box', width: '100%' }} />
-
-      <Label style={{ marginBottom: 6 }}>Photo (required)</Label>
-      <input ref={fileRef} type="file" accept="image/*" capture="environment" onChange={onPick} style={{ display: 'none' }} />
-      {!photo ? (
-        <button onClick={() => fileRef.current && fileRef.current.click()} style={{
-          ...T.body, height: 140, border: `2px dashed ${C.ruleHi}`, cursor: 'pointer', background: C.surface,
-          color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontWeight: 600,
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: S[4],
-        }}>
-          <span style={{ fontSize: 32 }}>📷</span>
-          <span>Take photo of load</span>
-          <span style={{ ...T.micro, color: C.inkFaint, fontWeight: 500 }}>Required to submit</span>
-        </button>
-      ) : (
-        <div style={{ position: 'relative', marginBottom: S[4] }}>
-          <img src={photo} alt="Load" style={{ width: '100%', height: 180, objectFit: 'cover', borderRadius: R.md, border: `1px solid ${C.accent}`, display: 'block' }} />
-          <button onClick={() => { setPhoto(null); if (fileRef.current) fileRef.current.value = ''; }} style={{
-            ...T.micro, position: 'absolute', top: 8, right: 8, background: 'rgba(0,0,0,0.7)', color: C.ink, border: 'none',
-            padding: '6px 12px', borderRadius: R.pill, cursor: 'pointer', fontWeight: 600,
-          }}>Retake</button>
-        </div>
-      )}
-
-      <div style={{ flex: 1, minHeight: S[3] }} />
-
-      <button onClick={submit} disabled={!canSubmit} style={{
-        ...T.h4, height: 64, border: 'none', cursor: canSubmit ? 'pointer' : 'not-allowed',
-        background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4,
-        opacity: canSubmit ? 1 : 0.4,
-      }}>Submit load</button>
-      <div style={{ ...T.micro, color: C.inkDim, textAlign: 'center', marginTop: S[2] }}>
-        Hauler will review and approve.
-      </div>
-    </div>
-  );
-}
-
-// Driver "incoming requests" card — surfaces pending hauls on the
-// driver's project(s) and lets them Accept or Pass. Shared by both the
-// multi-truck home screen and the single-truck detail screen. Passing on a
-// request keeps it pending in the admin pool but hides it from this driver.
-function DriverIncomingRequests({ db, setDb, driver, projectIds }) {
-  const requests = (db.haulRequests || []).filter(r =>
-    r.status === 'pending'
-    && projectIds.includes(r.projectId)
-    && !(r.passedBy || []).includes(driver.id)
-  );
-
-  const acceptRequest = (reqId) => {
-    const req = (db.haulRequests || []).find(r => r.id === reqId);
-    if (!req) return;
-    const matLabel = materialLabel(req.materialCode);
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        haulRequests: prev.haulRequests.map(r => r.id === reqId
-          ? { ...r, status: 'accepted', acceptedByDriver: driver.id }
-          : r),
-      },
-      {
-        type: 'haulRequest.accepted',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} accepted ${req.volumeCY} CY of ${matLabel}`,
-        refId: reqId,
-      }
-    ));
-  };
-
-  const passRequest = (reqId) => {
-    const req = (db.haulRequests || []).find(r => r.id === reqId);
-    if (!req) return;
-    const matLabel = materialLabel(req.materialCode);
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        haulRequests: prev.haulRequests.map(r => r.id === reqId
-          ? { ...r, passedBy: [...(r.passedBy || []), driver.id] }
-          : r),
-      },
-      {
-        type: 'haulRequest.passed',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} passed on ${req.volumeCY} CY of ${matLabel}`,
-        refId: reqId,
-      }
-    ));
-  };
-
-  return (
-    <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
-        <Label>Incoming requests</Label>
-        <Pill color={requests.length > 0 ? C.warn : C.inkDim} soft={requests.length > 0 ? C.warnSoft : 'rgba(255,255,255,0.06)'}>{requests.length}</Pill>
-      </div>
-      {requests.length === 0 ? (
-        <div style={{ ...T.bodySm, color: C.inkDim, padding: `${S[2]}px 0` }}>Nothing waiting right now.</div>
-      ) : requests.map((r, i) => {
-        const project = db.projects.find(p => p.id === r.projectId);
-        const matLabel = materialLabel(r.materialCode);
-        return (
-          <div key={r.id} style={{
-            padding: `${S[3]}px 0`,
-            borderTop: i === 0 ? 'none' : `1px solid ${C.rule}`,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
-              <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
-              <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
-            </div>
-            <div style={{ ...T.monoSm, color: C.inkDim, marginBottom: S[3] }}>{r.volumeCY} CY · {r.requestedAt}</div>
-            <div style={{ display: 'flex', gap: S[2] }}>
-              <button onClick={() => acceptRequest(r.id)} style={{
-                ...T.bodySm, flex: 1, height: 40, border: 'none', cursor: 'pointer',
-                background: C.accent, color: C.bg, borderRadius: R.md, fontFamily: F.display, fontWeight: 700,
-                letterSpacing: -0.2,
-              }}>Accept</button>
-              <button onClick={() => passRequest(r.id)} style={{
-                ...T.bodySm, flex: 1, height: 40, border: `1px solid ${C.ruleHi}`, cursor: 'pointer',
-                background: 'transparent', color: C.inkDim, borderRadius: R.md, fontFamily: F.display, fontWeight: 600,
-              }}>Pass</button>
-            </div>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function DriverMultiTruckHome({ driver, trucks, db, setDb, navigate }) {
-  const fmtClock = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-  // Aggregate across all the driver's trucks
-  const todaysLoadsAll = db.loads.filter(l => l.driverId === driver.id && isToday(l.date));
-  const openShifts = db.hours.filter(h => h.driverId === driver.id && h.status === 'open');
-  const totalCY = todaysLoadsAll.reduce((s, l) => s + (l.cy || 0), 0);
-  const projectIds = Array.from(new Set(trucks.map(t => t.projectId).filter(Boolean)));
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
-      <div style={{ marginBottom: S[3] }}>
-        <Label color={C.accent}>Today {fmtClock(new Date())}</Label>
-        <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, marginTop: 4 }}>Hi, {driver.name.split(' ').pop()}</div>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>You're assigned to {trucks.length} trucks today. Tap one to log loads or start a shift.</div>
-      </div>
-
-      <DriverIncomingRequests db={db} setDb={setDb} driver={driver} projectIds={projectIds} />
-
-      {trucks.map(truck => {
-        const truckType = TRUCK_TYPES.find(t => t.code === truck.type);
-        const project = db.projects.find(p => p.id === truck.projectId);
-        const hr = db.hours.find(h => h.truckId === truck.id && h.driverId === driver.id && h.status === 'open');
-        const isOpen = !!hr;
-        const isPaused = !!(hr && hr.pausedAt);
-        const truckLoadsToday = db.loads.filter(l => l.truckId === truck.id && l.driverId === driver.id && isToday(l.date));
-        const truckCY = truckLoadsToday.reduce((s, l) => s + (l.cy || 0), 0);
-        // v33: how many hauler-confirmed assignments target this truck right now
-        const activeHaulsForTruck = (db.haulRequests || []).filter(r =>
-          r && r.status !== 'completed' && Array.isArray(r.assignments) &&
-          r.assignments.some(a => a && a.truckId === truck.id)
-        ).length;
-
-        return (
-          <button key={truck.id} onClick={() => navigate(`/driver/truck/${truck.id}`)} style={{
-            textAlign: 'left', background: C.surface, border: 'none', borderRadius: R.lg,
-            padding: S[4], marginBottom: S[3], cursor: 'pointer', color: C.ink, width: '100%',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[2] }}>
-              <div style={{ fontFamily: F.display, fontSize: 24, fontWeight: 700, letterSpacing: -0.6, color: C.accent }}>#{truck.plate}</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                {activeHaulsForTruck > 0 && <Pill color={C.accent} soft={C.accentSoft}>{activeHaulsForTruck} active haul{activeHaulsForTruck === 1 ? '' : 's'}</Pill>}
-                {isOpen && !isPaused && <StatusPill status="open" />}
-                {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
-                {!isOpen && <StatusPill status="idle" />}
-              </div>
-            </div>
-            <div style={{ ...T.caption, marginBottom: S[3] }}>{truckType ? truckType.label : truck.type} · {truck.hauler}</div>
-            <div style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, marginBottom: S[3] }}>
-              <Label style={{ marginBottom: 4 }}>On haul</Label>
-              <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
-              <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-              <div>
-                <Label style={{ marginBottom: 4 }}>Loads today</Label>
-                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckLoadsToday.length}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <Label style={{ marginBottom: 4 }}>Total CY</Label>
-                <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{truckCY}</div>
-              </div>
-              <div style={{ textAlign: 'right', alignSelf: 'flex-end' }}>
-                <span style={{ ...T.monoSm, color: C.accent, display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 600 }}>Open <ChevronRight size={14} /></span>
-              </div>
-            </div>
-          </button>
-        );
-      })}
-
-      <div style={{ flex: 1 }} />
-
-      {/* Aggregate end-of-day summary across all trucks */}
-      <div style={{ marginTop: S[3], background: C.surface, borderRadius: R.lg, padding: S[4] }}>
-        <Label style={{ marginBottom: S[3] }}>Today across all trucks</Label>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: S[3] }}>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Loads</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todaysLoadsAll.length}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Total CY</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Active</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: openShifts.length > 0 ? C.accent : C.inkDim, lineHeight: 1 }}>{openShifts.length}/{trucks.length}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DriverTruckDetail({ driver, truck, trucks, db, setDb, navigate, embedded = false, onOpenLogLoad }) {
-  const truckType = TRUCK_TYPES.find(t => t.code === truck.type);
-  const project = db.projects.find(p => p.id === truck.projectId);
-  const hr = db.hours.find(h => h.truckId === truck.id && h.driverId === driver.id && h.status === 'open');
-  const isOpen = !!hr;
-  const isPaused = !!(hr && hr.pausedAt);
-  const todayLoads = db.loads.filter(l => l.driverId === driver.id && l.truckId === truck.id && isToday(l.date));
-  const totalCY = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
-  const backHref = '/driver';
-
-  // v33: default-CY + active assignments + quickLog (mirrors DriverHome).
-  const parseCapUpper = (s) => {
-    if (!s) return null;
-    const nums = String(s).match(/\d+(?:\.\d+)?/g);
-    if (!nums || nums.length === 0) return null;
-    return parseFloat(nums[nums.length - 1]);
-  };
-  const defaultCy = (truck.capacityCY && parseFloat(truck.capacityCY))
-    || parseCapUpper(truckType && truckType.cap)
-    || 16;
-  const myActiveAssignments = (db.haulRequests || []).filter(r => {
-    if (!r || r.status === 'completed') return false;
-    if (!Array.isArray(r.assignments)) return false;
-    return r.assignments.some(a => a && a.truckId === truck.id);
-  });
-  const hourlyRate = (truck.ratePerHour != null ? truck.ratePerHour : ((db.rates && db.rates[truck.type]) || 0));
-
-  const quickLog = () => {
-    if (!hr || isPaused) return;
-    const haulReqId = myActiveAssignments.length === 1 ? myActiveAssignments[0].id : null;
-    const material = (haulReqId && myActiveAssignments[0].materialCode)
-      || (project && project.material && project.material[0])
-      || 'CF';
-    const now = new Date();
-    const hhmm = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    const newLoad = {
-      id: 'ld-' + Math.random().toString(36).substring(2, 7),
-      driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-      material, cy: defaultCy, photo: null, time: hhmm, date: TODAY_ISO,
-      status: 'pending', haulRequestId: haulReqId,
-    };
-    setDb(prev => appendActivity(
-      { ...prev, loads: [...prev.loads, newLoad] },
-      {
-        type: 'load.logged',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} quick-logged ${defaultCy} CY of ${materialLabel(material)} on #${truck.plate}`,
-        refId: newLoad.id,
-      }
-    ));
-  };
-
-  // Live ticker for elapsed shift display
-  const [, force] = useState(0);
-  useEffect(() => {
-    if (!isOpen) return;
-    const id = setInterval(() => force(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, [isOpen, isPaused, hr ? hr.id : null]);
-
-  let elapsedMs = 0;
-  if (hr && hr.clockedInAt) {
-    let pausedMs = hr.pausedMs || 0;
-    if (hr.pausedAt) pausedMs += Date.now() - hr.pausedAt;
-    const end = hr.clockedOutAt || Date.now();
-    elapsedMs = Math.max(0, end - hr.clockedInAt - pausedMs);
-  }
-
-  const fmtClock = (d) => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
-
-  const clockIn = () => {
-    const now = Date.now();
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        hours: [
-          ...prev.hours.map(h => (h.driverId === driver.id && h.status === 'open') ? { ...h, status: 'closed', clockOut: fmtClock(new Date(now)), clockedOutAt: now } : h),
-          {
-            id: 'hr-' + Math.random().toString(36).substring(2, 7),
-            driverId: driver.id, truckId: truck.id, projectId: truck.projectId,
-            clockIn: fmtClock(new Date(now)), clockedInAt: now, clockOut: null, clockedOutAt: null,
-            breakMin: 0, pausedMs: 0, pausedAt: null, status: 'open', date: TODAY_ISO,
-          },
-        ],
-      },
-      {
-        type: 'shift.started',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} clocked in on #${truck.plate}`,
-        refId: truck.id,
-      }
-    ));
-  };
-
-  const clockOut = () => {
-    if (!hr) return;
-    if (!confirm('End your shift on this truck?')) return;
-    const now = Date.now();
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        hours: prev.hours.map(h => {
-          if (h.id !== hr.id) return h;
-          let pausedMs = h.pausedMs || 0;
-          if (h.pausedAt) pausedMs += now - h.pausedAt;
-          return {
-            ...h, clockOut: fmtClock(new Date(now)), clockedOutAt: now,
-            pausedAt: null, pausedMs, breakMin: Math.round(pausedMs / 60000),
-            status: 'pending',
-          };
-        }),
-      },
-      {
-        type: 'shift.ended',
-        actorRole: 'driver',
-        actorId: driver.id,
-        summary: `${driver.name} ended shift on #${truck.plate}`,
-        refId: truck.id,
-      }
-    ));
-  };
-
-  return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', padding: `${S[3]}px ${S[5]}px ${S[5]}px`, overflowY: 'auto' }}>
-      {!embedded && (
-        <button onClick={() => navigate(backHref)} style={{ ...T.bodySm, background: 'transparent', border: 'none', color: C.inkDim, padding: 0, marginBottom: S[3], cursor: 'pointer', textAlign: 'left' }}>← All my trucks</button>
-      )}
-
-      {!embedded && <DriverIncomingRequests db={db} setDb={setDb} driver={driver} projectIds={truck.projectId ? [truck.projectId] : []} />}
-
-      {/* Truck header */}
-      <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[2] }}>
-          <Label>Truck</Label>
-          {isOpen && !isPaused && <StatusPill status="open" />}
-          {isOpen && isPaused && <Pill color={C.warn} soft={C.warnSoft}>Paused</Pill>}
-          {!isOpen && <StatusPill status="idle" />}
-        </div>
-        <div style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.8, color: C.accent }}>#{truck.plate}</div>
-        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>{truckType ? truckType.label : truck.type} · {truckType ? truckType.cap : ''} · {truck.hauler}</div>
-        <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
-          <Label style={{ marginBottom: 4 }}>On haul</Label>
-          <div style={{ ...T.bodyLg, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{project ? project.name : '—'}</div>
-          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.gc : ''}</div>
-          <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{project ? project.address : ''}</div>
-        </div>
-      </div>
-
-      {/* v33: Today's hauler-confirmed assignments for this truck */}
-      <div style={{ background: C.surface, borderRadius: R.lg, padding: S[4], marginBottom: S[3] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
-          <Label>Today's assignments</Label>
-          <Pill color={myActiveAssignments.length > 0 ? C.accent : C.inkDim} soft={myActiveAssignments.length > 0 ? C.accentSoft : 'rgba(255,255,255,0.06)'}>{myActiveAssignments.length}</Pill>
-        </div>
-        {myActiveAssignments.length === 0 ? (
-          <div style={{ ...T.bodySm, color: C.inkDim }}>No active hauls today.</div>
-        ) : myActiveAssignments.map((r, i) => {
-          const rProj = db.projects.find(p => p.id === r.projectId);
-          const matLabel = materialLabel(r.materialCode);
-          const pickup = (r.pickupLocation && r.pickupLocation.name) || (rProj ? rProj.address : '—');
-          const dropoff = (r.dropoffLocation && r.dropoffLocation.name) || '—';
-          const deliveredCY = (db.loads || [])
-            .filter(l => l.haulRequestId === r.id && l.truckId === truck.id)
-            .reduce((s, l) => s + (l.cy || 0), 0);
-          return (
-            <div key={r.id} style={{ padding: `${S[3]}px 0`, borderTop: i === 0 ? 'none' : `1px solid ${C.rule}` }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], marginBottom: 4 }}>
-                <div style={{ fontFamily: F.display, fontSize: 15, fontWeight: 600, color: C.ink }}>{rProj ? rProj.name : '—'}</div>
-                <StatusPill status={r.status || 'pending'} />
-              </div>
-              <div style={{ ...T.micro, color: C.inkDim, marginBottom: 4 }}>{pickup} {'→'} {dropoff}</div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-                <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
-                <span style={{ ...T.monoSm, color: C.inkDim }}>{deliveredCY} of {r.volumeCY || 0} CY</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: S[2], marginBottom: S[3] }}>
-        <Card padding={S[3]}>
-          <Label style={{ marginBottom: 4 }}>Loads</Label>
-          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
-        </Card>
-        <Card padding={S[3]}>
-          <Label style={{ marginBottom: 4 }}>Total CY</Label>
-          <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
-        </Card>
-        <Card padding={S[3]}>
-          <Label style={{ marginBottom: 4 }}>Shift</Label>
-          <div style={{ ...T.statValue, fontWeight: 700, color: isOpen ? C.accent : C.inkDim, lineHeight: 1 }}>{isOpen ? (elapsedMs / 3600000).toFixed(1) + 'h' : '—'}</div>
-        </Card>
-      </div>
-
-      {/* v33: Primary actions — one-tap quick log + custom load + clock controls */}
-      {!isOpen ? (
-        <button onClick={clockIn} style={{ ...T.h4, width: '100%', height: 64, border: 'none', cursor: 'pointer', background: C.accent, color: C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, marginBottom: S[2] }}>Clock in (this truck)</button>
-      ) : (
-        <>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], marginBottom: S[2] }}>
-            <button onClick={quickLog} disabled={isPaused} style={{ ...T.h4, height: 64, border: 'none', cursor: isPaused ? 'not-allowed' : 'pointer', background: isPaused ? C.surfaceHi : C.accent, color: isPaused ? C.inkFaint : C.bg, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Log {defaultCy} CY</button>
-            <button onClick={() => embedded ? (onOpenLogLoad && onOpenLogLoad(truck)) : navigate(`/driver/log/${truck.id}`)} disabled={isPaused} style={{ ...T.h4, height: 64, border: `1px solid ${isPaused ? C.ruleHi : C.accent}`, cursor: isPaused ? 'not-allowed' : 'pointer', background: 'transparent', color: isPaused ? C.inkFaint : C.accent, borderRadius: R.lg, fontWeight: 700, letterSpacing: -0.4, opacity: isPaused ? 0.5 : 1 }}>+ Custom load</button>
-          </div>
-          <button onClick={clockOut} style={{ ...T.body, width: '100%', height: 48, border: `1px solid ${C.warn}`, cursor: 'pointer', background: 'transparent', color: C.warn, borderRadius: R.lg, fontFamily: F.display, fontWeight: 600, marginBottom: S[2] }}>End shift on this truck</button>
-        </>
-      )}
-
-      {/* Today's loads list */}
-      <div style={{ marginTop: S[3] }}>
-        <Label style={{ marginBottom: S[2] }}>Today's loads on #{truck.plate}</Label>
-        {todayLoads.length === 0 ? (
-          <EmptyState
-            icon={<TruckIcon size={32} />}
-            title="No loads logged yet"
-            body="Use the + Log load button above to log your first load on this truck."
-          />
-        ) : (
-          todayLoads.slice().reverse().map(l => {
-            const m = MATERIALS.find(m => m.code === l.material);
-            return (
-              <div key={l.id} style={{ ...T.bodySm, display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`}}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
-                  {l.photo ? <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover' }} /> : <div style={{ ...T.body, width: 32, height: 32, borderRadius: R.xs, background: C.surfaceMax, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>📷</div>}
-                  <div>
-                    <div style={{ fontFamily: F.display, fontWeight: 600 }}>{l.cy != null ? l.cy + ' CY' : l.ticketNo} · {m ? m.label : l.material}</div>
-                    <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkDim, marginTop: 2 }}>{l.time}</div>
-                  </div>
-                </div>
-                <StatusPill status={l.status} />
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      {/* v33: Day summary on this truck */}
-      <div style={{ marginTop: S[4], background: C.surface, borderRadius: R.lg, padding: S[4] }}>
-        <Label style={{ marginBottom: S[3] }}>Today on #{truck.plate}</Label>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3] }}>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Loads</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{todayLoads.length}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>CY</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: C.ink, lineHeight: 1 }}>{totalCY}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Hours</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: hr ? C.accent : C.inkDim, lineHeight: 1 }}>{hr ? (elapsedMs / 3600000).toFixed(1) : '—'}</div>
-          </div>
-          <div>
-            <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 4 }}>Earned</div>
-            <div style={{ ...T.statValue, fontWeight: 700, color: hr && hourlyRate > 0 ? C.accent : C.inkDim, lineHeight: 1 }}>{hr && hourlyRate > 0 ? fmtMoney((elapsedMs / 3600000) * hourlyRate) : '—'}</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+// === BLOCK 6: removed 2026-05-25 (operator role retired from UI) ===
+// All field-operator-view components deleted. No routes mount them; no
+// other code references them. Restorable from git history.
   </script>
 
   <script type="text/babel" data-presets="react">
@@ -16446,7 +15015,6 @@ function App() {
         title = 'JSE — Payments';
       }
     }
-    else if (h.startsWith('/admin/trucks/active')) title = 'JSE — Active Trucks';
     else if (h.startsWith('/admin/trucks/new/for/') && parts[4] && db && db.haulers) {
       const op = db.haulers.find(o => o.id === parts[4]);
       title = op ? `JSE — New truck for ${op.name}` : 'JSE — New truck';
@@ -16492,14 +15060,6 @@ function App() {
       }
     }
     else if (h.startsWith('/hauler')) title = 'JSE — Hauler';
-    else if (parts[0] === 'driver' && parts[1] === 'log') {
-      title = 'JSE — Driver — Log load';
-    }
-    else if (parts[0] === 'driver' && parts[1] === 'truck' && parts[2]) {
-      const tr = db && db.trucks ? db.trucks.find(t => t.id === parts[2]) : null;
-      title = tr ? `JSE — Driver — Truck #${tr.plate}` : 'JSE — Driver';
-    }
-    else if (h.startsWith('/driver')) title = 'JSE — Driver';
     document.title = title;
   }, [hash, db]);
   const route = (hash || '/').split('/')[1] || '';
@@ -16509,10 +15069,7 @@ function App() {
         {route === '' && <Landing navigate={navigate} />}
         {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'hauler' && <HaulerShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-        {/* Driver role removed from UI 2026-05-25 per Robert's brief.
-            DriverShell + DriverHome function definitions remain in the file
-            (dead code, never rendered) so re-adding later is a one-line route
-            restore, not a re-implementation. */}
+        {/* Operator role retired from UI 2026-05-25 (schema columns preserved nullable). */}
         <CloudStatusChip status={cloudStatus} />
         <SyncErrorOverlay />
       </div>
