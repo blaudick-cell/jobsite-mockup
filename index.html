@@ -6402,60 +6402,99 @@ function AdminNewProject({ db, setDb, navigate }) {
           </div>
         )}
 
-        {step === 3 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-            <Label>Step 3 — Assign trucks</Label>
-            <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this haul and assign each to one of the haulers you selected.</div>
-            <div>
-              <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-              {db.trucks.filter(t => onlyUnassigned ? !t.projectId : true).map(t => {
-                const sel = trucks.find(x => x.truckId === t.id);
-                const selected = !!sel;
-                const currentProj = t.projectId ? db.projects.find(p => p.id === t.projectId) : null;
-                const currentOp = t.haulerId ? db.haulers.find(o => o.id === t.haulerId) : null;
-                const reassign = !!t.projectId;
-                const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
-                return (
-                  <div key={t.id} style={{
-                    display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
-                    background: selected ? C.accentSoft : C.surfaceHi,
-                    border: `1px solid ${selected ? C.accent : C.ruleHi}`,
-                    borderRadius: R.md, flexWrap: 'wrap',
-                  }}>
-                    <div onClick={() => toggleTruck(t.id)} style={{
-                      ...T.body, width: 22, height: 22, borderRadius: 6,
-                      background: selected ? C.accent : 'transparent',
-                      border: `2px solid ${selected ? C.accent : C.ruleHi}`,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
-                    }}>{selected ? 'âœ“' : ''}</div>
-                    <div onClick={() => toggleTruck(t.id)} style={{ flex: 1, minWidth: 180, cursor: 'pointer' }}>
-                      <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
-                      <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                        {t.hauler} · {currentProj ? `On ${currentProj.name}${currentOp ? ' / ' + currentOp.name : ''}` : 'Unassigned'}
+        {step === 3 && (() => {
+          // 2026-05-24: drop orphan trucks (haulerId missing or pointing at a
+          // deleted hauler) — same filter as the haul-detail picker fix
+          // (line ~9569) + the active-trucks fix (commit 539a39d). The wizard
+          // picker was the last unfiltered surface. Also group by hauler with
+          // a section header per group so the wizard reads the same way as
+          // the detail-page picker.
+          const haulerById = new Map((db.haulers || []).map(o => [o.id, o]));
+          const pickable = (db.trucks || []).filter(t =>
+            t && t.haulerId && haulerById.has(t.haulerId) && (onlyUnassigned ? !t.projectId : true)
+          );
+          const trucksByHauler = new Map();
+          for (const t of pickable) {
+            if (!trucksByHauler.has(t.haulerId)) trucksByHauler.set(t.haulerId, []);
+            trucksByHauler.get(t.haulerId).push(t);
+          }
+          const sortedHaulerIds = Array.from(trucksByHauler.keys()).sort((a, b) => {
+            const an = (haulerById.get(a)?.name || '').toLowerCase();
+            const bn = (haulerById.get(b)?.name || '').toLowerCase();
+            return an.localeCompare(bn);
+          });
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
+              <Label>Step 3 — Assign trucks</Label>
+              <div style={{ ...T.bodySm, color: C.inkDim }}>Optional. Pick trucks for this haul and assign each to one of the haulers you selected.</div>
+              <div>
+                <Chip active={onlyUnassigned} onClick={() => setOnlyUnassigned(v => !v)}>Only show unassigned</Chip>
+              </div>
+              {pickable.length === 0 ? (
+                <div style={{ ...T.bodySm, color: C.inkFaint }}>No trucks available for the selected filter.</div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
+                  {sortedHaulerIds.map(hid => {
+                    const hauler = haulerById.get(hid);
+                    const haulerTrucks = trucksByHauler.get(hid);
+                    return (
+                      <div key={hid}>
+                        <div style={{ ...T.caption, color: C.inkDim, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: S[2] }}>
+                          {hauler ? hauler.name : 'Unknown hauler'}
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                          {haulerTrucks.map(t => {
+                            const sel = trucks.find(x => x.truckId === t.id);
+                            const selected = !!sel;
+                            const currentProj = t.projectId ? db.projects.find(p => p.id === t.projectId) : null;
+                            const currentOp = haulerById.get(t.haulerId);
+                            const reassign = !!t.projectId;
+                            const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
+                            return (
+                              <div key={t.id} style={{
+                                display: 'flex', alignItems: 'center', gap: S[3], padding: S[3],
+                                background: selected ? C.accentSoft : C.surfaceHi,
+                                border: `1px solid ${selected ? C.accent : C.ruleHi}`,
+                                borderRadius: R.md, flexWrap: 'wrap',
+                              }}>
+                                <div onClick={() => toggleTruck(t.id)} style={{
+                                  ...T.body, width: 22, height: 22, borderRadius: 6,
+                                  background: selected ? C.accent : 'transparent',
+                                  border: `2px solid ${selected ? C.accent : C.ruleHi}`,
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: C.bg, fontFamily: F.display, fontWeight: 700, flexShrink: 0, cursor: 'pointer',
+                                }}>{selected ? 'âœ“' : ''}</div>
+                                <div onClick={() => toggleTruck(t.id)} style={{ flex: 1, minWidth: 180, cursor: 'pointer' }}>
+                                  <div style={{ fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate} · {typeLabel}</div>
+                                  <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
+                                    {currentOp ? currentOp.name : t.hauler} · {currentProj ? `On ${currentProj.name}` : 'Available'}
+                                  </div>
+                                </div>
+                                {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
+                                {selected && (
+                                  <select value={sel.haulerId} onChange={e => setTruckHauler(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
+                                    <option value="">Pick a hauler…</option>
+                                    {haulerIds.map(opId => {
+                                      const op = haulerById.get(opId);
+                                      return op ? <option key={opId} value={opId}>{op.name}</option> : null;
+                                    })}
+                                  </select>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                    {reassign && <Pill color={C.warn} soft={C.warnSoft}>Reassign</Pill>}
-                    {selected && (
-                      <select value={sel.haulerId} onChange={e => setTruckHauler(t.id, e.target.value)} style={{ ...T.bodySm, ...inputStyle, width: 'auto', padding: '8px 10px'}}>
-                        <option value="">Pick a hauler…</option>
-                        {haulerIds.map(opId => {
-                          const op = db.haulers.find(o => o.id === opId);
-                          return op ? <option key={opId} value={opId}>{op.name}</option> : null;
-                        })}
-                      </select>
-                    )}
-                  </div>
-                );
-              })}
+                    );
+                  })}
+                </div>
+              )}
+              <div style={{ ...T.caption }}>
+                {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick a hauler for each' : ''}
+              </div>
             </div>
-            <div style={{ ...T.caption }}>
-              {trucks.length} selected{trucks.length > 0 && !trucksValid ? ' · pick a hauler for each' : ''}
-            </div>
-          </div>
-        )}
+          );
+        })()}
 
         {step === 4 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
@@ -6700,7 +6739,11 @@ function AdminNewDriver({ db, setDb, navigate }) {
 
   const inputStyle = WIZARD_INPUT_STYLE;
   const detailsValid = !!name.trim() && !!phone.trim();
-  const unassignedTrucks = db.trucks.filter(t => !t.driverId);
+  // 2026-05-24 sweep: also drop orphan trucks (haulerId missing / points at a
+  // deleted hauler). The new-driver "default truck" picker shouldn't surface
+  // ghost trucks from retired haulers.
+  const _haulerByIdAND = new Map((db.haulers || []).map(o => [o.id, o]));
+  const unassignedTrucks = db.trucks.filter(t => !t.driverId && t.haulerId && _haulerByIdAND.has(t.haulerId));
 
   const cancel = () => navigate('/admin/haulers');
   const submit = () => {
@@ -7344,21 +7387,27 @@ function AdminReports({ db, navigate }) {
     .slice(0, 10);
 
   // ----- Truck utilization (range-scoped) -----
-  const truckRows = db.trucks.map(t => {
-    const ldsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso) && l.truckId === t.id).length;
-    const driver = db.drivers.find(d => d.id === t.driverId);
-    const project = db.projects.find(p => p.id === t.projectId);
-    const inService = db.hours.some(h => h.truckId === t.id && h.status === 'open');
-    return {
-      id: t.id,
-      plate: t.plate,
-      type: t.type,
-      loadsInRange: ldsInRange,
-      driverName: driver ? driver.name : '—',
-      projectName: project ? project.name : '—',
-      status: inService ? 'inservice' : 'idle',
-    };
-  }).sort((a, b) => b.loadsInRange - a.loadsInRange || String(a.plate).localeCompare(String(b.plate)));
+  // 2026-05-24 sweep: drop orphan trucks (haulerId missing / points at a
+  // deleted hauler) before rendering the utilization table — otherwise ghost
+  // trucks with "—" everywhere clutter the report.
+  const _haulerByIdReports = new Map((db.haulers || []).map(o => [o.id, o]));
+  const truckRows = db.trucks
+    .filter(t => t && t.haulerId && _haulerByIdReports.has(t.haulerId))
+    .map(t => {
+      const ldsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso) && l.truckId === t.id).length;
+      const driver = db.drivers.find(d => d.id === t.driverId);
+      const project = db.projects.find(p => p.id === t.projectId);
+      const inService = db.hours.some(h => h.truckId === t.id && h.status === 'open');
+      return {
+        id: t.id,
+        plate: t.plate,
+        type: t.type,
+        loadsInRange: ldsInRange,
+        driverName: driver ? driver.name : '—',
+        projectName: project ? project.name : '—',
+        status: inService ? 'inservice' : 'idle',
+      };
+    }).sort((a, b) => b.loadsInRange - a.loadsInRange || String(a.plate).localeCompare(String(b.plate)));
 
   // ----- Top-level empty state: no projects -----
   if (db.projects.length === 0) {
@@ -10358,17 +10407,22 @@ function AdminHaulers({ db, setDb, navigate }) {
   });
 
   // === Operational KPI strip data ===
-  const totalTrucks    = db.trucks.length;
+  // 2026-05-24 sweep: every truck KPI here filters out orphan trucks (no
+  // haulerId / hauler deleted). Pre-fix, `trucksOffline` inflated by counting
+  // orphans as "no driver"; `totalTrucks` was unused but still misleading
+  // as a debug var, so we drop it.
+  const _haulerByIdKpi = new Map((db.haulers || []).map(o => [o.id, o]));
+  const realTrucks = db.trucks.filter(t => t && t.haulerId && _haulerByIdKpi.has(t.haulerId));
   // F2 (2026-05-24 value-source audit): require `t.driverId` so this global
   // KPI matches the per-project `trucksActive` filter (index.html line 5011 +
   // 13228). Without this, a truck with an open shift but no driver_id
   // (legacy / mid-unassign data) was counted in the global KPI but not in any
   // tile, making sum(tiles) ≠ global.
-  const trucksActiveAll = db.trucks.filter(t =>
+  const trucksActiveAll = realTrucks.filter(t =>
     t.driverId && db.hours.some(h => h.truckId === t.id && h.status === 'open')
   ).length;
-  const trucksAvailable = db.trucks.filter(t => t.driverId).length - trucksActiveAll;
-  const trucksOffline   = db.trucks.length - db.trucks.filter(t => t.driverId).length;
+  const trucksAvailable = realTrucks.filter(t => t.driverId).length - trucksActiveAll;
+  const trucksOffline   = realTrucks.length - realTrucks.filter(t => t.driverId).length;
   const avgResponse     = enriched.length ? Math.round(enriched.reduce((s, h) => s + h.responseMin, 0) / enriched.length) : 0;
   const loadsToday      = todayLoads.length;
   const cyTodayAll      = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
