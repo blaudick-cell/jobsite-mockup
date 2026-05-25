@@ -7762,6 +7762,21 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   };
 
   // === Dispatch-style row ===
+  // List-page delete handler — confirm + remove from db.haulRequests + emit
+  // activity event. Mirrors the detail-page `deleteHaulRequest` in
+  // AdminHaulRequestDetail (line ~8654). Phase 3 setDb wrapper handles the
+  // Supabase DELETE + Realtime fan-out automatically via diffArrayById.
+  const deleteRequestFromList = (req) => {
+    const proj = (db.projects || []).find(p => p.id === req.projectId);
+    const label = haulRequestLabel(db, req) || req.id;
+    if (!confirm(`Delete this haul request${proj ? ` (${proj.name})` : ''}? This cannot be undone.`)) return;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.filter(r => r.id !== req.id) },
+      { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
+        summary: `Admin deleted haul request ${label}`, refId: req.id }
+    ));
+  };
+
   const DispatchRow = ({ e, last }) => {
     const tone = priTone(e.priority);
     const lct  = lifecycleTone(e.lifecycle);
@@ -7777,10 +7792,28 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           alignItems: 'start',
           cursor: 'pointer',
           transition: 'background 120ms ease',
+          position: 'relative',
         }}
         onMouseEnter={ev => ev.currentTarget.style.background = 'rgba(255,255,255,0.025)'}
         onMouseLeave={ev => ev.currentTarget.style.background = 'transparent'}
       >
+        {/* Delete affordance — top-right × button. stopPropagation so the
+            row's onClick (navigate to detail) doesn't fire. Confirm dialog
+            in the handler. */}
+        <button
+          onClick={(ev) => { ev.stopPropagation(); deleteRequestFromList(e.r); }}
+          aria-label={`Delete haul request ${haulRequestLabel(db, e.r) || e.r.id}`}
+          title="Delete haul request"
+          style={{
+            position: 'absolute', top: S[2], right: S[2],
+            background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
+            width: 26, height: 26, borderRadius: R.sm,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18, lineHeight: 1, padding: 0,
+          }}
+          onMouseEnter={ev => { ev.currentTarget.style.color = C.warn; ev.currentTarget.style.background = C.warnSoft; }}
+          onMouseLeave={ev => { ev.currentTarget.style.color = C.inkFaint; ev.currentTarget.style.background = 'transparent'; }}
+        >×</button>
         {/* LEFT — id / haul / route / requested */}
         <div style={{ minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 4 }}>
