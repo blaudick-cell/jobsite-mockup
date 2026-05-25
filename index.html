@@ -7513,7 +7513,7 @@ function AdminReports({ db, navigate }) {
           <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            Activity across hauls, haulers, and trucks. Numbers update live as drivers log hours and loads.
+            Activity across hauls, haulers, and trucks. Numbers update live as hours and loads are logged.
           </div>
         </div>
 
@@ -11174,7 +11174,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </div>
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
-            <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/drivers/new')}>+ Add driver</Btn>
+{/* "+ Add driver" removed 2026-05-25 — driver concept eliminated from UI. */}
             <Btn variant="primary"   size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck</Btn>
             <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
           </div>
@@ -11183,7 +11183,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
         <Card padding={S[4]}><Stat label="Hauls" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul` : 'assigned'} /></Card>
-        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => t.driverId).length} with driver`} /></Card>
+        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => db.hours.some(h => h.truckId === t.id && h.status === 'open')).length} active now`} /></Card>
         <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
       </div>
