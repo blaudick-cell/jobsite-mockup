@@ -15,6 +15,12 @@
        If this CDN fails to load the app stays fully functional in offline mode
        backed by localStorage; the CloudStatus chip surfaces the offline state. -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js" crossorigin="anonymous"></script>
+  <!-- SheetJS (XLSX) — used by /admin/backup for the Excel export + restore.
+       Lazy-load would be ideal but the bundle is ~750KB and most admin
+       sessions touch backup occasionally enough that eager load is simpler.
+       If the CDN fails the /admin/backup page disables the Excel actions and
+       points the user at the SQL backup path. -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js" crossorigin="anonymous"></script>
   <style>
     html, body { margin: 0; padding: 0; background: #0a0a0a; color: #fff; font-family: "Inter", -apple-system, system-ui, sans-serif; }
     #root { min-height: 100vh; }
@@ -12799,6 +12805,437 @@ function AdminActivity({ db, setDb, navigate }) {
   );
 }
 
+// =====================================================================
+// BACKUP — Excel + SQL export, Excel restore, SQL Editor deep-link
+// 2026-05-24: Robert greenlit shipping items 1-3 from the scope-blocker
+// triage. SheetJS lazy-load was rejected; the script tag in <head> loads
+// xlsx.full.min.js up front. Scheduled-backup-infra is documented separately
+// at outputs/scheduled-backup-infra-options.md — pick from there.
+// =====================================================================
+
+// Tables in FK dependency order. INSERTs walk this order (parents first);
+// DELETEs walk the reverse so child rows go before the parents they reference.
+const BACKUP_TABLES = [
+  { sb: 'meta',          pk: 'key',         label: 'Meta',          jsKey: null /* not in SB_TABLES */ },
+  { sb: 'materials',     pk: 'code',        label: 'Materials',     jsKey: null },
+  { sb: 'rates',         pk: 'truck_type',  label: 'Rates',         jsKey: null },
+  { sb: 'haulers',       pk: 'id',          label: 'Haulers',       jsKey: 'haulers' },
+  { sb: 'projects',      pk: 'id',          label: 'Projects',      jsKey: 'projects' },
+  { sb: 'drivers',       pk: 'id',          label: 'Drivers',       jsKey: 'drivers' },
+  { sb: 'trucks',        pk: 'id',          label: 'Trucks',        jsKey: 'trucks' },
+  { sb: 'haul_requests', pk: 'id',          label: 'Haul requests', jsKey: 'haulRequests' },
+  { sb: 'loads',         pk: 'id',          label: 'Loads',         jsKey: 'loads' },
+  { sb: 'hours',         pk: 'id',          label: 'Hours',         jsKey: 'hours' },
+  { sb: 'invoices',      pk: 'id',          label: 'Invoices',      jsKey: 'invoices' },
+  { sb: 'activity',      pk: 'id',          label: 'Activity',      jsKey: 'activity' },
+];
+
+// Fetch RAW Supabase rows (not JS-shape rows) for every backup table in
+// parallel. Returns Map<sbTableName, rows[]>. We deliberately use raw SB
+// rows so the backup contains the actual on-disk column names — that's
+// what makes the SQL dump replayable and the Excel sheets recognizable
+// 1:1 with the DB schema.
+async function fetchBackupSnapshot() {
+  if (!_sb.ready) throw new Error('Supabase client not ready');
+  const fetched = await Promise.all(BACKUP_TABLES.map(async t => {
+    const { data, error } = await _sb.client.from(t.sb).select('*').limit(50000);
+    if (error) throw new Error(`Fetch ${t.sb} failed: ${error.message}`);
+    return [t.sb, data || []];
+  }));
+  return new Map(fetched);
+}
+
+function buildBackupFilenameBase() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `jse-backup-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}-${pad(d.getMinutes())}`;
+}
+
+function triggerDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// SQL-literal escape. NULL stays NULL. Numbers and booleans pass through.
+// Strings get single quotes doubled. Objects/arrays get JSON-stringified +
+// quoted as jsonb literals. Dates → ISO string.
+function valueToSqlLiteral(v) {
+  if (v === null || v === undefined) return 'NULL';
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL';
+  if (typeof v === 'boolean') return v ? 'TRUE' : 'FALSE';
+  if (v instanceof Date) return `'${v.toISOString()}'`;
+  if (typeof v === 'object') {
+    // jsonb column — emit as a string literal with the JSON encoded inside.
+    // Postgres will cast text → jsonb on insert when the column type is jsonb.
+    return `'${JSON.stringify(v).replace(/'/g, "''")}'::jsonb`;
+  }
+  // string
+  return `'${String(v).replace(/'/g, "''")}'`;
+}
+
+function buildSqlDumpText(snapshot) {
+  const lines = [];
+  const now = new Date();
+  lines.push(`-- Jobsite Exchange backup`);
+  lines.push(`-- Generated: ${now.toISOString()}`);
+  lines.push(`-- Supabase project: ${SB_URL}`);
+  lines.push(`-- Row counts:`);
+  for (const t of BACKUP_TABLES) {
+    lines.push(`--   ${t.sb.padEnd(15)} ${(snapshot.get(t.sb) || []).length}`);
+  }
+  lines.push(`-- Restore: open Supabase SQL Editor, paste this file, click Run.`);
+  lines.push(`-- WARNING: replays as DELETE-then-INSERT per table (FK dependency order).`);
+  lines.push(`-- Photos in Supabase Storage are NOT included — use Supabase PITR for that.`);
+  lines.push(``);
+  lines.push(`BEGIN;`);
+  lines.push(``);
+  // DELETE in reverse order so child rows go first.
+  lines.push(`-- ===== DELETE existing rows (reverse FK order) =====`);
+  for (let i = BACKUP_TABLES.length - 1; i >= 0; i--) {
+    const t = BACKUP_TABLES[i];
+    lines.push(`DELETE FROM public.${t.sb};`);
+  }
+  lines.push(``);
+  // INSERT in dependency order.
+  for (const t of BACKUP_TABLES) {
+    const rows = snapshot.get(t.sb) || [];
+    lines.push(`-- ===== ${t.label} (${rows.length} rows) =====`);
+    if (rows.length === 0) { lines.push(``); continue; }
+    const cols = Object.keys(rows[0]);
+    const colList = cols.map(c => `"${c}"`).join(', ');
+    for (const row of rows) {
+      const vals = cols.map(c => valueToSqlLiteral(row[c])).join(', ');
+      lines.push(`INSERT INTO public.${t.sb} (${colList}) VALUES (${vals});`);
+    }
+    lines.push(``);
+  }
+  lines.push(`COMMIT;`);
+  lines.push(``);
+  return lines.join('\n');
+}
+
+// Build an XLSX workbook (one sheet per table) using the SheetJS UMD global.
+// Returns a Uint8Array ready for a Blob. jsonb-shaped values get serialized
+// to JSON strings so each cell stays text. Throws if SheetJS isn't loaded.
+function buildExcelWorkbookBinary(snapshot) {
+  if (typeof window.XLSX === 'undefined') {
+    throw new Error('SheetJS (XLSX) library not loaded — CDN may be blocked.');
+  }
+  const XLSX = window.XLSX;
+  const wb = XLSX.utils.book_new();
+  for (const t of BACKUP_TABLES) {
+    const rows = snapshot.get(t.sb) || [];
+    // Always create the sheet even if empty so the restore path can detect it.
+    const aoa = [];
+    if (rows.length === 0) {
+      aoa.push(['(no rows)']);
+    } else {
+      const cols = Object.keys(rows[0]);
+      aoa.push(cols);
+      for (const row of rows) {
+        aoa.push(cols.map(c => {
+          const v = row[c];
+          if (v === null || v === undefined) return '';
+          if (typeof v === 'object') return JSON.stringify(v);
+          return v;
+        }));
+      }
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    XLSX.utils.book_append_sheet(wb, ws, t.sb);
+  }
+  const out = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  return new Uint8Array(out);
+}
+
+// Parse an uploaded XLSX file back into { sbTableName: rows[] } maps. Each
+// row is shaped like a raw Supabase row (column names from the header line)
+// with jsonb cells JSON.parse'd back into objects/arrays.
+async function readExcelFileToSnapshot(file) {
+  if (typeof window.XLSX === 'undefined') {
+    throw new Error('SheetJS (XLSX) library not loaded — CDN may be blocked.');
+  }
+  const XLSX = window.XLSX;
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const out = new Map();
+  for (const t of BACKUP_TABLES) {
+    if (!wb.SheetNames.includes(t.sb)) { out.set(t.sb, []); continue; }
+    const ws = wb.Sheets[t.sb];
+    const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+    if (!aoa || aoa.length === 0 || (aoa.length === 1 && (aoa[0][0] === '(no rows)' || aoa[0][0] == null))) {
+      out.set(t.sb, []); continue;
+    }
+    const cols = aoa[0].map(c => String(c || '').trim()).filter(Boolean);
+    const rows = [];
+    for (let i = 1; i < aoa.length; i++) {
+      const arr = aoa[i] || [];
+      const row = {};
+      for (let j = 0; j < cols.length; j++) {
+        let v = arr[j];
+        if (v === undefined) v = null;
+        if (typeof v === 'string') {
+          const s = v.trim();
+          // Try JSON.parse for cells that look like jsonb. Keep as string if it fails.
+          if (s.length > 1 && (s[0] === '{' || s[0] === '[')) {
+            try { v = JSON.parse(s); } catch (e) { /* keep as string */ }
+          } else if (s === '') {
+            v = null;
+          }
+        }
+        row[cols[j]] = v;
+      }
+      rows.push(row);
+    }
+    out.set(t.sb, rows);
+  }
+  return out;
+}
+
+// Apply a parsed Excel snapshot to Supabase. DELETE in reverse order, INSERT
+// in dependency order. Each table reports its own error; the caller surfaces
+// them so an RLS block on (say) `loads` doesn't hide successes on other
+// tables. Returns { ok, results: [{ sb, op, count|error }] }.
+async function restoreSnapshotToSupabase(snapshot) {
+  if (!_sb.ready) throw new Error('Supabase client not ready');
+  const results = [];
+  // DELETE pass (reverse).
+  for (let i = BACKUP_TABLES.length - 1; i >= 0; i--) {
+    const t = BACKUP_TABLES[i];
+    try {
+      const { error } = await _sb.client.from(t.sb).delete().gte(t.pk, '');
+      if (error) throw error;
+      results.push({ sb: t.sb, op: 'delete', count: '∗' });
+    } catch (e) {
+      results.push({ sb: t.sb, op: 'delete', error: e.message || String(e) });
+    }
+  }
+  // INSERT pass (forward).
+  for (const t of BACKUP_TABLES) {
+    const rows = snapshot.get(t.sb) || [];
+    if (rows.length === 0) { results.push({ sb: t.sb, op: 'insert', count: 0 }); continue; }
+    try {
+      const { error } = await _sb.client.from(t.sb).insert(rows);
+      if (error) throw error;
+      results.push({ sb: t.sb, op: 'insert', count: rows.length });
+    } catch (e) {
+      results.push({ sb: t.sb, op: 'insert', error: e.message || String(e) });
+    }
+  }
+  const ok = results.every(r => !r.error);
+  return { ok, results };
+}
+
+function AdminBackup({ db, navigate }) {
+  const [running, setRunning] = React.useState(null); // 'excel' | 'sql' | 'restore' | null
+  const [lastError, setLastError] = React.useState(null);
+  const [lastSuccess, setLastSuccess] = React.useState(null);
+  const [restoreFile, setRestoreFile] = React.useState(null);
+  const [restoreConfirm, setRestoreConfirm] = React.useState('');
+  const [restoreResults, setRestoreResults] = React.useState(null);
+  const fileInputRef = React.useRef(null);
+
+  const xlsxLoaded = typeof window.XLSX !== 'undefined';
+  const sbReady = _sb.ready;
+  const sqlEditorUrl = SB_URL.replace(/^https?:\/\//, '').replace(/\.supabase\.co.*/, '');
+  const sqlEditorLink = `https://supabase.com/dashboard/project/${sqlEditorUrl}/sql/new`;
+
+  const doExcelExport = async () => {
+    setLastError(null); setLastSuccess(null); setRunning('excel');
+    try {
+      const snap = await fetchBackupSnapshot();
+      const bin = buildExcelWorkbookBinary(snap);
+      const blob = new Blob([bin], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const filename = buildBackupFilenameBase() + '.xlsx';
+      triggerDownload(blob, filename);
+      const total = Array.from(snap.values()).reduce((s, r) => s + r.length, 0);
+      setLastSuccess(`Downloaded ${filename} — ${total} rows across ${BACKUP_TABLES.length} tables.`);
+    } catch (e) {
+      setLastError(`Excel export failed: ${e.message || e}`);
+    } finally { setRunning(null); }
+  };
+
+  const doSqlExport = async () => {
+    setLastError(null); setLastSuccess(null); setRunning('sql');
+    try {
+      const snap = await fetchBackupSnapshot();
+      const text = buildSqlDumpText(snap);
+      const blob = new Blob([text], { type: 'application/sql' });
+      const filename = buildBackupFilenameBase() + '.sql';
+      triggerDownload(blob, filename);
+      const total = Array.from(snap.values()).reduce((s, r) => s + r.length, 0);
+      setLastSuccess(`Downloaded ${filename} — ${total} rows across ${BACKUP_TABLES.length} tables. Paste into Supabase SQL Editor to restore.`);
+    } catch (e) {
+      setLastError(`SQL export failed: ${e.message || e}`);
+    } finally { setRunning(null); }
+  };
+
+  const doRestore = async () => {
+    if (!restoreFile) return;
+    if (restoreConfirm !== 'RESTORE') return;
+    setLastError(null); setLastSuccess(null); setRestoreResults(null); setRunning('restore');
+    try {
+      const snap = await readExcelFileToSnapshot(restoreFile);
+      const { ok, results } = await restoreSnapshotToSupabase(snap);
+      setRestoreResults({ ok, results });
+      if (ok) {
+        setLastSuccess(`Restore complete from ${restoreFile.name}. Reload the page to see restored data.`);
+      } else {
+        setLastError(`Restore had errors — see per-table results below. Likely cause: the publishable key doesn't permit DELETE/INSERT on one or more tables under your RLS policies. Use the SQL Editor restore path instead.`);
+      }
+    } catch (e) {
+      setLastError(`Restore failed: ${e.message || e}`);
+    } finally { setRunning(null); }
+  };
+
+  const onPickFile = (ev) => {
+    const f = ev.target.files && ev.target.files[0];
+    setRestoreFile(f || null);
+    setRestoreConfirm('');
+    setRestoreResults(null);
+    setLastError(null); setLastSuccess(null);
+  };
+
+  const btn = (label, onClick, disabled, isRunning, primary) => (
+    <Btn variant={primary ? 'primary' : 'secondary'} onClick={onClick} disabled={disabled || isRunning}>
+      {isRunning ? 'Working…' : label}
+    </Btn>
+  );
+
+  const sectionCard = { padding: S[5], marginBottom: S[4] };
+
+  return (
+    <div style={{ padding: S[6], maxWidth: 1100, margin: '0 auto' }}>
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Backup' }]} navigate={navigate} />
+      <div style={{ marginBottom: S[5] }}>
+        <Label color={C.accent}>Backup &amp; restore</Label>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Download a snapshot or restore from a file</h1>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: S[2] }}>
+          Snapshots cover all {BACKUP_TABLES.length} Supabase tables and are pulled live with your current publishable key. Photos stored in the attachments bucket are NOT included.
+        </div>
+      </div>
+
+      {!sbReady && (
+        <Card style={{ ...sectionCard, borderLeft: `4px solid ${C.warn}` }}>
+          <Label color={C.warn} style={{ marginBottom: S[2] }}>Supabase offline</Label>
+          <div style={{ ...T.bodySm, color: C.ink }}>The Supabase client isn't initialized in this tab, so backup/restore is disabled. Reload after the cloud connection comes back online.</div>
+        </Card>
+      )}
+
+      {lastError && (
+        <Card style={{ ...sectionCard, borderLeft: `4px solid ${C.warn}`, background: 'rgba(255, 107, 71, 0.05)' }}>
+          <Label color={C.warn} style={{ marginBottom: S[2] }}>Error</Label>
+          <div style={{ ...T.bodySm, color: C.ink, whiteSpace: 'pre-wrap' }}>{lastError}</div>
+        </Card>
+      )}
+      {lastSuccess && (
+        <Card style={{ ...sectionCard, borderLeft: `4px solid ${C.ok}`, background: 'rgba(91, 201, 124, 0.05)' }}>
+          <Label color={C.ok} style={{ marginBottom: S[2] }}>Success</Label>
+          <div style={{ ...T.bodySm, color: C.ink }}>{lastSuccess}</div>
+        </Card>
+      )}
+
+      <Card style={sectionCard}>
+        <Label style={{ marginBottom: S[2] }}>Download backup</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
+          Filename format: <span style={{ fontFamily: F.mono }}>{buildBackupFilenameBase()}.xlsx</span> / <span style={{ fontFamily: F.mono }}>.sql</span>
+        </div>
+        <div style={{ display: 'flex', gap: S[3], flexWrap: 'wrap' }}>
+          {btn('Download Excel backup now', doExcelExport, !sbReady || !xlsxLoaded, running === 'excel', true)}
+          {btn('Download SQL backup now', doSqlExport, !sbReady, running === 'sql', false)}
+        </div>
+        {!xlsxLoaded && (
+          <div style={{ ...T.caption, color: C.warn, marginTop: S[2] }}>
+            SheetJS (XLSX) didn't load — Excel actions are disabled. SQL backup still works.
+          </div>
+        )}
+      </Card>
+
+      <Card style={sectionCard}>
+        <Label style={{ marginBottom: S[2] }}>Restore from Excel backup</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
+          DELETEs every row in every table then re-INSERTs from the .xlsx file (FK dependency order). Cannot be undone. If your publishable key's RLS doesn't allow DELETE/INSERT on every table, the restore will report per-table errors and the data will be left in a half-restored state.
+        </div>
+        <div style={{ display: 'flex', gap: S[3], alignItems: 'center', flexWrap: 'wrap', marginBottom: S[3] }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={onPickFile}
+            style={{ ...T.bodySm, color: C.ink }}
+          />
+          {restoreFile && (
+            <span style={{ ...T.bodySm, color: C.inkDim }}>
+              <span style={{ fontFamily: F.mono, color: C.ink }}>{restoreFile.name}</span> · {(restoreFile.size / 1024).toFixed(1)} KB
+            </span>
+          )}
+        </div>
+        {restoreFile && (
+          <div style={{ marginBottom: S[3] }}>
+            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[2] }}>Type <span style={{ fontFamily: F.mono, color: C.warn, fontWeight: 700 }}>RESTORE</span> to confirm:</div>
+            <input
+              type="text"
+              value={restoreConfirm}
+              onChange={e => setRestoreConfirm(e.target.value)}
+              placeholder="RESTORE"
+              style={{ ...T.bodySm, background: C.surfaceHi, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '8px 12px', width: 200, fontFamily: F.mono }}
+            />
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: S[3], flexWrap: 'wrap' }}>
+          {btn('Restore from Excel', doRestore, !sbReady || !xlsxLoaded || !restoreFile || restoreConfirm !== 'RESTORE', running === 'restore', false)}
+        </div>
+        {restoreResults && (
+          <div style={{ marginTop: S[4] }}>
+            <Label style={{ marginBottom: S[2] }}>Per-table results</Label>
+            <table style={{ width: '100%', borderCollapse: 'collapse', ...T.bodySm }}>
+              <thead><tr>
+                <th style={{ textAlign: 'left', color: C.inkFaint, padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>Table</th>
+                <th style={{ textAlign: 'left', color: C.inkFaint, padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>Op</th>
+                <th style={{ textAlign: 'left', color: C.inkFaint, padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>Result</th>
+              </tr></thead>
+              <tbody>
+                {restoreResults.results.map((r, i) => (
+                  <tr key={i}>
+                    <td style={{ padding: '4px 0', fontFamily: F.mono }}>{r.sb}</td>
+                    <td style={{ padding: '4px 0', fontFamily: F.mono, color: C.inkDim }}>{r.op}</td>
+                    <td style={{ padding: '4px 0', color: r.error ? C.warn : C.ok }}>
+                      {r.error ? r.error : (r.op === 'insert' ? `${r.count} rows` : 'cleared')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <Card style={sectionCard}>
+        <Label style={{ marginBottom: S[2] }}>Restore from SQL backup (manual)</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
+          The publishable key can't execute arbitrary SQL from the browser. For a full SQL restore, open the Supabase SQL Editor, paste the .sql file you downloaded above, and click Run. The dump wraps everything in a transaction (BEGIN/COMMIT) so a syntax error rolls back cleanly.
+        </div>
+        <a href={sqlEditorLink} target="_blank" rel="noopener noreferrer" style={{
+          display: 'inline-flex', alignItems: 'center', gap: S[2],
+          background: 'transparent', color: C.accent,
+          border: `1px solid ${C.accent}`, borderRadius: R.sm,
+          padding: '8px 14px', textDecoration: 'none', ...T.bodySm, fontWeight: 600,
+        }}>Open Supabase SQL Editor →</a>
+      </Card>
+
+      <Card style={{ ...sectionCard, background: 'rgba(255,255,255,0.02)' }}>
+        <Label style={{ marginBottom: S[2] }}>Photos &amp; full disaster recovery</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim }}>
+          Photos in Supabase Storage are NOT included in Excel/SQL backups (PostgREST can't enumerate bucket contents to download as files). For full disaster recovery use the Supabase point-in-time recovery: <span style={{ color: C.ink }}>Supabase Dashboard → Database → Backups</span>. PITR covers all tables + storage buckets together.
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 // Shared admin sidebar nav (desktop) + drawer (mobile).
 // Renders the same nav items in both modes; parent controls visibility via CSS.
 function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', haulersExpanded, setHaulersExpanded, reportsExpanded, setReportsExpanded }) {
@@ -12972,6 +13409,12 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
         active={onPayments}
         onClick={() => go('/admin/payments')}
       />
+      <Item
+        icon={<HaulRequestIcon size={20} />}
+        label="Backup"
+        active={parts[1] === 'backup'}
+        onClick={() => go('/admin/backup')}
+      />
     </nav>
   );
 }
@@ -13019,6 +13462,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 2 && parts[1] === 'backup' && <AdminBackup db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'haulers' && parts[2] === 'new' && <AdminNewHauler db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks'  && parts[2] === 'new' && <AdminNewTruck  db={db} setDb={setDb} navigate={navigate} />}
