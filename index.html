@@ -4127,6 +4127,33 @@ const NWS_DENVER = { lat: 39.7392, lon: -104.9903, label: 'Front Range', city: '
 // Cached across re-mounts so we don't re-hit /points/ on every refresh tick.
 let _nwsGridpointUrl = null;
 
+// Weather palette (2026-05-24 Site Conditions upgrade per Robert's brief).
+// Local to this card — not promoted to C tokens because these are the only
+// surfaces that use the weather-domain semantics (sun yellow, mud orange, etc).
+const WX_COLORS = {
+  // Sky conditions (icon tint)
+  sun:    '#F4C842', // warm yellow — sunny / clear / fair
+  cloud:  '#9A9A9A', // neutral gray — cloudy / overcast
+  rain:   '#5AAEFF', // blue — rain / showers / drizzle
+  snow:   '#B6DBFF', // light blue — snow / sleet / flurries
+  storm:  '#F4C842', // yellow lightning bolt (cloud rendered gray inline)
+  fog:    '#9A9A9A', // gray — fog / haze / smoke
+  wind:   '#5AAEFF', // blue — wind-forward conditions
+  // Haul-condition derived (drive labels + pills)
+  dry:    '#5BC97C', // green   — optimal hauling
+  drying: '#F4C842', // yellow  — recovering after rain
+  wet:    '#F4A261', // orange  — mud risk
+  delay:  '#E76F51', // red-orange — severe weather hold
+  freeze: '#B6DBFF', // light blue — sub-freezing
+};
+const WX_COLORS_SOFT = {
+  dry:    'rgba(91, 201, 124, 0.10)',
+  drying: 'rgba(244, 200, 66, 0.10)',
+  wet:    'rgba(244, 162, 97, 0.10)',
+  delay:  'rgba(231, 111, 81, 0.10)',
+  freeze: 'rgba(182, 219, 255, 0.10)',
+};
+
 // Map NWS shortForecast text → one of our icon keys.
 function nwsShortToWxKind(short) {
   const s = (short || '').toLowerCase();
@@ -4138,6 +4165,15 @@ function nwsShortToWxKind(short) {
   if (s.includes('cloud') || s.includes('overcast')) return 'cloud';
   if (s.includes('sun') || s.includes('clear') || s.includes('fair')) return 'sun';
   return 'cloud';
+}
+
+// Color a given weather kind. Multi-color kinds (partly, storm) render their
+// own inline colors inside the SVG; this is the primary stroke for everything
+// else. Used by the parent `style={{ color: ... }}` since the SVGs use
+// currentColor for stroke.
+function wxColorFor(kind) {
+  if (kind === 'partly') return WX_COLORS.sun;   // sun-forward primary
+  return WX_COLORS[kind] || WX_COLORS.cloud;
 }
 
 // NWS reports wind as "5 to 9 mph" or "6 mph"; extract the upper-bound number.
@@ -4162,28 +4198,83 @@ function nwsPairDaily(periods) {
   return Array.from(byIso.values()).slice(0, 7);
 }
 
-// Derive haul-readiness label + grade pill tone from a day's conditions.
-// Decision rule (per session spec, no AskUserQuestion):
-//   precip >= 60% OR snow/storm        → HOLD     (C.warn, soft warn bg)
-//   precip 20-59% OR rain OR wind >=25 → CAUTION  (C.warn, soft warn bg)
-//   otherwise                          → OPTIMAL  (C.ok,   soft ok bg)
-// Tokens only define C.ok / C.warn / C.info — there is no separate amber, so
-// CAUTION + HOLD both ride C.warn and rely on the label to disambiguate.
-function haulConditionFromNws({ wx, precipPct, windMph }) {
+// Derive haul-readiness from a day's NWS fields. Returns a rich object the
+// UI consumes for the prominent label, the header status badge, the per-day
+// pill in the 7-day strip, and the driver-friendly subtitle.
+//
+// Decision order (2026-05-24 upgrade per Robert's brief):
+//   1. low <= 32°F OR snow            → Freeze Risk    (light blue)
+//   2. precip >= 70% OR storm OR wind>=35 → Delay Risk (red-orange)
+//   3. precip >= 40% OR rain          → Wet / Mud Risk (orange)
+//   4. precip 20-39%                  → Drying          (yellow)
+//   5. otherwise                      → Dry             (green)
+//
+// Header status badge collapses: dry → OPTIMAL, drying → CAUTION,
+// wet/freeze → CAUTION, delay → HOLD.
+//
+// NWS-limit-aware wording: "mud risk", "haul condition", "based on forecast"
+// — never claims field-verified site state.
+function haulConditionFromNws({ wx, precipPct, windMph, tempLo, tempHi }) {
   const pct = precipPct == null ? 0 : precipPct;
   const wind = windMph == null ? 0 : windMph;
-  if (pct >= 60 || wx === 'snow' || wx === 'storm') {
-    return { grade: 'HOLD',    gradeTone: C.warn, gradeSoft: C.warnSoft, label: 'Muddy / Hold',   sub: 'high mud risk' };
+  const low = tempLo == null ? (tempHi == null ? 50 : tempHi) : tempLo;
+  if (low <= 32 || wx === 'snow') {
+    return { key: 'freeze', label: 'Freeze Risk',   short: 'FREEZE', driverNote: 'Early start', sub: 'sub-freezing — watch for ice', grade: 'CAUTION', tone: WX_COLORS.freeze, soft: WX_COLORS_SOFT.freeze };
   }
-  if (pct >= 20 || wx === 'rain' || wind >= 25) {
-    return { grade: 'CAUTION', gradeTone: C.warn, gradeSoft: C.warnSoft, label: 'Wet / Caution',  sub: 'soft ground possible' };
+  if (pct >= 70 || wx === 'storm' || wind >= 35) {
+    return { key: 'delay',  label: 'Delay Risk',    short: 'DELAY',  driverNote: 'Watch',       sub: 'severe weather likely',         grade: 'HOLD',    tone: WX_COLORS.delay,  soft: WX_COLORS_SOFT.delay };
   }
-  return   { grade: 'OPTIMAL', gradeTone: C.ok,   gradeSoft: C.okSoft,   label: 'Dry',             sub: 'no mud / freeze risk' };
+  if (pct >= 40 || wx === 'rain') {
+    return { key: 'wet',    label: 'Wet / Mud Risk',short: 'WET',    driverNote: 'Mud Risk',    sub: 'soft ground likely',            grade: 'CAUTION', tone: WX_COLORS.wet,    soft: WX_COLORS_SOFT.wet };
+  }
+  if (pct >= 20) {
+    return { key: 'drying', label: 'Drying',        short: 'DRYING', driverNote: 'Better',      sub: 'ground recovering',             grade: 'CAUTION', tone: WX_COLORS.drying, soft: WX_COLORS_SOFT.drying };
+  }
+  return   { key: 'dry',    label: 'Dry',           short: 'DRY',    driverNote: 'Excellent',   sub: 'no mud or freeze risk',         grade: 'OPTIMAL', tone: WX_COLORS.dry,    soft: WX_COLORS_SOFT.dry };
 }
 
-// Inline SVG weather glyph — uses 'currentColor' so the parent can theme it.
+// Driver-recommendation strip (bottom of card). Looks at the next 48 hours
+// (today + tomorrow) and produces a sentence the dispatcher reads at a
+// glance. NWS-limit-aware — frames everything as a forecast-based outlook,
+// never as field-verified state.
+function getDriverRecommendation(days) {
+  if (!days || days.length === 0) return 'Forecast unavailable — coordinate with dispatch before mobilizing.';
+  const next48 = days.slice(0, 2);
+  const keys = next48.map(d => d.cond && d.cond.key).filter(Boolean);
+  if (keys.length === 0) return 'Forecast unavailable — coordinate with dispatch before mobilizing.';
+  if (keys.every(k => k === 'dry')) return 'Conditions are optimal for hauling. No mud or freeze concerns in the next 48 hours.';
+  if (keys.some(k => k === 'delay'))  return 'Severe weather likely in the next 48 hours — coordinate with dispatch before mobilizing.';
+  if (keys.some(k => k === 'freeze')) return 'Sub-freezing temperatures expected — plan early starts and watch for ice on access roads.';
+  if (keys.some(k => k === 'wet'))    return 'Mud risk in the next 48 hours — verify site access before each shift.';
+  return 'Conditions look workable — monitor for changes through the day.';
+}
+
+// Mud Outlook — looks 2–6 days out, calls out the wet days by name so
+// dispatchers can pre-plan crew schedules.
+function getMudOutlook(days) {
+  if (!days || days.length < 2) return 'No outlook available beyond today.';
+  const future = days.slice(1, 7);
+  const wetDays = future.filter(d => d.cond && (d.cond.key === 'wet' || d.cond.key === 'delay'));
+  if (wetDays.length === 0) {
+    const dryingDays = future.filter(d => d.cond && d.cond.key === 'drying').length;
+    if (dryingDays > 0) return 'Light drying expected later this week. Mud risk stays low.';
+    return 'No mud risk in the forecast window.';
+  }
+  const dayNames = wetDays.map(d => isoToWeekdayShort(d.iso)).slice(0, 3).join(', ');
+  return `Mud risk increases ${dayNames}. Plan ahead.`;
+}
+
+// Inline SVG weather glyph. Single-color kinds (sun/cloud/rain/snow/fog) use
+// `currentColor` so the parent can theme via `style={{ color: ... }}`.
+// Two-color kinds (partly, storm) embed explicit colors inline so the sun
+// stays yellow even when the cloud is gray, and the lightning bolt stays
+// yellow over a gray storm cloud. 2026-05-24 upgrade per Robert's brief.
 function WxIcon({ kind, size = 26 }) {
   const s = { stroke: 'currentColor', strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
+  const partlySun  = { stroke: WX_COLORS.sun,   strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
+  const partlyCloud= { stroke: WX_COLORS.cloud, strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
+  const stormCloud = { stroke: WX_COLORS.cloud, strokeWidth: 1.6, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
+  const stormBolt  = { stroke: WX_COLORS.sun,   strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round', fill: 'none' };
   const glyphs = {
     sun: (
       <g {...s}>
@@ -4193,10 +4284,12 @@ function WxIcon({ kind, size = 26 }) {
     ),
     cloud: <path {...s} d="M6 18h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 18z" />,
     partly: (
-      <g {...s}>
-        <circle cx="9" cy="8.5" r="2.6" />
-        <path d="M9 2.8v1.4M9 12.8v1.4M2.8 8.5h1.4M13.8 8.5h1.4M4.6 4.1l1 1M13.4 12.9l1 1M4.6 12.9l1-1" />
-        <path d="M10 20h7a3 3 0 0 0 .4-5.97 4.5 4.5 0 0 0-8.4-.5A2.75 2.75 0 0 0 10 20z" />
+      <g>
+        <g {...partlySun}>
+          <circle cx="9" cy="8.5" r="2.6" />
+          <path d="M9 2.8v1.4M9 12.8v1.4M2.8 8.5h1.4M13.8 8.5h1.4M4.6 4.1l1 1M13.4 12.9l1 1M4.6 12.9l1-1" />
+        </g>
+        <path {...partlyCloud} d="M10 20h7a3 3 0 0 0 .4-5.97 4.5 4.5 0 0 0-8.4-.5A2.75 2.75 0 0 0 10 20z" />
       </g>
     ),
     rain: (
@@ -4212,9 +4305,9 @@ function WxIcon({ kind, size = 26 }) {
       </g>
     ),
     storm: (
-      <g {...s}>
-        <path d="M6 14h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 14z" />
-        <path d="M12 14l-2.5 4.5h3L10.5 22" />
+      <g>
+        <path {...stormCloud} d="M6 14h10a4 4 0 0 0 .5-7.97 6 6 0 0 0-11.65 1.5A3.5 3.5 0 0 0 6 14z" />
+        <path {...stormBolt}  d="M12 14l-2.5 4.5h3L10.5 22" />
       </g>
     ),
     fog: (
@@ -4231,7 +4324,8 @@ function WxIcon({ kind, size = 26 }) {
   );
 }
 
-// Skeleton — compact small-tile layout matching the live card while NWS loads.
+// Skeleton — matches the upgraded layout (today grid + 7-day strip with pills
+// + driver recommendation / mud outlook strip) so the card doesn't jump on load.
 function SiteConditionsSkeleton() {
   const skel = { background: 'rgba(255,255,255,0.04)', borderRadius: R.xs, height: 14 };
   return (
@@ -4256,9 +4350,20 @@ function SiteConditionsSkeleton() {
         <div style={{ ...skel, width: 90, marginBottom: 10 }} />
         <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
           {[0, 1, 2, 3, 4, 5, 6].map(i => (
-            <div key={i} style={{ ...skel, height: 60, borderRadius: R.sm }} />
+            <div key={i} style={{ ...skel, height: 84, borderRadius: R.sm }} />
           ))}
         </div>
+      </div>
+      <div style={{ borderTop: `1px solid ${C.rule}`, padding: S[4], display: 'grid', gridTemplateColumns: '1fr', gap: S[3] }}>
+        {[0, 1].map(i => (
+          <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
+            <div style={{ ...skel, width: 26, height: 26, borderRadius: '50%', flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ ...skel, width: 130, marginBottom: 6 }} />
+              <div style={{ ...skel, width: '85%', height: 11 }} />
+            </div>
+          </div>
+        ))}
       </div>
     </Card>
   );
@@ -4315,94 +4420,145 @@ function SiteConditionsCard() {
     );
   }
 
-  const days = nwsPairDaily(forecast.periods);
-  // Find "today" — first calendar date with a usable period. Use whichever of
-  // day/night exists (so an evening fetch that opens with "Tonight" still works).
-  const todayBucket = days[0] || { day: null, night: null };
-  const todayPrimary = todayBucket.day || todayBucket.night;
-  const todayWx = nwsShortToWxKind(todayPrimary && todayPrimary.shortForecast);
-  const todayPrecipPct = (todayPrimary && todayPrimary.probabilityOfPrecipitation && todayPrimary.probabilityOfPrecipitation.value) || 0;
-  const todayWind = nwsParseWindMph(todayPrimary && todayPrimary.windSpeed) || 0;
-  const todayWindDir = (todayPrimary && todayPrimary.windDirection) || '';
-  const todayTempNow = todayPrimary ? todayPrimary.temperature : null;
-  const todayHi = todayBucket.day ? todayBucket.day.temperature : (todayPrimary ? todayPrimary.temperature : null);
-  const todayLo = todayBucket.night ? todayBucket.night.temperature : null;
-  const cond = haulConditionFromNws({ wx: todayWx, precipPct: todayPrecipPct, windMph: todayWind });
+  // Pair NWS periods into per-day buckets, then derive the haul condition for
+  // each day. Each enriched entry carries cond + the inputs used to compute it
+  // so the bottom Driver Recommendation + Mud Outlook strip don't recompute.
+  const rawDays = nwsPairDaily(forecast.periods);
+  const days = rawDays.map(d => {
+    const primary = d.day || d.night;
+    const wx = nwsShortToWxKind(primary && primary.shortForecast);
+    const precipPct = (primary && primary.probabilityOfPrecipitation && primary.probabilityOfPrecipitation.value) || 0;
+    const windMph = nwsParseWindMph(primary && primary.windSpeed) || 0;
+    const hi = d.day ? d.day.temperature : (primary ? primary.temperature : null);
+    const lo = d.night ? d.night.temperature : null;
+    const cond = haulConditionFromNws({ wx, precipPct, windMph, tempLo: lo, tempHi: hi });
+    return { iso: d.iso, day: d.day, night: d.night, primary, wx, precipPct, windMph, hi, lo, cond };
+  });
+  const today = days[0] || null;
+  const todayTempNow = today && today.primary ? today.primary.temperature : null;
+  const todayWindDir = (today && today.primary && today.primary.windDirection) || '';
+  const cond = today ? today.cond : haulConditionFromNws({ wx: 'cloud', precipPct: 0, windMph: 0 });
+  const driverRec = getDriverRecommendation(days);
+  const mudOutlook = getMudOutlook(days);
 
   const now = new Date();
   const hhmm = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
 
   return (
     <Card padding={0}>
-      {/* Header: matches the existing small-tile header pattern. */}
+      {/* Header: location + status badge driven by today's haul condition. */}
       <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
         <div style={{ minWidth: 0 }}>
           <Label color={C.accent}>Site conditions</Label>
           <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{NWS_DENVER.label} · {hhmm}</div>
         </div>
-        <Pill color={cond.gradeTone} soft={cond.gradeSoft}>{cond.grade}</Pill>
+        <Pill color={cond.tone} soft={cond.soft}>{cond.grade}</Pill>
       </div>
 
-      {/* Today: 2x2 stat grid (matches the existing small-tile body). */}
+      {/* Today: 2x2 stat grid — TEMPERATURE / WIND / PRECIP RISK / HAUL CONDITION. */}
       <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: S[4] }}>
         <div>
           <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
-            <div style={{ color: C.inkDim, display: 'inline-flex' }}><WxIcon kind={todayWx} size={18} /></div>
+            <div style={{ color: wxColorFor(today ? today.wx : 'cloud'), display: 'inline-flex' }}><WxIcon kind={today ? today.wx : 'cloud'} size={20} /></div>
           </div>
           <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-            {todayHi != null ? `Hi ${todayHi}°` : ''}{todayHi != null && todayLo != null ? ' · ' : ''}{todayLo != null ? `Lo ${todayLo}°` : ''}
+            {today && today.hi != null ? `Hi ${today.hi}°` : ''}{today && today.hi != null && today.lo != null ? ' · ' : ''}{today && today.lo != null ? `Lo ${today.lo}°` : ''}
           </div>
         </div>
         <div>
           <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
-          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayWind} mph</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{(today ? today.windMph : 0)} mph</div>
+          </div>
           <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{todayWindDir || '—'}</div>
         </div>
         <div>
           <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
-          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: todayPrecipPct >= 40 ? C.warn : C.ok }}>{todayPrecipPct}%</div>
+          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: (today ? today.precipPct : 0) >= 40 ? WX_COLORS.wet : ((today ? today.precipPct : 0) >= 20 ? WX_COLORS.drying : WX_COLORS.dry) }}>{(today ? today.precipPct : 0)}%</div>
           <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next period</div>
         </div>
         <div>
           <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
-          <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: cond.gradeTone }}>{cond.label}</div>
+          <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: cond.tone, letterSpacing: -0.3 }}>{cond.label}</div>
           <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{cond.sub}</div>
         </div>
       </div>
 
-      {/* 7-day strip — condensed: dow / icon / hi / lo. */}
+      {/* 7-day forecast: dow / colored icon / hi · lo / haul-condition pill / driver subtitle. */}
       <div style={{ borderTop: `1px solid ${C.rule}`, background: C.bg, padding: `${S[3]}px ${S[4]}px` }}>
         <div style={{ ...T.caption, color: C.inkFaint, marginBottom: S[2] }}>7-DAY FORECAST</div>
-        <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+        <div className="site-cond-strip" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4, overflowX: 'auto' }}>
           {days.map((d, i) => {
             const isFirst = i === 0;
-            const primary = d.day || d.night;
-            const wx = nwsShortToWxKind(primary && primary.shortForecast);
-            const hi = d.day ? d.day.temperature : (primary ? primary.temperature : null);
-            const lo = d.night ? d.night.temperature : null;
-            const wkLabel = primary ? primary.name : '';
+            const wkLabel = d.primary ? d.primary.name : '';
             return (
               <div key={d.iso}
-                aria-label={`${wkLabel} ${d.iso} · ${primary && primary.shortForecast} · high ${hi != null ? hi : 'n/a'}, low ${lo != null ? lo : 'n/a'}`}
+                aria-label={`${wkLabel} ${d.iso} · ${d.primary && d.primary.shortForecast} · high ${d.hi != null ? d.hi : 'n/a'}, low ${d.lo != null ? d.lo : 'n/a'} · ${d.cond.label}`}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center',
-                  gap: 2, padding: '4px 1px', minWidth: 0, overflow: 'hidden',
-                  borderRadius: R.xs,
+                  gap: 3, padding: '6px 2px', minWidth: 0, overflow: 'hidden',
+                  borderRadius: R.sm,
                   background: isFirst ? C.accentSoft : 'transparent',
+                  border: isFirst ? `1px solid ${C.ruleHi}` : '1px solid transparent',
                 }}>
                 <div style={{ ...T.micro, color: isFirst ? C.accent : C.inkDim, fontWeight: isFirst ? 700 : 600, letterSpacing: 0.4, textTransform: 'uppercase', fontSize: 9 }}>
-                  {isFirst ? 'Today' : (isoToWeekdayShort ? isoToWeekdayShort(d.iso) : wkLabel.slice(0, 3))}
+                  {isFirst ? 'Today' : isoToWeekdayShort(d.iso)}
                 </div>
-                <div style={{ color: isFirst ? C.accent : C.inkDim, display: 'inline-flex' }}>
-                  <WxIcon kind={wx} size={18} />
+                <div style={{ color: wxColorFor(d.wx), display: 'inline-flex' }}>
+                  <WxIcon kind={d.wx} size={22} />
                 </div>
-                <div style={{ ...T.micro, color: C.ink, fontWeight: 600, fontSize: 10, lineHeight: 1.2 }}>{hi != null ? `${hi}°` : '—'}</div>
-                <div style={{ ...T.micro, color: C.inkFaint, fontSize: 9, lineHeight: 1.2 }}>{lo != null ? `${lo}°` : ''}</div>
+                <div style={{ ...T.micro, color: C.ink, fontWeight: 700, fontSize: 11, lineHeight: 1.1 }}>{d.hi != null ? `${d.hi}°` : '—'}</div>
+                <div style={{ ...T.micro, color: C.inkFaint, fontSize: 9, lineHeight: 1.1 }}>{d.lo != null ? `${d.lo}°` : ''}</div>
+                <div style={{
+                  marginTop: 2,
+                  padding: '1px 5px',
+                  borderRadius: R.pill,
+                  background: d.cond.soft,
+                  color: d.cond.tone,
+                  fontFamily: F.mono, fontSize: 8, fontWeight: 700,
+                  letterSpacing: 0.5,
+                  lineHeight: 1.3,
+                  whiteSpace: 'nowrap',
+                }}>{d.cond.short}</div>
+                <div style={{ ...T.micro, color: C.inkDim, fontSize: 9, lineHeight: 1.2, textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{d.cond.driverNote}</div>
               </div>
             );
           })}
+        </div>
+      </div>
+
+      {/* Driver Recommendation + Mud Outlook strip. Both derive from `days`. */}
+      <div style={{ borderTop: `1px solid ${C.rule}`, padding: S[4], display: 'grid', gridTemplateColumns: '1fr', gap: S[3] }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
+          <span aria-hidden="true" style={{
+            width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: WX_COLORS_SOFT.dry, color: WX_COLORS.dry,
+            border: `1px solid ${WX_COLORS.dry}`,
+            fontSize: 13, fontWeight: 800, lineHeight: 1,
+          }}>✓</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>DRIVER RECOMMENDATION</div>
+            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{driverRec}</div>
+          </div>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
+          <span aria-hidden="true" style={{
+            width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            background: WX_COLORS_SOFT.wet, color: WX_COLORS.wet,
+            border: `1px solid ${WX_COLORS.wet}`,
+            fontSize: 13, fontWeight: 800, lineHeight: 1,
+          }}>◐</span>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>MUD OUTLOOK</div>
+            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{mudOutlook}</div>
+          </div>
+        </div>
+        <div style={{ ...T.micro, color: C.inkFaint, fontSize: 9, letterSpacing: 0.3 }}>
+          Based on NWS forecast data · not field-verified · refreshes every 30 min
         </div>
       </div>
     </Card>
