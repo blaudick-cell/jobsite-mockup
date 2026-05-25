@@ -9041,6 +9041,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     }
     if ('hours' in patch) {
       const hVal = typeof patch.hours === 'number' ? patch.hours : 0;
+      // 2026-05-25: also persist the entered value on assignments[].days[].hours
+      // so the right-side day-row chip displays it immediately even if the
+      // db.hours upsert below races, fails, or is awaiting a Realtime echo.
+      // The migration cascade at 3082 already treats d.hours as the day-level
+      // billing override (creates a matching db.hours row on hydrate when one
+      // is missing), so this completes the round-trip in the other direction.
+      updateReq(r => ({
+        ...r,
+        assignments: (r.assignments || []).map(a => a.truckId === truckId
+          ? { ...a, days: (a.days || []).map(d => d.date === date ? { ...d, hours: hVal } : d) }
+          : a),
+      }));
       const truck = db.trucks.find(t => t.id === truckId);
       const projectId = (truck && truck.projectId) || req.projectId || null;
       const driverId = (truck && truck.driverId) || null;
@@ -10093,8 +10105,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                               {/* Daily hours — editable. v32: edit upserts a
                                   canonical db.hours row tied to this (req,truck,day). */}
                               <div style={{ ...T.monoSm, color: C.ink, fontWeight: 600, display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
-                                <EditableText value={dailyHours > 0 ? String(parseFloat(dailyHours.toFixed(2))) : ''} placeholder="0"
-                                  onSave={(v) => { const n = parseHours(v); if (n != null && Math.abs(n - dailyHours) > 0.001) updateDay(a.truckId, d.date, { hours: n }); }} />
+                                <EditableText
+                                  value={(() => {
+                                    // Prefer the explicit override on d.hours so the
+                                    // entered value displays immediately on save
+                                    // (covers the case where the upserted db.hours
+                                    // row is still awaiting a Realtime echo). Falls
+                                    // back to the computed value from db.hours rows.
+                                    if (typeof d.hours === 'number' && d.hours > 0) return String(parseFloat(d.hours.toFixed(2)));
+                                    return dailyHours > 0 ? String(parseFloat(dailyHours.toFixed(2))) : '';
+                                  })()}
+                                  placeholder="0"
+                                  onSave={(v) => { const n = parseHours(v); if (n != null) updateDay(a.truckId, d.date, { hours: n }); }} />
                                 <span style={{ color: C.inkFaint }}>h</span>
                               </div>
                               <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
