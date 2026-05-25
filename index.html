@@ -5334,14 +5334,19 @@ function AdminProjects({ db, setDb, navigate }) {
   // === Operational haul card — replaces the dense table row ===
   const HaulOperationalCard = ({ p, dim }) => {
     const tone = healthTone(p.healthStatus);
-    // Shortcut: when the project has exactly one in-flight haul, deep-link to
-    // its detail page; otherwise fall back to the project-filtered list so the
-    // user can pick. In-flight = anything not completed/closed (same notion
-    // already used by the qty rollup on this same card).
+    // Click target depends on how many live hauls the project has:
+    //   0 live hauls → /admin/requests/new?projectId=<id> (pre-fills the
+    //     wizard so the user can create one — was sending them to the
+    //     filtered list where the project didn't appear, RCA 2026-05-25
+    //     "click into Galapago haul on overview, not shown on requests page").
+    //   1 live haul  → /admin/requests/<haulId> (direct deep-link).
+    //   2+ live hauls → /admin/requests?projectId=<id> (filtered list).
     const liveReqsForCard = (p.reqs || []).filter(r => r && r.status !== 'completed' && r.status !== 'closed');
-    const cardHref = liveReqsForCard.length === 1
-      ? '/admin/requests/' + liveReqsForCard[0].id
-      : '/admin/requests?projectId=' + p.id;
+    const cardHref = liveReqsForCard.length === 0
+      ? '/admin/requests/new?projectId=' + p.id
+      : liveReqsForCard.length === 1
+        ? '/admin/requests/' + liveReqsForCard[0].id
+        : '/admin/requests?projectId=' + p.id;
     return (
       <Card padding={0} style={dim ? { opacity: 0.65 } : {}}>
         <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) auto', gap: S[4], alignItems: 'start', cursor: 'pointer' }}
@@ -5371,13 +5376,19 @@ function AdminProjects({ db, setDb, navigate }) {
               const aggMatLabel = matCodes.length === 0 ? (p.materialType || '—')
                 : matCodes.length === 1 ? materialLabel(matCodes[0])
                 : 'Mixed';
-              // Single source of truth: sum(liveReqs.volumeCY). NO fallback
-              // to project.volumeCYNeeded — the seed value drifts and was
-              // disagreeing with the bar's denominator (2026-05-24 RCA).
-              // No live reqs → '—' (matches what the bar shows: nothing).
-              const qtyStr = liveReqs.length > 0
-                ? Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel
-                : '—';
+              // 2026-05-25: don't claim NEEDS/HAS or a CY total if no haul
+              // request exists — the haul requests page shows nothing for
+              // this project in that state, so the tile shouldn't imply
+              // there's work to do. Card click goes to /requests/new in this
+              // state (see cardHref above) so the call-to-action is honest.
+              if (liveReqs.length === 0) {
+                return (
+                  <div style={{ ...T.bodySm, color: C.inkDim, fontStyle: 'italic' }}>
+                    No active hauls — click to create one
+                  </div>
+                );
+              }
+              const qtyStr = Number(aggCY).toLocaleString() + ' CY of ' + aggMatLabel;
               return (
                 <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
                   <HasNeedsPill type={p.haulType} fontSize={13} />
@@ -8137,9 +8148,22 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 // is atomic: haulRequests append + activity event + locked-in geocode entries
 // all flow through the same setDb so Phase 3 upserts and Realtime broadcast
 // land in lockstep.
-function AdminHaulRequestCreate({ db, setDb, navigate }) {
+function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
   const projects = db.projects || [];
-  const [projectId, setProjectId] = useState(projects[0] ? projects[0].id : '');
+  // 2026-05-25: support `?projectId=<id>` deep-link from HaulOperationalCard
+  // when the user clicks a tile with 0 live haul requests. Pre-selects that
+  // project in the wizard so they don't have to re-pick from the dropdown.
+  // Falls through to projects[0] when the query param is missing or invalid.
+  const preselectedProjectId = (() => {
+    try {
+      const q = (hash || '').split('?')[1] || '';
+      const m = q.split('&').map(p => p.split('=')).find(([k]) => k === 'projectId');
+      if (!m || !m[1]) return null;
+      const id = decodeURIComponent(m[1]);
+      return projects.some(p => p.id === id) ? id : null;
+    } catch (e) { return null; }
+  })();
+  const [projectId, setProjectId] = useState(preselectedProjectId || (projects[0] ? projects[0].id : ''));
   const [materialCode, setMaterialCode] = useState('CF');
   const [volumeCY, setVolumeCY] = useState('');
   const [requestedAt, setRequestedAt] = useState(() => {
@@ -13459,7 +13483,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-          {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} />}
+          {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'backup' && <AdminBackup db={db} navigate={navigate} />}
