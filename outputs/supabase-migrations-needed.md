@@ -362,3 +362,22 @@ After applying, add `'haulRequestId'` to both `SB_FIELDS_JS.loads` and `SB_FIELD
 Additive, idempotent, safe to re-run. Dispatch can auto-apply.
 
 **Photo upload on haul-detail loads:** No new bucket needed. The existing truck-page photo upload stores a base64 data URL inline in `loads.photo` (existing `text` column), already round-trips through Supabase via `SB_FIELDS_JS.loads.photo`. The haul-detail photo column mirrors that same data-URL pattern — no Storage code path required.
+
+---
+
+## v21 follow-up — clock-in photo on hours (2026-05-25)
+
+The restored driver widget adds an optional "Add a photo" prompt at clock-in (truck condition, dump body, gear check). One photo per shift, stored on the hours row.
+
+```sql
+-- v21: optional clock-in photo URL/data-URL on hours
+ALTER TABLE hours ADD COLUMN IF NOT EXISTS photo text;
+```
+
+After applying, add `'photo'` to `SB_FIELDS_JS.hours` in `index.html` so the field round-trips through Supabase + Realtime.
+
+**Storage:** No new bucket needed. The clock-in photo follows the same pattern as `loads.photo` — base64 data URL inline in the column. Avoids Supabase Storage configuration on the demo project.
+
+**Code-side handling:** Optional — user can Skip. Reads use `h.photo` with conditional thumbnail render. No write if no photo attached. Existing rows continue to work unchanged.
+
+Additive, idempotent, safe to re-run. Dispatch can auto-apply.
