@@ -518,10 +518,20 @@ const T = {
 // =====================================================================
 // Date anchors (declared before seeds so LOADS_SEED / HOURS_SEED can reference them)
 // =====================================================================
-// Frozen reference dates for deterministic mockup behavior. All loads/hours dates
-// are real ISO strings (YYYY-MM-DD), generated relative to TODAY_ISO so the demo
-// produces stable charts regardless of when the page is opened.
-const TODAY_ISO = '2026-05-19';
+// 2026-05-25: TODAY_ISO is now the *real* local date computed once at script
+// load. Seed loads/hours that reference TODAY_ISO + isoDaysAgo() still get
+// stable relative anchoring (today / yesterday / N-days-ago) regardless of
+// when the page opens — they just shift forward each calendar day so the
+// "today" highlight on the day-row and the dashboard charts always match
+// the user's wall-clock. Uses local-date components (not toISOString) so
+// late-evening US users don't roll into tomorrow's UTC date.
+const TODAY_ISO = (() => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+})();
 
 // Helper: returns ISO date N days before TODAY_ISO. dayOffset 0 = today, 1 = yesterday, etc.
 function isoDaysAgo(dayOffset) {
@@ -595,7 +605,14 @@ const MATERIALS = [
 // =====================================================================
 // Helpers
 // =====================================================================
-const NOW_MIN = 11 * 60 + 5; // 11:05
+// 2026-05-25: NOW_MIN is now the *real* current minute-of-day, computed
+// once at script load. Used by calcHours() as the end anchor for open
+// shifts (no clockOut yet). Stays frozen for the session — matches the
+// prior demo behavior where NOW_MIN was a hardcoded 11:05.
+const NOW_MIN = (() => {
+  const d = new Date();
+  return d.getHours() * 60 + d.getMinutes();
+})();
 
 function calcHours(clockIn, breakMin, clockOut) {
   const [h, m] = clockIn.split(':').map(Number);
