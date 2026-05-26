@@ -3850,8 +3850,45 @@ function applyRealtimeChange(jsKey, payload, setDbRaw, bumpRemote) {
     const idx = arr.findIndex(r => r.id === rowKey);
     if (idx === -1) return { ...prev, [jsKey]: [...arr, jsRowForCompare] };
     if (jsonEq(arr[idx], jsRowForCompare)) return prev;
+    // 2026-05-26: GUARD against an incoming Supabase echo blanking a
+    // populated pickup/dropoff address on a haul request. Root cause of
+    // hreq-009 + hreq-010 losing their addresses: a stale tab / out-of-
+    // band write broadcast a row with pickup_location.address = '', this
+    // listener swapped it in, the cloud snapshot stayed empty, and
+    // subsequent hydrates re-spread the empty value forward. Merge in
+    // favor of local when incoming would NULL a populated address;
+    // self-heal the cloud so the empty broadcast doesn't keep recurring.
+    let mergedRow = jsRowForCompare;
+    if (jsKey === 'haulRequests') {
+      const localRow = arr[idx];
+      const incoming = jsRowForCompare;
+      const localPick = localRow && localRow.pickupLocation && (localRow.pickupLocation.address || '').trim();
+      const incomingPick = incoming && incoming.pickupLocation && (incoming.pickupLocation.address || '').trim();
+      const localDrop = localRow && localRow.dropoffLocation && (localRow.dropoffLocation.address || '').trim();
+      const incomingDrop = incoming && incoming.dropoffLocation && (incoming.dropoffLocation.address || '').trim();
+      const pickWouldBlank = !!localPick && !incomingPick;
+      const dropWouldBlank = !!localDrop && !incomingDrop;
+      if (pickWouldBlank || dropWouldBlank) {
+        console.warn('[jse] Realtime echo on haulRequests ' + rowKey + ' would blank '
+          + (pickWouldBlank && dropWouldBlank ? 'pickup + dropoff'
+            : pickWouldBlank ? 'pickup'
+            : 'dropoff')
+          + ' address. Preserving local + self-healing cloud.');
+        mergedRow = {
+          ...incoming,
+          pickupLocation:  pickWouldBlank ? localRow.pickupLocation  : incoming.pickupLocation,
+          dropoffLocation: dropWouldBlank ? localRow.dropoffLocation : incoming.dropoffLocation,
+        };
+        try {
+          markLocalWrite('haulRequests', rowKey, sbRowToJs('haulRequests', jsRowToSb('haulRequests', mergedRow)));
+          _sb.upsertRows('haulRequests', [mergedRow])
+            .catch(e => SyncErrorBus.push('haulRequests', 'realtime-address-heal', e));
+        } catch (e) { /* heal is best-effort */ }
+        if (jsonEq(arr[idx], mergedRow)) return prev;
+      }
+    }
     const next = arr.slice();
-    next[idx] = jsRowForCompare;
+    next[idx] = mergedRow;
     return { ...prev, [jsKey]: next };
   });
   bumpRemote();
