@@ -5652,8 +5652,13 @@ function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
           <Label>Step 1 — Truck details</Label>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
             <div>
-              <div style={{ ...T.caption, marginBottom: 4 }}>Plate</div>
-              <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g., 447" style={{ ...inputStyle, fontFamily: F.mono, textTransform: 'uppercase' }} maxLength={5} autoFocus />
+              {/* 2026-05-26: Robert spec — "plate" relabeled to "Truck #" in the
+                  UI. Underlying state + db column stay `plate` (Phase 3 sync).
+                  Restrictions stripped: no maxLength, no uppercase enforcement,
+                  no numeric-only. Users can type any string: 1 / 01 / 001 / 511
+                  / GT20 / MBL-501 / anything. */}
+              <div style={{ ...T.caption, marginBottom: 4 }}>Truck #</div>
+              <input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g., 447, GT20, MBL-501" style={{ ...inputStyle, fontFamily: F.mono }} autoFocus />
             </div>
             <div>
               <div style={{ ...T.caption, marginBottom: 4 }}>Type</div>
@@ -5710,7 +5715,7 @@ function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
           <div>
             <Label style={{ marginBottom: S[2] }}>Truck</Label>
             <div style={{ background: C.surfaceHi, borderRadius: R.md, padding: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: S[3] }}>
-              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Plate</div><div style={{ fontFamily: F.mono, color: C.ink }}>#{plate}</div></div>
+              <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Truck #</div><div style={{ fontFamily: F.mono, color: C.ink }}>#{plate}</div></div>
               <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Type</div><div style={{ fontFamily: F.body, color: C.ink }}>{(TRUCK_TYPES.find(x => x.code === type) || {}).label || type}</div></div>
               {haulerCompany.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Hauler co.</div><div style={{ fontFamily: F.body, color: C.ink }}>{haulerCompany}</div></div>}
               {make.trim() && <div><div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Make</div><div style={{ fontFamily: F.body, color: C.ink }}>{make}</div></div>}
@@ -9367,7 +9372,7 @@ function AdminHaulers({ db, setDb, navigate }) {
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: S[1] }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '70px 110px 130px 1fr 80px', gap: S[2], ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', paddingBottom: S[1], borderBottom: `1px solid ${C.rule}` }}>
-                  <div>Plate</div><div>Type · Cap</div><div>Status</div><div>Assigned haul</div><div style={{ textAlign: 'right' }}>GPS</div>
+                  <div>Truck #</div><div>Type · Cap</div><div>Status</div><div>Assigned haul</div><div style={{ textAlign: 'right' }}>GPS</div>
                 </div>
                 {trucks.map(t => {
                   const shift = h.openShifts.find(s => s.truckId === t.id);
@@ -9957,7 +9962,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th align="right"></Th></tr></thead>
+            <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th align="right"></Th></tr></thead>
             <tbody>
               {trucks.map(t => {
                 const project = db.projects.find(p => p.id === t.projectId);
@@ -11407,7 +11412,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
           <Card padding={0}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><Th>Plate</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
+              <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
               <tbody>
                 {benchedTrucks.map(t => {
                   const h = db.haulers.find(x => x.id === t.haulerId);
