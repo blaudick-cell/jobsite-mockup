@@ -4755,14 +4755,20 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     // markers effect doesn't re-render on unrelated db churn.
     const LIVE_STATUSES = new Set(['pending', 'matched', 'accepted', 'active', 'approved', 'open', 'upcoming']);
     const reqRoutes = useMemo(() => {
-      const projectById = new Map((db.projects || []).map(p => [p.id, p]));
+      // 2026-05-26: Projects entity dropped (207a80f) → db.projects is always
+      // []. Previously this memo bailed on every req via
+      // `if (!projectById.has(req.projectId)) return null;`, so 100% of haul
+      // requests were filtered out and no routes ever rendered. Now we read
+      // pickup/dropoff strictly from req.pickupLocation/dropoffLocation
+      // (already backfilled at the haul row level), label from req.projectLabel,
+      // and projectAddress stays null (used downstream only to skip a
+      // pickup pin when it equals the project address; with no project, no
+      // skip needed).
       return (db.haulRequests || []).map(req => {
         if (!req) return null;
         if (!LIVE_STATUSES.has(req.status)) return null;
-        if (!projectById.has(req.projectId)) return null;
-        const proj = projectById.get(req.projectId) || null;
-        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
-        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || null;
+        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || null;
         if (!pickAddr || !dumpAddr) return null;
         const key = pickAddr + '|' + dumpAddr;
         const cached = routesCache[key];
@@ -4771,16 +4777,16 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         const isPending = req.status === 'pending';
         const reqStatus = isPending ? 'pending' : 'active';
         const lineId = req.id;
-        const label = (proj ? proj.name : '') + ' · ' + (req.volumeCY != null ? req.volumeCY + ' CY' : '');
+        const label = (req.projectLabel || '') + ' · ' + (req.volumeCY != null ? req.volumeCY + ' CY' : '');
         if (cached && Array.isArray(cached.coords) && cached.coords.length >= 2) {
-          return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
+          return { id: lineId, reqId: req.id, projectId: null, reqStatus, isPending, label, key, coords: cached.coords, distanceMeters: cached.distanceMeters, durationSeconds: cached.durationSeconds, isStraight: false, pickAddr, dumpAddr, pick, dump, projectAddress: null };
         }
         if (pick && dump) {
-          return { id: lineId, reqId: req.id, projectId: req.projectId, reqStatus, isPending, label, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: proj ? proj.address : null };
+          return { id: lineId, reqId: req.id, projectId: null, reqStatus, isPending, label, key, coords: [[pick.lng, pick.lat], [dump.lng, dump.lat]], distanceMeters: null, durationSeconds: null, isStraight: true, pickAddr, dumpAddr, pick, dump, projectAddress: null };
         }
         return null;
       }).filter(Boolean);
-    }, [db.haulRequests, db.projects, db.geocode, db.routes]);
+    }, [db.haulRequests, db.geocode, db.routes]);
 
     // Endpoints (pickup + dump markers) per project, derived from the same
     // address pair. Per Robert: drop the marker for the endpoint that IS the
@@ -4841,15 +4847,14 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     // doesn't loop after a successful fetch.
     // v24: pendingKey now scans haul REQUESTS for un-cached routes.
     const pendingKey = (() => {
+      // 2026-05-26: projects-drop fix — see reqRoutes comment above. Drop
+      // the projectById.has() gate; read addresses directly from the haul.
       const keys = new Set();
-      const projectById = new Map((db.projects || []).map(p => [p.id, p]));
       (db.haulRequests || []).forEach(req => {
         if (!req) return;
         if (!LIVE_STATUSES.has(req.status)) return;
-        if (!projectById.has(req.projectId)) return;
-        const proj = projectById.get(req.projectId);
-        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
-        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+        const pickAddr = (req.pickupLocation && req.pickupLocation.address) || null;
+        const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || null;
         if (!pickAddr || !dumpAddr) return;
         const k = pickAddr + '|' + dumpAddr;
         if (!routesCache[k]) keys.add(k);
@@ -4865,16 +4870,16 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
       if (!pendingKey) return undefined;
       let cancelled = false;
       (async () => {
+        // 2026-05-26: projects-drop fix — same change as reqRoutes/pendingKey
+        // above. Drop the projectById.has() gate so the OSRM fetch loop
+        // actually runs against haul requests in the flat-Hauls model.
         const seen = new Set();
         const pairs = [];
-        const projectById = new Map((db.projects || []).map(p => [p.id, p]));
         (db.haulRequests || []).forEach(req => {
           if (!req) return;
           if (!LIVE_STATUSES.has(req.status)) return;
-          if (!projectById.has(req.projectId)) return;
-          const proj = projectById.get(req.projectId);
-          const pickAddr = (req.pickupLocation && req.pickupLocation.address) || (proj && proj.pickupLocation) || null;
-          const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || (proj && proj.dumpLocation) || null;
+          const pickAddr = (req.pickupLocation && req.pickupLocation.address) || null;
+          const dumpAddr = (req.dropoffLocation && req.dropoffLocation.address) || null;
           if (!pickAddr || !dumpAddr) return;
           const k = pickAddr + '|' + dumpAddr;
           if (seen.has(k)) return;
