@@ -2439,16 +2439,31 @@ function haulRequestLabel(state, req) {
 // Derive from the project that owns the request. Falls back to 'NEEDS' so
 // the pill always renders and the toggle has a starting state.
 // === Total billed hours for one haul request =============================
-// v32: canonical-store reads. Sums db.hours rows matched by haulRequestId.
-// Each db.hours row is a real shift (clockIn / clockOut / breakMin) — we
-// pass through calcHours() so partial shifts (open clockOut) use NOW_MIN
-// just like the per-truck day list. Single source of truth for billed-hour
-// stats across project tiles, dispatch rows, hauler dash, and haul detail.
+// 2026-05-25: reads day.hours FIRST (the explicit per-day override the
+// admin enters on the haul-detail day-row chip), falls back to a db.hours
+// row sum for (truck, date) pairs that don't have an override. This makes
+// admin edits flow into haul + project rollups immediately on the same
+// setDb pass without waiting for the db.hours upsert to round-trip
+// through Supabase (Realtime echoes can lag, and a PGRST204 on a missing
+// column would otherwise silently drop the edit from the rollup). The
+// override set is keyed (truckId, date) so we never double-count a day
+// that has both an override AND a matching db.hours row.
 function totalBilledHoursForRequest(req, db) {
-  if (!req || !db || !Array.isArray(db.hours)) return 0;
+  if (!req || !db) return 0;
   let total = 0;
-  for (const h of db.hours) {
+  const overrideKeys = new Set();
+  for (const a of (req.assignments || [])) {
+    if (!a || !Array.isArray(a.days)) continue;
+    for (const d of a.days) {
+      if (d && typeof d.hours === 'number' && d.hours > 0) {
+        total += d.hours;
+        overrideKeys.add(a.truckId + '|' + d.date);
+      }
+    }
+  }
+  for (const h of (db.hours || [])) {
     if (!h || h.haulRequestId !== req.id) continue;
+    if (overrideKeys.has(h.truckId + '|' + h.date)) continue;
     total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
   }
   return total;
@@ -2474,10 +2489,28 @@ function deliveredCYForRequest(req, db) {
 // filter `db.hours` by `req.assignments.filter(a => a.haulerId === me).truckId`
 // themselves — see `haulsForHauler` line ~11089 for the correct pattern.
 function dollarsForRequest(req, db) {
-  if (!req || !db || !Array.isArray(db.hours)) return 0;
+  if (!req || !db) return 0;
+  // 2026-05-25: parallel rewrite of totalBilledHoursForRequest. day.hours
+  // overrides win over the matching db.hours row so the dollar rollup
+  // reflects the entered value on the same setDb pass. Rate resolution
+  // still goes through the canonical chain: assignment.ratePerHour ->
+  // truck.ratePerHour -> DEFAULT_RATES[type].
   let total = 0;
-  for (const h of db.hours) {
+  const overrideKeys = new Set();
+  for (const a of (req.assignments || [])) {
+    if (!a || !Array.isArray(a.days)) continue;
+    const truck = (db.trucks || []).find(t => t.id === a.truckId) || null;
+    const rate = rateForAssignment(a, truck);
+    for (const d of a.days) {
+      if (d && typeof d.hours === 'number' && d.hours > 0) {
+        total += d.hours * rate;
+        overrideKeys.add(a.truckId + '|' + d.date);
+      }
+    }
+  }
+  for (const h of (db.hours || [])) {
     if (!h || h.haulRequestId !== req.id) continue;
+    if (overrideKeys.has(h.truckId + '|' + h.date)) continue;
     const rate = rateForHoursRow(h, req, db);
     total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut) * rate;
   }
