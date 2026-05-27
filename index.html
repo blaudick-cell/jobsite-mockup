@@ -9232,14 +9232,12 @@ function AdminHaulers({ db, setDb, navigate }) {
   ).length;
   const trucksAvailable = realTrucks.length - trucksActiveAll;
   const trucksOffline   = 0;
-  const avgResponse     = enriched.length ? Math.round(enriched.reduce((s, h) => s + h.responseMin, 0) / enriched.length) : 0;
   const loadsToday      = todayLoads.length;
   const cyTodayAll      = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
   const kpis = [
     { label: 'Haulers',          value: enriched.length,        tone: C.ink },
     { label: 'Available now',    value: Math.max(0, trucksAvailable), tone: C.accent, sub: 'idle' },
     { label: 'Trucks active',    value: trucksActiveAll,        tone: C.ok,     sub: 'clocked-in' },
-    { label: 'Avg response',     value: avgResponse + ' min',   tone: C.info,   sub: 'mock telemetry' },
     { label: 'Loads today',      value: loadsToday,             tone: C.accent },
     { label: 'CY today',         value: cyTodayAll.toLocaleString(),    tone: C.ink, sub: 'across network' },
   ];
@@ -9252,7 +9250,7 @@ function AdminHaulers({ db, setDb, navigate }) {
     typeTAN: false, typeSD: false, typeED: false, typeBD: false, typeHS: false,
   };
   const [filters, setFilters] = useState(FILTERS_INIT);
-  const [sort, setSort] = useState('rating'); // rating | response | trucks | name
+  const [sort, setSort] = useState('rating'); // rating | trucks | name
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(null); // hauler id of the open drawer
 
@@ -9274,7 +9272,6 @@ function AdminHaulers({ db, setDb, navigate }) {
       const order = { 'A+': 0, 'A': 1, 'A-': 2, 'B+': 3, 'B': 4 };
       return (order[a.reliability] ?? 5) - (order[b.reliability] ?? 5);
     }
-    if (sort === 'response') return a.responseMin - b.responseMin;
     if (sort === 'trucks')   return b.trucks.length - a.trucks.length;
     return a.name.localeCompare(b.name);
   });
@@ -9518,10 +9515,6 @@ function AdminHaulers({ db, setDb, navigate }) {
               <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.completedToday}</div>
             </div>
             <div>
-              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Response</div>
-              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.info }}>{h.responseMin}m</div>
-            </div>
-            <div>
               <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>On-time</div>
               <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: h.onTimePct >= 92 ? C.ok : h.onTimePct >= 85 ? C.ink : C.warn }}>{h.onTimePct}%</div>
             </div>
@@ -9606,7 +9599,6 @@ function AdminHaulers({ db, setDb, navigate }) {
             <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase' }}>Sort</span>
             <select value={sort} onChange={e => setSort(e.target.value)} style={{ ...T.caption, padding: '4px 6px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surfaceHi, color: C.ink, fontFamily: F.mono, letterSpacing: 0.3, outline: 'none' }}>
               <option value="rating">Highest rated</option>
-              <option value="response">Fastest response</option>
               <option value="trucks">Largest fleet</option>
               <option value="name">A → Z</option>
             </select>
