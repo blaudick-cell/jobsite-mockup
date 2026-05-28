@@ -8,6 +8,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="theme-color" content="#111111">
   <title>JobsiteExchange Driver</title>
+  <link id="manifest-link" rel="manifest" href="">
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <style>
     /* ─── Reset & Base ─────────────────────────────────────── */
@@ -113,40 +114,48 @@
       background: var(--surface); border: 1px solid var(--border);
       border-radius: var(--radius); padding: 18px 16px;
     }
-    .menu-item {
-      display: flex; align-items: center; gap: 14px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 18px 16px;
-      cursor: pointer; transition: background 0.15s;
-      -webkit-tap-highlight-color: transparent;
-      text-decoration: none; color: var(--text);
-      width: 100%;
-    }
-    .menu-item:active { background: var(--surface2); }
-    .menu-item-icon {
-      width: 44px; height: 44px; border-radius: 10px;
-      background: var(--surface2); display: flex; align-items: center;
-      justify-content: center; font-size: 20px; flex-shrink: 0;
-    }
-    .menu-item-text { flex: 1; }
-    .menu-item-title { font-size: 16px; font-weight: 600; }
-    .menu-item-desc  { font-size: 13px; color: var(--muted); margin-top: 2px; }
-    .chevron { color: var(--muted); font-size: 18px; }
     .stack { display: flex; flex-direction: column; gap: 12px; }
 
-    /* ─── Input ─────────────────────────────────────────────── */
-    .input-wrap { display: flex; flex-direction: column; gap: 8px; }
-    .input-wrap .label { margin-bottom: 0; }
-    input[type="text"] {
-      width: 100%; height: 58px; background: var(--surface);
+    /* ─── Form fields (intake) ──────────────────────────────── */
+    .field { display: flex; flex-direction: column; gap: 8px; }
+    .field input[type="text"],
+    .field select {
+      width: 100%; height: 56px; background: var(--surface);
       border: 1.5px solid var(--border); border-radius: var(--radius);
-      color: var(--text); font-size: 24px; font-weight: 600;
-      padding: 0 16px; letter-spacing: 2px; text-transform: uppercase;
-      outline: none; caret-color: var(--green);
-      -webkit-appearance: none; transition: border-color 0.15s;
+      color: var(--text); font-size: 17px; font-weight: 500;
+      padding: 0 16px; outline: none; caret-color: var(--green);
+      -webkit-appearance: none; appearance: none; transition: border-color 0.15s;
     }
-    input[type="text"]::placeholder { color: var(--muted); letter-spacing: 1px; font-size: 18px; font-weight: 400; text-transform: none; }
-    input[type="text"]:focus { border-color: var(--green); }
+    .field input[type="text"]::placeholder { color: var(--muted); font-weight: 400; }
+    .field input[type="text"]:focus,
+    .field select:focus { border-color: var(--green); }
+    .field select {
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'><path fill='%239ca3af' d='M7 8L0 0h14z'/></svg>");
+      background-repeat: no-repeat; background-position: right 16px center;
+      padding-right: 44px;
+    }
+    .field select option { background: var(--surface); color: var(--text); }
+
+    /* ─── Dashboard: driver-name callsign treatment ─────────── */
+    .driver-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px 20px; margin-top: 4px;
+    }
+    .driver-card .label { font-size: 11px; }
+    .driver-name {
+      font-family: 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 30px; font-weight: 900; letter-spacing: 3px;
+      color: var(--green); text-transform: uppercase; line-height: 1.05;
+      margin: 6px 0 12px; word-break: break-word;
+    }
+    .driver-rule {
+      height: 1px; background: var(--border); margin-bottom: 12px;
+    }
+    .driver-meta {
+      font-family: 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 13px; letter-spacing: 1.4px; color: var(--muted);
+      text-transform: uppercase;
+    }
 
     /* ─── Dashboard stats ───────────────────────────────────── */
     .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
@@ -157,9 +166,21 @@
     .stat-label { font-size: 10px; font-weight: 700; letter-spacing: 0.8px; color: var(--muted); text-transform: uppercase; }
     .stat-value { font-size: 36px; font-weight: 800; color: var(--green); letter-spacing: -1px; line-height: 1.1; margin-top: 4px; }
     .stat-value.white { color: var(--text); }
+    .stat-value.orange { color: var(--orange); }
 
-    .truck-plate { font-size: 42px; font-weight: 900; color: var(--green); letter-spacing: 2px; line-height: 1; }
-    .truck-name  { font-size: 15px; color: var(--muted); margin-top: 4px; }
+    /* ─── HH:MM:SS pickup timer ─────────────────────────────── */
+    .timer-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 16px 20px; margin-top: 12px;
+      text-align: center;
+    }
+    .timer-card .label { display: block; margin-bottom: 6px; }
+    .timer-digits {
+      font-family: 'Courier New', ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 44px; font-weight: 800; letter-spacing: 4px;
+      color: var(--green); line-height: 1;
+    }
+    .timer-digits.idle { color: var(--muted); }
 
     /* ─── Confirmation icon ─────────────────────────────────── */
     .confirm-icon {
@@ -170,6 +191,7 @@
     .confirm-icon.pickup  { background: rgba(132,204,22,0.15); }
     .confirm-icon.dropoff { background: rgba(239,68,68,0.15); }
     .confirm-icon.end     { background: rgba(239,68,68,0.15); }
+    .confirm-icon.warn    { background: rgba(249,115,22,0.15); }
 
     /* ─── Photo area ────────────────────────────────────────── */
     .photo-area {
@@ -181,16 +203,6 @@
     .photo-area img { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; border-radius: var(--radius); }
     .photo-area .camera-icon { font-size: 52px; color: var(--muted); z-index: 1; }
     .photo-area .photo-hint  { font-size: 14px; color: var(--muted); z-index: 1; }
-    #platePhotoPreview { display: none; }
-
-    /* ─── Location row ──────────────────────────────────────── */
-    .location-row {
-      display: flex; align-items: center; gap: 10px;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: 10px; padding: 12px 14px; font-size: 14px;
-    }
-    .location-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
-    .location-dot.red { background: var(--red); }
 
     /* ─── Divider ───────────────────────────────────────────── */
     .divider { display: flex; align-items: center; gap: 12px; color: var(--muted); font-size: 13px; margin: 8px 0; }
@@ -214,15 +226,17 @@
     /* ─── End shift stats ───────────────────────────────────── */
     .end-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
 
-    /* ─── Toast ─────────────────────────────────────────────── */
+    /* ─── Toast (centered) ──────────────────────────────────── */
     #toast {
-      position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(20px);
+      position: fixed; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.96);
       background: var(--surface2); color: var(--text); border: 1px solid var(--border);
-      border-radius: 24px; padding: 10px 20px; font-size: 14px; font-weight: 500;
-      opacity: 0; transition: opacity 0.3s, transform 0.3s; pointer-events: none;
+      border-radius: 24px; padding: 14px 26px; font-size: 15px; font-weight: 600;
+      opacity: 0; transition: opacity 0.2s, transform 0.2s; pointer-events: none;
       white-space: nowrap; z-index: 999;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.5);
     }
-    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 
     /* ─── Loading overlay ───────────────────────────────────── */
     .loading { opacity: 0.5; pointer-events: none; }
@@ -289,122 +303,88 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 2: Find Your Truck
+       SCREEN 2: Intake form (driver name / company / truck type)
   ══════════════════════════════════════════════════════════ -->
-  <div class="screen" id="screen-find">
+  <div class="screen" id="screen-intake">
     <div class="header">
       <div class="logo-icon"><span>J</span></div>
       <div class="logo-text">Jobsite<em>Exchange</em></div>
     </div>
     <div class="screen-nav">
-      <button class="back-btn" onclick="goBack('screen-lang')">‹ <span id="find-back">Back</span></button>
+      <button class="back-btn" onclick="goBack('screen-lang')">‹ <span id="intake-back">Back</span></button>
     </div>
     <div class="content">
-      <h1 id="find-title">Find Your Truck</h1>
-      <p class="subtitle" id="find-subtitle">Enter your license plate or take a photo</p>
-      <div class="gap-32"></div>
+      <h1 id="intake-title">Driver Info</h1>
+      <p class="subtitle" id="intake-subtitle">Tell us who you are.</p>
+      <div class="gap-24"></div>
       <div class="stack">
-        <button class="menu-item" onclick="showScreen('screen-plate')">
-          <div class="menu-item-icon">🔢</div>
-          <div class="menu-item-text">
-            <div class="menu-item-title" id="find-enter-title">Enter Plate Number</div>
-            <div class="menu-item-desc" id="find-enter-desc">Enter the last 4–6 characters</div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
-        <button class="menu-item" onclick="showScreen('screen-photo')">
-          <div class="menu-item-icon">📷</div>
-          <div class="menu-item-text">
-            <div class="menu-item-title" id="find-photo-title">Take Photo of Plate</div>
-            <div class="menu-item-desc" id="find-photo-desc">Use your camera to capture your plate</div>
-          </div>
-          <span class="chevron">›</span>
-        </button>
+        <div class="field">
+          <span class="label" id="intake-name-label">Driver Name</span>
+          <input type="text" id="driverNameInput" placeholder="" autocomplete="off"
+                 oninput="onIntakeChange()">
+        </div>
+        <div class="field">
+          <span class="label" id="intake-company-label">Company</span>
+          <input type="text" id="companyInput" placeholder="" autocomplete="off"
+                 oninput="onIntakeChange()">
+        </div>
+        <div class="field">
+          <span class="label" id="intake-trucktype-label">Truck Type</span>
+          <select id="truckTypeSelect" onchange="onIntakeChange()">
+            <option value="" id="trucktype-placeholder">Select truck type…</option>
+            <option value="SD">Single Axle Dump</option>
+            <option value="ED">End Dump</option>
+            <option value="BD">Belly Dump</option>
+            <option value="TAN">Tandem</option>
+            <option value="HS">Hot Shot</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
       </div>
       <div class="gap-24"></div>
+      <button class="btn btn-green" id="intake-continue-btn" onclick="submitIntake()" disabled style="opacity:0.4;">
+        <span id="intake-continue-label">CONTINUE</span>
+      </button>
+      <div class="gap-24"></div>
       <div style="text-align:center;">
-        <span style="font-size:13px; color:var(--muted);">? <span id="find-help-label">Need help? Call dispatcher</span></span><br>
+        <span style="font-size:13px; color:var(--muted);">? <span id="intake-help-label">Need help? Call dispatcher</span></span><br>
         <a href="tel:7205550198" style="color:var(--green);font-size:14px;font-weight:600;text-decoration:none;">(720) 555-0198</a>
       </div>
     </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 3: Enter Plate Number
+       SCREEN 3: Truck Photo (optional)
   ══════════════════════════════════════════════════════════ -->
-  <div class="screen" id="screen-plate">
+  <div class="screen" id="screen-truck-photo">
     <div class="header">
       <div class="logo-icon"><span>J</span></div>
       <div class="logo-text">Jobsite<em>Exchange</em></div>
     </div>
-    <div class="screen-nav">
-      <button class="back-btn" onclick="goBack('screen-find')">‹ <span id="plate-back">Back</span></button>
-    </div>
     <div class="content">
-      <h1 id="plate-title">Enter Plate Number</h1>
-      <p class="subtitle" id="plate-subtitle">Enter the last 4–6 characters</p>
-      <div class="gap-24"></div>
-      <div class="input-wrap">
-        <span class="label" id="plate-label">Plate</span>
-        <input type="text" id="plateInput" maxlength="8" inputmode="text"
-               placeholder="ABC123" autocomplete="off" autocorrect="off"
-               autocapitalize="characters" spellcheck="false"
-               oninput="onPlateInput(this)">
-      </div>
-      <div class="gap-24"></div>
-      <button class="btn btn-green" id="plate-continue-btn" onclick="submitPlate()" disabled style="opacity:0.4;">
-        <span id="plate-continue-label">CONTINUE</span>
-      </button>
+      <h1 id="truckphoto-title">Take a photo of your truck (optional)</h1>
+      <p class="subtitle" id="truckphoto-subtitle">&nbsp;</p>
       <div class="gap-16"></div>
-      <div class="divider"><span id="plate-or">or</span></div>
-      <div class="gap-16"></div>
-      <button class="btn btn-dark" onclick="showScreen('screen-photo')">
-        📷 <span id="plate-switch-photo">TAKE PHOTO INSTEAD</span>
-      </button>
-      <div class="gap-24"></div>
-      <div style="text-align:center;">
-        <span style="font-size:13px; color:var(--muted);">? <span id="plate-help-label">Need help? Call dispatcher</span></span><br>
-        <a href="tel:7205550198" style="color:var(--green);font-size:14px;font-weight:600;text-decoration:none;">(720) 555-0198</a>
-      </div>
-    </div>
-  </div>
-
-  <!-- ══════════════════════════════════════════════════════════
-       SCREEN 4: Take Plate Photo
-  ══════════════════════════════════════════════════════════ -->
-  <div class="screen" id="screen-photo">
-    <div class="header">
-      <div class="logo-icon"><span>J</span></div>
-      <div class="logo-text">Jobsite<em>Exchange</em></div>
-    </div>
-    <div class="screen-nav">
-      <button class="back-btn" onclick="goBack('screen-find')">‹ <span id="photo-back">Back</span></button>
-    </div>
-    <div class="content">
-      <h1 id="photo-title">Take Photo of Plate</h1>
-      <p class="subtitle" id="photo-subtitle">Position your plate clearly in the frame</p>
-      <div class="gap-16"></div>
-      <label class="photo-area" for="platePhotoInput">
+      <label class="photo-area" for="truckPhotoInput" id="truckPhotoArea">
         <span class="camera-icon">📷</span>
-        <span class="photo-hint" id="photo-hint-text">Tap to open camera</span>
-        <img id="platePhotoPreview" alt="plate preview">
+        <span class="photo-hint" id="truckphoto-hint">Tap to open camera</span>
+        <img id="truckPhotoPreview" alt="truck photo" style="display:none;">
       </label>
-      <input type="file" id="platePhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="onPlatePhoto(this)">
+      <input type="file" id="truckPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="onTruckPhoto(this)">
       <div class="gap-16"></div>
-      <button class="btn btn-green" id="photo-continue-btn" onclick="submitPlatePhoto()" disabled style="opacity:0.4;">
-        <span id="photo-continue-label">CONTINUE</span>
-      </button>
-      <div class="gap-16"></div>
-      <div class="divider"><span id="photo-or">or</span></div>
-      <div class="gap-16"></div>
-      <button class="btn btn-dark" onclick="showScreen('screen-plate')">
-        🔢 <span id="photo-switch-plate">ENTER PLATE INSTEAD</span>
-      </button>
+      <div class="stack">
+        <button class="btn btn-green" id="truckphoto-take-btn" onclick="onTakeOrUseTruckPhoto()">
+          📷 <span id="truckphoto-take-label">TAKE PHOTO</span>
+        </button>
+        <button class="btn btn-outline" onclick="skipTruckPhoto()">
+          <span id="truckphoto-skip-btn">SKIP</span>
+        </button>
+      </div>
     </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 5: Driver Dashboard
+       SCREEN 4: Driver Dashboard
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-dash">
     <div class="header">
@@ -422,23 +402,36 @@
       </div>
     </div>
     <div class="content">
-      <div class="label" id="dash-truck-label">TRUCK</div>
-      <div class="gap-8"></div>
-      <div class="truck-plate" id="dash-plate">—</div>
-      <div class="truck-name" id="dash-truck-name"></div>
+
+      <!-- Driver callsign card -->
+      <div class="driver-card">
+        <div class="label" id="dash-driver-label">DRIVER</div>
+        <div class="driver-name" id="dash-driver-name">—</div>
+        <div class="driver-rule"></div>
+        <div class="driver-meta" id="dash-driver-meta"></div>
+      </div>
+
+      <!-- HH:MM:SS pickup timer -->
+      <div class="timer-card">
+        <span class="label" id="dash-timer-label">TIME SINCE PICKUP</span>
+        <div class="timer-digits idle" id="dash-timer-digits">00:00:00</div>
+      </div>
+
+      <!-- In Transit + Completed badges -->
       <div class="stats-row">
         <div class="stat-box">
-          <div class="stat-label" id="dash-shift-time-label">SHIFT TIME</div>
-          <div class="stat-value" id="dash-shift-time">0.0h</div>
+          <div class="stat-label" id="dash-intransit-label">IN TRANSIT</div>
+          <div class="stat-value orange" id="dash-intransit">0</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label" id="dash-loads-label">LOADS TODAY</div>
-          <div class="stat-value white" id="dash-loads">0</div>
+          <div class="stat-label" id="dash-completed-label">COMPLETED</div>
+          <div class="stat-value white" id="dash-completed">0</div>
         </div>
       </div>
+
       <div class="gap-8"></div>
       <div class="stack">
-        <button class="btn btn-green btn-stacked" onclick="logEvent('pickup_load')">
+        <button class="btn btn-green btn-stacked" onclick="onPickupTap()">
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:22px;">↑</span>
             <div>
@@ -446,7 +439,7 @@
             </div>
           </div>
         </button>
-        <button class="btn btn-orange btn-stacked" onclick="logEvent('dropoff_load')">
+        <button class="btn btn-orange btn-stacked" onclick="onDropoffTap()">
           <div style="display:flex;align-items:center;gap:10px;">
             <span style="font-size:22px;">↓</span>
             <div>
@@ -467,7 +460,7 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 6: Event Logged Confirmation
+       SCREEN 5: Event Logged Confirmation
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-confirm">
     <div class="header">
@@ -479,18 +472,7 @@
       <h1 id="confirm-title">Pickup Load Logged</h1>
       <p class="subtitle" id="confirm-time" style="margin-top:6px;font-size:16px;color:var(--muted);"></p>
       <div class="gap-24"></div>
-      <div id="confirm-location-row" class="location-row" style="width:100%;display:none;">
-        <div class="location-dot" id="confirm-location-dot"></div>
-        <div>
-          <div style="font-weight:600;" id="confirm-location-label">Location captured</div>
-          <div style="font-size:13px;color:var(--muted);" id="confirm-coords"></div>
-        </div>
-      </div>
-      <div class="gap-24"></div>
       <div style="width:100%;" class="stack">
-        <button class="btn btn-dark" onclick="showAddPhoto()">
-          📷 <span id="confirm-add-photo-btn">ADD PHOTO (OPTIONAL)</span>
-        </button>
         <button class="btn btn-green" onclick="showScreen('screen-dash')">
           <span id="confirm-ok-btn">OK</span>
         </button>
@@ -499,40 +481,30 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 7: Add Photo (Optional)
+       SCREEN 6: Gating warning modal (already-hauling / no-load)
   ══════════════════════════════════════════════════════════ -->
-  <div class="screen" id="screen-add-photo">
+  <div class="screen" id="screen-warn">
     <div class="header">
       <div class="logo-icon"><span>J</span></div>
       <div class="logo-text">Jobsite<em>Exchange</em></div>
     </div>
-    <div class="screen-nav">
-      <button class="back-btn" onclick="goBack('screen-confirm')">‹ <span id="addphoto-back">Back</span></button>
-    </div>
-    <div class="content">
-      <h1 id="addphoto-title">Add Photo</h1>
-      <p class="subtitle" id="addphoto-subtitle">Add a photo for this load (optional)</p>
-      <div class="gap-16"></div>
-      <label class="photo-area" for="eventPhotoInput" id="eventPhotoArea" style="flex:1;">
-        <span class="camera-icon">📷</span>
-        <span class="photo-hint" id="addphoto-hint">Tap to open camera</span>
-        <img id="eventPhotoPreview" alt="event photo" style="display:none;">
-      </label>
-      <input type="file" id="eventPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="onEventPhoto(this)">
-      <div class="gap-16"></div>
-      <div class="stack">
-        <button class="btn btn-green" id="take-photo-btn">
-          📷 <span id="addphoto-take-btn">TAKE PHOTO</span>
-        </button>
-        <button class="btn btn-outline" onclick="skipPhoto()">
-          <span id="addphoto-skip-btn">SKIP THIS TIME</span>
+    <div class="content center">
+      <div class="confirm-icon warn">
+        <span style="font-size:40px;color:var(--orange);">!</span>
+      </div>
+      <h1 id="warn-title">—</h1>
+      <p class="subtitle" id="warn-body" style="margin-top:10px;"></p>
+      <div class="gap-24"></div>
+      <div style="width:100%;" class="stack">
+        <button class="btn btn-green" onclick="showScreen('screen-dash')">
+          <span id="warn-ok-btn">OK</span>
         </button>
       </div>
     </div>
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
-       SCREEN 8: End Shift Confirmation
+       SCREEN 7: End Shift Confirmation
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-end">
     <div class="header">
@@ -551,8 +523,8 @@
           <div class="stat-value" id="end-shift-time">0.0h</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label" id="end-loads-label">LOADS TODAY</div>
-          <div class="stat-value white" id="end-loads">0</div>
+          <div class="stat-label" id="end-completed-label">COMPLETED</div>
+          <div class="stat-value white" id="end-completed">0</div>
         </div>
       </div>
       <div class="stack" style="width:100%;">
@@ -582,16 +554,18 @@ const db = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
 // ══════════════════════════════════════════════════════════════════
 // STATE
 // ══════════════════════════════════════════════════════════════════
-let lang        = 'en';
-let session     = null;   // { id, started_at, matched_truck_id, ... }
-let truck       = null;   // { id, plate, display_name }
-let lastEventId = null;
-let lastEventType = null;
-let lastCoords  = null;
-let loadsToday  = 0;
-let timerInterval = null;
-let platePhotoFile = null;
-let eventPhotoFile = null;
+let lang             = 'en';
+let session          = null;   // { id, started_at, driver_name, company, truck_type, ... }
+let driverName       = '';
+let companyName      = '';
+let truckType        = '';     // stored code: SD / ED / BD / TAN / HS / OTHER
+let lastEventId      = null;
+let lastEventType    = null;
+let inTransit        = 0;      // pickup count - dropoff count (0 or 1)
+let completedCount   = 0;
+let lastPickupAt     = null;   // ISO timestamp of most recent pickup_load
+let pickupTimerInt   = null;   // 1Hz interval handle for HH:MM:SS
+let truckPhotoFile   = null;
 
 const STORAGE_KEY = 'jse_driver_v1';
 
@@ -601,56 +575,77 @@ const STORAGE_KEY = 'jse_driver_v1';
 const T = {
   en: {
     welcome: 'Welcome', selectLang: 'Select your language', privacy: 'Your data is saved securely.',
-    findTitle: 'Find Your Truck', findSubtitle: 'Enter your license plate or take a photo',
-    findEnterTitle: 'Enter Plate Number', findEnterDesc: 'Enter the last 4–6 characters',
-    findPhotoTitle: 'Take Photo of Plate', findPhotoDesc: 'Use your camera to capture your plate',
-    needHelp: 'Need help? Call dispatcher',
-    plateTitle: 'Enter Plate Number', plateSubtitle: 'Enter the last 4–6 characters',
-    plateLabel: 'Plate', plateContinue: 'CONTINUE', or: 'or',
-    plateSwitchPhoto: 'TAKE PHOTO INSTEAD',
-    photoTitle: 'Take Photo of Plate', photoSubtitle: 'Position your plate clearly in the frame',
-    photoHint: 'Tap to open camera', photoContinue: 'CONTINUE', photoSwitchPlate: 'ENTER PLATE INSTEAD',
-    shiftBadge: 'SHIFT ACTIVE', truckLabel: 'TRUCK', shiftTimeLabel: 'SHIFT TIME',
-    loadsLabel: 'LOADS TODAY', pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD',
-    endshiftLabel: 'END SHIFT',
+    // Intake
+    intakeTitle: 'Driver Info', intakeSubtitle: 'Tell us who you are.',
+    intakeNameLabel: 'Driver Name', intakeCompanyLabel: 'Company', intakeTruckTypeLabel: 'Truck Type',
+    trucktypePlaceholder: 'Select truck type…',
+    intakeContinue: 'CONTINUE', needHelp: 'Need help? Call dispatcher',
+    // Truck photo
+    truckPhotoTitle: 'Take a photo of your truck (optional)',
+    truckPhotoHint: 'Tap to open camera',
+    truckTakeBtn: 'TAKE PHOTO', truckUseBtn: 'USE PHOTO', truckSkipBtn: 'SKIP',
+    photoSaved: 'Photo saved',
+    // Dashboard
+    shiftBadge: 'SHIFT ACTIVE', driverLabel: 'DRIVER',
+    timerLabel: 'TIME SINCE PICKUP',
+    inTransitLabel: 'IN TRANSIT', completedLabel: 'COMPLETED',
+    pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD', endshiftLabel: 'END SHIFT',
+    // Truck-type display names
+    tt_SD: 'Single Axle Dump', tt_ED: 'End Dump', tt_BD: 'Belly Dump',
+    tt_TAN: 'Tandem', tt_HS: 'Hot Shot', tt_OTHER: 'Other',
+    // Event confirmation
     confirmPickupTitle: 'Pickup Load Logged', confirmDropoffTitle: 'Drop Off Load Logged',
-    locationCaptured: 'Location captured', addPhotoBtnLabel: 'ADD PHOTO (OPTIONAL)', ok: 'OK',
-    addPhotoTitle: 'Add Photo', addPhotoSubtitle: 'Add a photo for this load (optional)',
-    addPhotoHint: 'Tap to open camera', takePhotoBtnLabel: 'TAKE PHOTO', skipBtnLabel: 'SKIP THIS TIME',
+    ok: 'OK',
+    // Gating warnings
+    warnAlreadyTitle: 'Already hauling a load',
+    warnAlreadyBody:  'Drop off your current load before picking up another.',
+    warnNoLoadTitle:  'No load to drop off',
+    warnNoLoadBody:   'Pick up a load first before dropping off.',
+    // End shift
     endTitle: 'End Shift?', endSubtitle: "You're about to end your shift.\nThis cannot be undone.",
-    endShiftTimeLabel: 'SHIFT TIME', endLoadsLabel: 'LOADS TODAY',
+    endShiftTimeLabel: 'SHIFT TIME', endCompletedLabel: 'COMPLETED',
     endBtnLabel: 'END SHIFT', cancelBtnLabel: 'CANCEL',
-    back: 'Back', truckFound: 'Truck Found',
-    startingShift: 'Starting shift…', uploading: 'Uploading…', photoSaved: 'Photo saved.',
+    back: 'Back', uploading: 'Uploading…', startingShift: 'Starting shift…',
     endingShift: 'Ending shift…', shiftEnded: 'Shift ended. Good work!',
   },
   es: {
     welcome: 'Bienvenido', selectLang: 'Selecciona tu idioma', privacy: 'Tus datos están guardados de forma segura.',
-    findTitle: 'Encuentra tu camión', findSubtitle: 'Ingresa tu placa o toma una foto',
-    findEnterTitle: 'Ingresar placa', findEnterDesc: 'Ingresa los últimos 4–6 caracteres',
-    findPhotoTitle: 'Tomar foto de la placa', findPhotoDesc: 'Usa tu cámara para capturar tu placa',
-    needHelp: '¿Necesitas ayuda? Llama al despachador',
-    plateTitle: 'Ingresar placa', plateSubtitle: 'Ingresa los últimos 4–6 caracteres',
-    plateLabel: 'Placa', plateContinue: 'CONTINUAR', or: 'o',
-    plateSwitchPhoto: 'TOMAR FOTO EN CAMBIO',
-    photoTitle: 'Tomar foto de la placa', photoSubtitle: 'Coloca tu placa claramente en el encuadre',
-    photoHint: 'Toca para abrir la cámara', photoContinue: 'CONTINUAR', photoSwitchPlate: 'INGRESAR PLACA EN CAMBIO',
-    shiftBadge: 'TURNO ACTIVO', truckLabel: 'CAMIÓN', shiftTimeLabel: 'TIEMPO DEL TURNO',
-    loadsLabel: 'CARGAS HOY', pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA',
-    endshiftLabel: 'TERMINAR TURNO',
+    // Intake
+    intakeTitle: 'Información del conductor', intakeSubtitle: 'Dinos quién eres.',
+    intakeNameLabel: 'Nombre del conductor', intakeCompanyLabel: 'Compañía', intakeTruckTypeLabel: 'Tipo de camión',
+    trucktypePlaceholder: 'Selecciona tipo de camión…',
+    intakeContinue: 'CONTINUAR', needHelp: '¿Necesitas ayuda? Llama al despachador',
+    // Truck photo
+    truckPhotoTitle: 'Tomar una foto de tu camión (opcional)',
+    truckPhotoHint: 'Toca para abrir la cámara',
+    truckTakeBtn: 'TOMAR FOTO', truckUseBtn: 'USAR FOTO', truckSkipBtn: 'OMITIR',
+    photoSaved: 'Foto guardada',
+    // Dashboard
+    shiftBadge: 'TURNO ACTIVO', driverLabel: 'CONDUCTOR',
+    timerLabel: 'TIEMPO DESDE RECOGIDA',
+    inTransitLabel: 'EN TRÁNSITO', completedLabel: 'COMPLETADAS',
+    pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA', endshiftLabel: 'TERMINAR TURNO',
+    // Truck-type display names
+    tt_SD: 'Volqueta de Eje Sencillo', tt_ED: 'Volquete de Descarga Trasera', tt_BD: 'Volquete de Descarga Inferior',
+    tt_TAN: 'Volquete Tándem', tt_HS: 'Camioneta Hot Shot', tt_OTHER: 'Otro',
+    // Event confirmation
     confirmPickupTitle: 'Carga recogida', confirmDropoffTitle: 'Carga entregada',
-    locationCaptured: 'Ubicación registrada', addPhotoBtnLabel: 'AGREGAR FOTO (OPCIONAL)', ok: 'OK',
-    addPhotoTitle: 'Agregar foto', addPhotoSubtitle: 'Agregar una foto para esta carga (opcional)',
-    addPhotoHint: 'Toca para abrir la cámara', takePhotoBtnLabel: 'TOMAR FOTO', skipBtnLabel: 'OMITIR ESTA VEZ',
+    ok: 'OK',
+    // Gating warnings
+    warnAlreadyTitle: 'Ya estás transportando una carga',
+    warnAlreadyBody:  'Entrega tu carga actual antes de recoger otra.',
+    warnNoLoadTitle:  'No hay carga para entregar',
+    warnNoLoadBody:   'Recoge una carga antes de entregar.',
+    // End shift
     endTitle: '¿Terminar turno?', endSubtitle: 'Estás a punto de terminar tu turno.\nEsto no se puede deshacer.',
-    endShiftTimeLabel: 'TIEMPO DEL TURNO', endLoadsLabel: 'CARGAS HOY',
+    endShiftTimeLabel: 'TIEMPO DEL TURNO', endCompletedLabel: 'COMPLETADAS',
     endBtnLabel: 'TERMINAR TURNO', cancelBtnLabel: 'CANCELAR',
-    back: 'Atrás', truckFound: 'Camión encontrado',
-    startingShift: 'Iniciando turno…', uploading: 'Subiendo…', photoSaved: 'Foto guardada.',
+    back: 'Atrás', uploading: 'Subiendo…', startingShift: 'Iniciando turno…',
     endingShift: 'Terminando turno…', shiftEnded: '¡Turno terminado. Buen trabajo!',
   }
 };
 const t = (k) => T[lang][k] || T.en[k] || k;
+const truckTypeLabel = (code) => code ? t('tt_' + code) || code : '';
 
 // ══════════════════════════════════════════════════════════════════
 // SCREEN ROUTING
@@ -664,15 +659,15 @@ function showScreen(id) {
 function goBack(id) { showScreen(id); }
 
 // ══════════════════════════════════════════════════════════════════
-// TOAST
+// TOAST (centered, configurable duration)
 // ══════════════════════════════════════════════════════════════════
 let toastTimer;
-function toast(msg) {
+function toast(msg, durationMs) {
   const el = document.getElementById('toast');
   el.textContent = msg;
   el.classList.add('show');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+  toastTimer = setTimeout(() => el.classList.remove('show'), durationMs || 2200);
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -681,27 +676,24 @@ function toast(msg) {
 function applyTranslations() {
   const m = {
     'lang-welcome': 'welcome', 'lang-select-prompt': 'selectLang', 'lang-privacy': 'privacy',
-    'find-back': 'back', 'find-title': 'findTitle', 'find-subtitle': 'findSubtitle',
-    'find-enter-title': 'findEnterTitle', 'find-enter-desc': 'findEnterDesc',
-    'find-photo-title': 'findPhotoTitle', 'find-photo-desc': 'findPhotoDesc',
-    'find-help-label': 'needHelp',
-    'plate-back': 'back', 'plate-title': 'plateTitle', 'plate-subtitle': 'plateSubtitle',
-    'plate-label': 'plateLabel', 'plate-continue-label': 'plateContinue', 'plate-or': 'or',
-    'plate-switch-photo': 'plateSwitchPhoto', 'plate-help-label': 'needHelp',
-    'photo-back': 'back', 'photo-title': 'photoTitle', 'photo-subtitle': 'photoSubtitle',
-    'photo-hint-text': 'photoHint', 'photo-continue-label': 'photoContinue',
-    'photo-or': 'or', 'photo-switch-plate': 'photoSwitchPlate',
-    'dash-shift-badge': 'shiftBadge', 'dash-truck-label': 'truckLabel',
-    'dash-shift-time-label': 'shiftTimeLabel', 'dash-loads-label': 'loadsLabel',
+    // Intake
+    'intake-back': 'back', 'intake-title': 'intakeTitle', 'intake-subtitle': 'intakeSubtitle',
+    'intake-name-label': 'intakeNameLabel', 'intake-company-label': 'intakeCompanyLabel',
+    'intake-trucktype-label': 'intakeTruckTypeLabel',
+    'intake-continue-label': 'intakeContinue', 'intake-help-label': 'needHelp',
+    // Truck photo
+    'truckphoto-title': 'truckPhotoTitle', 'truckphoto-hint': 'truckPhotoHint',
+    'truckphoto-take-label': 'truckTakeBtn', 'truckphoto-skip-btn': 'truckSkipBtn',
+    // Dashboard
+    'dash-shift-badge': 'shiftBadge', 'dash-driver-label': 'driverLabel',
+    'dash-timer-label': 'timerLabel',
+    'dash-intransit-label': 'inTransitLabel', 'dash-completed-label': 'completedLabel',
     'dash-pickup-label': 'pickupLabel', 'dash-dropoff-label': 'dropoffLabel',
     'dash-endshift-label': 'endshiftLabel',
-    'confirm-location-label': 'locationCaptured',
-    'confirm-add-photo-btn': 'addPhotoBtnLabel', 'confirm-ok-btn': 'ok',
-    'addphoto-back': 'back', 'addphoto-title': 'addPhotoTitle',
-    'addphoto-subtitle': 'addPhotoSubtitle', 'addphoto-hint': 'addPhotoHint',
-    'addphoto-take-btn': 'takePhotoBtnLabel', 'addphoto-skip-btn': 'skipBtnLabel',
+    // Confirmation / warn / end
+    'confirm-ok-btn': 'ok', 'warn-ok-btn': 'ok',
     'end-title': 'endTitle', 'end-shift-time-label': 'endShiftTimeLabel',
-    'end-loads-label': 'endLoadsLabel', 'end-btn-label': 'endBtnLabel',
+    'end-completed-label': 'endCompletedLabel', 'end-btn-label': 'endBtnLabel',
     'end-cancel-btn': 'cancelBtnLabel',
   };
   Object.entries(m).forEach(([id, key]) => {
@@ -711,6 +703,9 @@ function applyTranslations() {
   // End subtitle has \n
   const endSub = document.getElementById('end-subtitle');
   if (endSub) endSub.innerHTML = t('endSubtitle').replace('\n','<br>');
+  // Truck type dropdown placeholder
+  const ttPh = document.getElementById('trucktype-placeholder');
+  if (ttPh) ttPh.textContent = t('trucktypePlaceholder');
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -719,156 +714,138 @@ function applyTranslations() {
 function selectLanguage(l) {
   lang = l;
   applyTranslations();
-  showScreen('screen-find');
+  showScreen('screen-intake');
 }
 
 // ══════════════════════════════════════════════════════════════════
-// PLATE INPUT
+// INTAKE FORM
 // ══════════════════════════════════════════════════════════════════
-function onPlateInput(input) {
-  input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
-  const btn = document.getElementById('plate-continue-btn');
-  if (input.value.length >= 4) {
-    btn.disabled = false; btn.style.opacity = '1';
+function onIntakeChange() {
+  const name = document.getElementById('driverNameInput').value.trim();
+  const company = document.getElementById('companyInput').value.trim();
+  const tt = document.getElementById('truckTypeSelect').value;
+  const ok = name.length > 0 && company.length > 0 && tt.length > 0;
+  const btn = document.getElementById('intake-continue-btn');
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.4';
+}
+
+function submitIntake() {
+  const name = document.getElementById('driverNameInput').value.trim();
+  const company = document.getElementById('companyInput').value.trim();
+  const tt = document.getElementById('truckTypeSelect').value;
+  if (!name || !company || !tt) return;
+  driverName = name;
+  companyName = company;
+  truckType = tt;
+  truckPhotoFile = null;
+  document.getElementById('truckPhotoPreview').src = '';
+  document.getElementById('truckPhotoPreview').style.display = 'none';
+  document.getElementById('truckphoto-take-label').textContent = t('truckTakeBtn');
+  showScreen('screen-truck-photo');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// TRUCK PHOTO (optional)
+// ══════════════════════════════════════════════════════════════════
+function onTruckPhoto(input) {
+  if (!input.files[0]) return;
+  truckPhotoFile = input.files[0];
+  const preview = document.getElementById('truckPhotoPreview');
+  preview.src = URL.createObjectURL(truckPhotoFile);
+  preview.style.display = 'block';
+  // Flip the green button label to "USE PHOTO" once a photo is selected.
+  document.getElementById('truckphoto-take-label').textContent = t('truckUseBtn');
+}
+
+function onTakeOrUseTruckPhoto() {
+  if (truckPhotoFile) {
+    // Already have a photo → upload it then enter dashboard
+    finishTruckPhoto(true);
   } else {
-    btn.disabled = true; btn.style.opacity = '0.4';
+    // Open camera picker
+    document.getElementById('truckPhotoInput').click();
   }
 }
 
-// ══════════════════════════════════════════════════════════════════
-// PLATE PHOTO
-// ══════════════════════════════════════════════════════════════════
-function onPlatePhoto(input) {
-  if (!input.files[0]) return;
-  platePhotoFile = input.files[0];
-  const preview = document.getElementById('platePhotoPreview');
-  preview.src = URL.createObjectURL(platePhotoFile);
-  preview.style.display = 'block';
-  const btn = document.getElementById('photo-continue-btn');
-  btn.disabled = false; btn.style.opacity = '1';
+function skipTruckPhoto() {
+  finishTruckPhoto(false);
 }
 
 // ══════════════════════════════════════════════════════════════════
-// GEOLOCATION
-// ══════════════════════════════════════════════════════════════════
-function getLocation() {
-  return new Promise((resolve) => {
-    if (!navigator.geolocation) return resolve(null);
-    navigator.geolocation.getCurrentPosition(
-      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      ()  => resolve(null),
-      { timeout: 5000, maximumAge: 30000 }
-    );
-  });
-}
-
-// ══════════════════════════════════════════════════════════════════
-// DEVICE TOKEN  (persisted UUID = "session key")
+// DEVICE TOKEN (persisted UUID = "session key")
 // ══════════════════════════════════════════════════════════════════
 function getDeviceToken() {
-  let t = localStorage.getItem('jse_device_token');
-  if (!t) { t = crypto.randomUUID(); localStorage.setItem('jse_device_token', t); }
-  return t;
+  let tok = localStorage.getItem('jse_device_token');
+  if (!tok) { tok = crypto.randomUUID(); localStorage.setItem('jse_device_token', tok); }
+  return tok;
 }
 
 // ══════════════════════════════════════════════════════════════════
-// FIND TRUCK BY PLATE SUFFIX
+// START SESSION + optional truck photo upload
 // ══════════════════════════════════════════════════════════════════
-async function findTruckByPlate(suffix) {
-  const norm = suffix.toUpperCase().replace(/\s/g,'');
-  const { data, error } = await db
-    .from('trucks')
-    .select('id, plate, display_name')
-    .ilike('plate', `%${norm}`)
-    .eq('active', true)
-    .limit(5);
-  if (error || !data || data.length === 0) return null;
-  // Prefer exact suffix match
-  const exact = data.find(r => r.plate.toUpperCase().endsWith(norm));
-  return exact || data[0];
-}
-
-// ══════════════════════════════════════════════════════════════════
-// START SESSION
-// ══════════════════════════════════════════════════════════════════
-async function startSession(matchedTruck, plateInput, platePhotoUrl) {
-  const deviceToken = getDeviceToken();
-  const { data, error } = await db.from('driver_sessions').insert({
-    language:         lang,
-    plate_input:      plateInput || null,
-    plate_photo_url:  platePhotoUrl || null,
-    matched_truck_id: matchedTruck ? matchedTruck.id : null,
-    device_token:     deviceToken,
-    started_at:       new Date().toISOString(),
-  }).select().single();
-  if (error) throw error;
-  return data;
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SUBMIT PLATE (text entry flow)
-// ══════════════════════════════════════════════════════════════════
-async function submitPlate() {
-  const input = document.getElementById('plateInput').value.trim();
-  if (input.length < 4) return;
-  const btn = document.getElementById('plate-continue-btn');
+async function finishTruckPhoto(usePhoto) {
+  const btn = document.getElementById('truckphoto-take-btn');
   btn.classList.add('loading');
+  const origHtml = btn.innerHTML;
   btn.innerHTML = `<div class="spinner"></div>`;
-
   try {
-    const coords = await getLocation();
-    lastCoords = coords;
-
-    // Try to match a truck — but always allow the driver through regardless
-    const found = await findTruckByPlate(input);
-    truck = found || { id: null, plate: input.toUpperCase(), display_name: '' };
-
-    session = await startSession(found || null, input, null);
-    saveLocal();
-    enterDashboard();
-  } catch(e) {
-    toast('Error: ' + e.message);
-    btn.classList.remove('loading');
-    btn.innerHTML = `<span id="plate-continue-label">${t('plateContinue')}</span>`;
-  }
-}
-
-// ══════════════════════════════════════════════════════════════════
-// SUBMIT PLATE PHOTO
-// ══════════════════════════════════════════════════════════════════
-async function submitPlatePhoto() {
-  if (!platePhotoFile) return;
-  const btn = document.getElementById('photo-continue-btn');
-  btn.classList.add('loading');
-  btn.innerHTML = `<div class="spinner"></div>`;
-
-  try {
-    toast(t('uploading'));
-    const coords = await getLocation();
-    lastCoords = coords;
-
-    // Upload plate photo
-    const ext  = platePhotoFile.name.split('.').pop() || 'jpg';
-    const path = `plates/${getDeviceToken()}_${Date.now()}.${ext}`;
-    const { error: upErr } = await db.storage.from('driver-photos').upload(path, platePhotoFile, { contentType: platePhotoFile.type });
     let photoUrl = null;
-    if (!upErr) {
-      const { data: pubData } = db.storage.from('driver-photos').getPublicUrl(path);
-      photoUrl = pubData.publicUrl;
+    if (usePhoto && truckPhotoFile) {
+      toast(t('uploading'));
+      try {
+        const ext  = (truckPhotoFile.name && truckPhotoFile.name.split('.').pop()) || 'jpg';
+        const path = `trucks/${getDeviceToken()}_${Date.now()}.${ext}`;
+        const { error: upErr } = await db.storage.from('driver-photos').upload(path, truckPhotoFile, { contentType: truckPhotoFile.type });
+        if (!upErr) {
+          const { data: pubData } = db.storage.from('driver-photos').getPublicUrl(path);
+          photoUrl = pubData.publicUrl;
+        }
+      } catch (_) { /* storage failure is non-fatal — session still starts */ }
     }
 
     toast(t('startingShift'));
-    // With photo we don't do a DB lookup — plate_input is null, matched_truck_id is null
-    // Driver may be matched manually by dispatch later
-    session = await startSession(null, null, photoUrl);
-    truck = { id: null, plate: '—', display_name: '' };
-    saveLocal();
-    enterDashboard();
-  } catch(e) {
-    toast('Error: ' + e.message);
+    // 2026-05-26: schema migration driver_sessions_add_driver_name_company_truck_type
+    // added driver_name, company, truck_type. Reusing existing plate_photo_url
+    // column for the optional truck photo URL (semantic mismatch but the
+    // schema doesn't carry a dedicated truck_photo_url column yet).
+    session = await startSession({
+      driverName, company: companyName, truckType,
+      truckPhotoUrl: photoUrl,
+    });
+
+    if (usePhoto && photoUrl) {
+      // Brief centered toast confirming the photo saved, then dashboard.
+      toast(t('photoSaved'), 1500);
+      saveLocal();
+      setTimeout(() => enterDashboard(), 800);
+    } else {
+      saveLocal();
+      enterDashboard();
+    }
+  } catch (e) {
+    toast('Error: ' + (e && e.message ? e.message : 'unknown'));
     btn.classList.remove('loading');
-    btn.innerHTML = `<span id="photo-continue-label">${t('photoContinue')}</span>`;
+    btn.innerHTML = origHtml;
   }
+}
+
+async function startSession(meta) {
+  const deviceToken = getDeviceToken();
+  const row = {
+    language:         lang,
+    driver_name:      meta.driverName || null,
+    company:          meta.company || null,
+    truck_type:       meta.truckType || null,
+    plate_input:      null,
+    plate_photo_url:  meta.truckPhotoUrl || null,
+    matched_truck_id: null,
+    device_token:     deviceToken,
+    started_at:       new Date().toISOString(),
+  };
+  const { data, error } = await db.from('driver_sessions').insert(row).select().single();
+  if (error) throw error;
+  return data;
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -876,41 +853,87 @@ async function submitPlatePhoto() {
 // ══════════════════════════════════════════════════════════════════
 function enterDashboard() {
   applyTranslations();
-  document.getElementById('dash-plate').textContent = truck ? truck.plate : '—';
-  document.getElementById('dash-truck-name').textContent = truck ? (truck.display_name || '') : '';
-  loadsToday = 0;
-  updateLoadsDisplay();
-  startTimer();
+  document.getElementById('dash-driver-name').textContent = (driverName || '—').toUpperCase();
+  const metaParts = [companyName, truckTypeLabel(truckType)].filter(Boolean);
+  document.getElementById('dash-driver-meta').textContent = metaParts.join(' · ');
+  updateBadges();
+  refreshTimer();
   showScreen('screen-dash');
 }
 
-function startTimer() {
-  clearInterval(timerInterval);
-  timerInterval = setInterval(updateTimer, 10000);
-  updateTimer();
+function updateBadges() {
+  document.getElementById('dash-intransit').textContent = inTransit;
+  document.getElementById('dash-completed').textContent = completedCount;
+  const endC = document.getElementById('end-completed');
+  if (endC) endC.textContent = completedCount;
 }
 
-function updateTimer() {
-  if (!session) return;
-  const ms  = Date.now() - new Date(session.started_at).getTime();
-  const hrs = ms / 3600000;
-  document.getElementById('dash-shift-time').textContent = hrs.toFixed(1) + 'h';
-  document.getElementById('end-shift-time').textContent  = hrs.toFixed(1) + 'h';
-}
-
-function updateLoadsDisplay() {
-  document.getElementById('dash-loads').textContent = loadsToday;
-  document.getElementById('end-loads').textContent  = loadsToday;
+// HH:MM:SS pickup timer — ticks every second, anchored to lastPickupAt.
+// When inTransit === 0 (no load active), digits freeze at 00:00:00 + .idle.
+function refreshTimer() {
+  clearInterval(pickupTimerInt);
+  const digits = document.getElementById('dash-timer-digits');
+  if (!digits) return;
+  const paint = () => {
+    if (!lastPickupAt || inTransit < 1) {
+      digits.textContent = '00:00:00';
+      digits.classList.add('idle');
+      return;
+    }
+    digits.classList.remove('idle');
+    const ms = Math.max(0, Date.now() - new Date(lastPickupAt).getTime());
+    const totalSec = Math.floor(ms / 1000);
+    const hh = String(Math.floor(totalSec / 3600)).padStart(2, '0');
+    const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
+    const ss = String(totalSec % 60).padStart(2, '0');
+    digits.textContent = `${hh}:${mm}:${ss}`;
+  };
+  paint();
+  if (inTransit >= 1 && lastPickupAt) {
+    pickupTimerInt = setInterval(paint, 1000);
+  }
+  // Mirror shift time onto the End-Shift confirmation screen (hours, 1 decimal).
+  if (session) {
+    const ms  = Date.now() - new Date(session.started_at).getTime();
+    const hrs = ms / 3600000;
+    const endT = document.getElementById('end-shift-time');
+    if (endT) endT.textContent = hrs.toFixed(1) + 'h';
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
-// LOG EVENT (pickup / dropoff)
+// PICKUP / DROPOFF GATING + LOGGING
 // ══════════════════════════════════════════════════════════════════
+function onPickupTap() {
+  if (inTransit >= 1) {
+    showWarn(t('warnAlreadyTitle'), t('warnAlreadyBody'));
+    return;
+  }
+  logEvent('pickup_load');
+}
+
+function onDropoffTap() {
+  if (inTransit <= 0) {
+    showWarn(t('warnNoLoadTitle'), t('warnNoLoadBody'));
+    return;
+  }
+  logEvent('dropoff_load');
+}
+
+function showWarn(title, body) {
+  document.getElementById('warn-title').textContent = title;
+  document.getElementById('warn-body').textContent = body;
+  document.getElementById('warn-ok-btn').textContent = t('ok');
+  showScreen('screen-warn');
+}
+
 async function logEvent(eventType) {
   if (!session) return;
-  const coords = await getLocation();
-  lastCoords = coords;
   const now = new Date().toISOString();
+  // 2026-05-26: geolocation removed from UI copy. The fetch + columns
+  // stay so dispatcher-side analytics still get coords when the browser
+  // grants permission, but no longer mentioned to the driver.
+  const coords = await maybeGetCoords();
 
   const { data, error } = await db.from('truck_events').insert({
     session_id: session.id,
@@ -924,113 +947,54 @@ async function logEvent(eventType) {
 
   lastEventId   = data.id;
   lastEventType = eventType;
-  if (eventType === 'dropoff_load') loadsToday++;
-  updateLoadsDisplay();
+  if (eventType === 'pickup_load') {
+    inTransit = 1;
+    lastPickupAt = now;
+  } else if (eventType === 'dropoff_load') {
+    inTransit = 0;
+    lastPickupAt = null;
+    completedCount += 1;
+  }
+  updateBadges();
+  refreshTimer();
   saveLocal();
-  showConfirmation(eventType, now, coords);
+  showConfirmation(eventType, now);
 }
 
-function showConfirmation(eventType, ts, coords) {
+function showConfirmation(eventType, ts) {
   const isPickup = eventType === 'pickup_load';
   const icon = document.getElementById('confirm-icon');
   icon.className = 'confirm-icon ' + (isPickup ? 'pickup' : 'dropoff');
   icon.innerHTML = isPickup
     ? '<span style="font-size:40px;color:var(--green);">↑</span>'
     : '<span style="font-size:40px;color:var(--red);">↓</span>';
-
-  document.getElementById('confirm-title').textContent = isPickup ? t('confirmPickupTitle') : t('confirmDropoffTitle');
-
+  document.getElementById('confirm-title').textContent =
+    isPickup ? t('confirmPickupTitle') : t('confirmDropoffTitle');
   const d = new Date(ts);
   document.getElementById('confirm-time').textContent =
     d.toLocaleTimeString(lang === 'es' ? 'es-MX' : 'en-US', { hour:'numeric', minute:'2-digit' });
-
-  const locRow = document.getElementById('confirm-location-row');
-  if (coords) {
-    locRow.style.display = 'flex';
-    document.getElementById('confirm-location-dot').className = 'location-dot' + (isPickup ? '' : ' red');
-    document.getElementById('confirm-location-label').textContent = t('locationCaptured');
-    document.getElementById('confirm-coords').textContent =
-      `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`;
-  } else {
-    locRow.style.display = 'none';
-  }
-
-  document.getElementById('confirm-add-photo-btn').textContent = t('addPhotoBtnLabel');
   document.getElementById('confirm-ok-btn').textContent = t('ok');
   showScreen('screen-confirm');
 }
 
-// ══════════════════════════════════════════════════════════════════
-// ADD PHOTO (optional)
-// ══════════════════════════════════════════════════════════════════
-function showAddPhoto() {
-  document.getElementById('eventPhotoPreview').style.display = 'none';
-  document.getElementById('eventPhotoPreview').src = '';
-  eventPhotoFile = null;
-  showScreen('screen-add-photo');
+// Geolocation kept for backend analytics — silent, no UI mention.
+function maybeGetCoords() {
+  return new Promise((resolve) => {
+    if (!navigator.geolocation) return resolve(null);
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      ()  => resolve(null),
+      { timeout: 5000, maximumAge: 30000 }
+    );
+  });
 }
-
-function onEventPhoto(input) {
-  if (!input.files[0]) return;
-  eventPhotoFile = input.files[0];
-  const preview = document.getElementById('eventPhotoPreview');
-  preview.src = URL.createObjectURL(eventPhotoFile);
-  preview.style.display = 'block';
-  document.getElementById('take-photo-btn').innerHTML =
-    `📷 <span>${t('takePhotoBtnLabel')}</span>`;
-}
-
-async function skipPhoto() { showScreen('screen-dash'); }
-
-async function saveEventPhoto() {
-  if (!eventPhotoFile || !lastEventId || !session) { showScreen('screen-dash'); return; }
-  const btn = document.getElementById('take-photo-btn');
-  btn.classList.add('loading');
-  btn.innerHTML = `<div class="spinner"></div>`;
-
-  try {
-    const coords = await getLocation();
-    const ext  = eventPhotoFile.name.split('.').pop() || 'jpg';
-    const path = `events/${lastEventId}_${Date.now()}.${ext}`;
-    const { error: upErr } = await db.storage.from('driver-photos').upload(path, eventPhotoFile, { contentType: eventPhotoFile.type });
-    if (upErr) throw upErr;
-    const { data: pubData } = db.storage.from('driver-photos').getPublicUrl(path);
-    const photoUrl = pubData.publicUrl;
-
-    await db.from('event_photos').insert({
-      event_id:   lastEventId,
-      session_id: session.id,
-      photo_url:  photoUrl,
-      latitude:   coords ? coords.lat : null,
-      longitude:  coords ? coords.lng : null,
-      photo_at:   new Date().toISOString(),
-    });
-    await db.from('truck_events').update({ photo_url: photoUrl }).eq('id', lastEventId);
-
-    toast(t('photoSaved'));
-    showScreen('screen-dash');
-  } catch(e) {
-    toast('Upload error: ' + e.message);
-    btn.classList.remove('loading');
-    btn.innerHTML = `📷 <span>${t('takePhotoBtnLabel')}</span>`;
-  }
-}
-
-// Take Photo button: open camera if no photo yet, save if photo already selected
-document.getElementById('take-photo-btn').addEventListener('click', async function() {
-  if (eventPhotoFile) {
-    await saveEventPhoto();
-  } else {
-    document.getElementById('eventPhotoInput').click();
-  }
-});
 
 // ══════════════════════════════════════════════════════════════════
 // END SHIFT
 // ══════════════════════════════════════════════════════════════════
 function showEndShift() {
-  updateTimer();
-  updateLoadsDisplay();
+  refreshTimer();
+  updateBadges();
   applyTranslations();
   showScreen('screen-end');
 }
@@ -1042,10 +1006,9 @@ async function confirmEndShift() {
   btn.innerHTML = `<div class="spinner"></div>`;
 
   try {
-    const coords = await getLocation();
+    const coords = await maybeGetCoords();
     const now = new Date().toISOString();
 
-    // Log end_shift event
     await db.from('truck_events').insert({
       session_id: session.id,
       event_type: 'end_shift',
@@ -1054,15 +1017,14 @@ async function confirmEndShift() {
       longitude:  coords ? coords.lng : null,
     });
 
-    // Close session
     await db.from('driver_sessions').update({ ended_at: now }).eq('id', session.id);
 
-    clearInterval(timerInterval);
+    clearInterval(pickupTimerInt);
     clearLocal();
     toast(t('shiftEnded'));
     setTimeout(() => showScreen('screen-lang'), 1200);
   } catch(e) {
-    toast('Error: ' + e.message);
+    toast('Error: ' + (e && e.message ? e.message : 'unknown'));
     btn.classList.remove('loading');
     btn.innerHTML = `<span>${t('endBtnLabel')}</span>`;
   }
@@ -1072,12 +1034,17 @@ async function confirmEndShift() {
 // SESSION PERSISTENCE (localStorage)
 // ══════════════════════════════════════════════════════════════════
 function saveLocal() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ session, truck, lang, loadsToday }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    session, lang, driverName, companyName, truckType,
+    inTransit, completedCount, lastPickupAt,
+  }));
 }
 
 function clearLocal() {
   localStorage.removeItem(STORAGE_KEY);
-  session = null; truck = null; loadsToday = 0;
+  session = null;
+  driverName = ''; companyName = ''; truckType = '';
+  inTransit = 0; completedCount = 0; lastPickupAt = null;
 }
 
 function loadLocal() {
@@ -1086,10 +1053,14 @@ function loadLocal() {
     if (!raw) return false;
     const d = JSON.parse(raw);
     if (!d.session || !d.session.id || d.session.ended_at) return false;
-    session    = d.session;
-    truck      = d.truck;
-    lang       = d.lang || 'en';
-    loadsToday = d.loadsToday || 0;
+    session        = d.session;
+    lang           = d.lang || 'en';
+    driverName     = d.driverName || '';
+    companyName    = d.companyName || '';
+    truckType      = d.truckType || '';
+    inTransit      = d.inTransit || 0;
+    completedCount = d.completedCount || 0;
+    lastPickupAt   = d.lastPickupAt || null;
     return true;
   } catch { return false; }
 }
@@ -1098,26 +1069,34 @@ function loadLocal() {
 // INIT
 // ══════════════════════════════════════════════════════════════════
 async function init() {
-  // Check for saved session
   if (loadLocal()) {
-    // Verify session is still open in DB
     try {
       const { data } = await db.from('driver_sessions')
-        .select('id, started_at, ended_at, matched_truck_id, language')
+        .select('id, started_at, ended_at, language, driver_name, company, truck_type')
         .eq('id', session.id).single();
       if (data && !data.ended_at) {
-        lang = data.language || lang;
-        session = { ...session, ...data };
+        lang        = data.language || lang;
+        driverName  = data.driver_name || driverName;
+        companyName = data.company || companyName;
+        truckType   = data.truck_type || truckType;
+        session     = { ...session, ...data };
         applyTranslations();
 
-        // Reload today's load count
-        const today = new Date(); today.setHours(0,0,0,0);
+        // Reload event counters from the truck_events row history.
         const { data: evts } = await db.from('truck_events')
-          .select('id')
+          .select('id, event_type, event_at')
           .eq('session_id', session.id)
-          .eq('event_type', 'dropoff_load')
-          .gte('event_at', today.toISOString());
-        loadsToday = evts ? evts.length : loadsToday;
+          .order('event_at', { ascending: true });
+        if (Array.isArray(evts)) {
+          let pickups = 0, drops = 0, mostRecentPickup = null;
+          for (const e of evts) {
+            if (e.event_type === 'pickup_load') { pickups += 1; mostRecentPickup = e.event_at; }
+            else if (e.event_type === 'dropoff_load') { drops += 1; }
+          }
+          inTransit = Math.max(0, pickups - drops);
+          completedCount = drops;
+          lastPickupAt = inTransit >= 1 ? mostRecentPickup : null;
+        }
 
         enterDashboard();
         return;
@@ -1147,8 +1126,8 @@ const manifest = {
   }]
 };
 const blob = new Blob([JSON.stringify(manifest)], {type:'application/json'});
-document.getElementById('manifest-link').href = URL.createObjectURL(blob);
+const link = document.getElementById('manifest-link');
+if (link) link.href = URL.createObjectURL(blob);
 </script>
 </body>
 </html>
-                                                                                                                                                                                                                                                                                                         
