@@ -218,6 +218,36 @@
       gap: 6px; font-size: 12px; color: var(--muted); padding: 12px 0 0;
     }
 
+    /* ─── Global footer (visible on every screen) ───────────── */
+    #app-footer {
+      position: fixed; left: 0; right: 0; bottom: 0;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      padding: 8px 16px 10px;
+      z-index: 50;
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+      font-size: 12px; color: var(--muted); text-align: center;
+      box-shadow: 0 -8px 16px rgba(0,0,0,0.35);
+    }
+    #footer-msg { line-height: 1.35; max-width: 340px; }
+    .footer-actions { display: flex; gap: 8px; }
+    .footer-link {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 6px 12px; border-radius: 14px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--green); text-decoration: none;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.3px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .footer-link:active { background: var(--surface2); }
+    .footer-link .footer-link-icon { font-size: 13px; line-height: 1; }
+    /* Reserve room at the bottom of every scrolling screen so the fixed
+       footer never covers the last action button. The dashboard stack
+       (driver card + timer + stats + 3 stacked buttons) is the tallest
+       layout; 140px clears the 88px-tall footer plus an iOS safe-area
+       allowance. */
+    .content { padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px)); }
+
     /* ─── End shift stats ───────────────────────────────────── */
     .end-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
 
@@ -340,11 +370,6 @@
       <button class="btn btn-green" id="intake-continue-btn" onclick="submitIntake()" disabled style="opacity:0.4;">
         <span id="intake-continue-label">CONTINUE</span>
       </button>
-      <div class="gap-24"></div>
-      <div style="text-align:center;">
-        <span style="font-size:13px; color:var(--muted);">? <span id="intake-help-label">Need help? Call dispatcher</span></span><br>
-        <a href="tel:7205550198" style="color:var(--green);font-size:14px;font-weight:600;text-decoration:none;">(720) 555-0198</a>
-      </div>
     </div>
   </div>
 
@@ -528,6 +553,23 @@
 
 </div><!-- #app -->
 
+<!-- 2026-05-26: Global footer — fixed-position, visible on every screen.
+     Replaces the per-screen "Need help? Call dispatcher" block that was
+     previously hardcoded only on the intake screen. -->
+<footer id="app-footer" aria-label="Support contact">
+  <div id="footer-msg">Having issues? Call/text Jobsite Exchange (614) 582-5642</div>
+  <div class="footer-actions">
+    <a class="footer-link" href="tel:+16145825642">
+      <span class="footer-link-icon" aria-hidden="true">📞</span>
+      <span id="footer-call-label">Call</span>
+    </a>
+    <a class="footer-link" href="sms:+16145825642">
+      <span class="footer-link-icon" aria-hidden="true">💬</span>
+      <span id="footer-text-label">Text</span>
+    </a>
+  </div>
+</footer>
+
 <div id="toast"></div>
 
 <script>
@@ -567,7 +609,10 @@ const T = {
     intakeTitle: 'Driver Info', intakeSubtitle: 'Tell us who you are.',
     intakeNameLabel: 'Driver Name', intakeCompanyLabel: 'Company', intakeTruckTypeLabel: 'Truck Type',
     trucktypePlaceholder: 'Select truck type…',
-    intakeContinue: 'CONTINUE', needHelp: 'Need help? Call dispatcher',
+    intakeContinue: 'CONTINUE',
+    // Global footer
+    footerMsg: 'Having issues? Call/text Jobsite Exchange (614) 582-5642',
+    footerCall: 'Call', footerText: 'Text',
     // Truck photo
     truckPhotoTitle: 'Take a photo of your truck (optional)',
     truckPhotoHint: 'Tap to open camera',
@@ -602,7 +647,10 @@ const T = {
     intakeTitle: 'Información del conductor', intakeSubtitle: 'Dinos quién eres.',
     intakeNameLabel: 'Nombre del conductor', intakeCompanyLabel: 'Compañía', intakeTruckTypeLabel: 'Tipo de camión',
     trucktypePlaceholder: 'Selecciona tipo de camión…',
-    intakeContinue: 'CONTINUAR', needHelp: '¿Necesitas ayuda? Llama al despachador',
+    intakeContinue: 'CONTINUAR',
+    // Global footer
+    footerMsg: '¿Problemas? Llama o envía un mensaje a Jobsite Exchange (614) 582-5642',
+    footerCall: 'Llamar', footerText: 'Mensaje',
     // Truck photo
     truckPhotoTitle: 'Tomar una foto de tu camión (opcional)',
     truckPhotoHint: 'Toca para abrir la cámara',
@@ -668,7 +716,11 @@ function applyTranslations() {
     'intake-back': 'back', 'intake-title': 'intakeTitle', 'intake-subtitle': 'intakeSubtitle',
     'intake-name-label': 'intakeNameLabel', 'intake-company-label': 'intakeCompanyLabel',
     'intake-trucktype-label': 'intakeTruckTypeLabel',
-    'intake-continue-label': 'intakeContinue', 'intake-help-label': 'needHelp',
+    'intake-continue-label': 'intakeContinue',
+    // Global footer (rendered outside #app)
+    'footer-msg': 'footerMsg',
+    'footer-call-label': 'footerCall',
+    'footer-text-label': 'footerText',
     // Truck photo
     'truckphoto-title': 'truckPhotoTitle', 'truckphoto-hint': 'truckPhotoHint',
     'truckphoto-take-label': 'truckTakeBtn', 'truckphoto-skip-btn': 'truckSkipBtn',
