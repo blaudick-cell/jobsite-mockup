@@ -57,19 +57,18 @@
     .logo-text { font-size: 18px; font-weight: 700; letter-spacing: -0.3px; }
     .logo-text em { font-style: normal; color: var(--green); }
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-    .shift-badge {
-      display: flex; align-items: center; gap: 6px;
-      background: rgba(132,204,22,0.12); border: 1px solid rgba(132,204,22,0.3);
-      border-radius: 20px; padding: 4px 10px; font-size: 11px;
-      font-weight: 700; letter-spacing: 0.5px; color: var(--green);
+    /* INFO button — replaces the prior SHIFT ACTIVE pulse badge.
+       Matches the footer-link chip silhouette for design consistency. */
+    .info-btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--green);
+      border-radius: 20px; padding: 6px 12px;
+      font-size: 12px; font-weight: 700; letter-spacing: 0.5px;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
     }
-    .shift-badge .dot {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--green); animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%,100% { opacity: 1; } 50% { opacity: 0.4; }
-    }
+    .info-btn:active { background: var(--surface2); }
+    .info-btn .info-icon { font-size: 13px; line-height: 1; }
     /* ─── Content wrapper ──────────────────────────────────── */
     .content {
       flex: 1; display: flex; flex-direction: column;
@@ -251,6 +250,59 @@
     /* ─── End shift stats ───────────────────────────────────── */
     .end-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 20px 0; }
 
+    /* ─── Info modal (how-to-use sheet) ─────────────────────── */
+    #info-modal {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+      display: none; align-items: center; justify-content: center;
+      z-index: 200; padding: 20px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #info-modal.show { display: flex; }
+    .info-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 22px 22px 18px;
+      max-width: 360px; width: 100%;
+      max-height: calc(100vh - 40px); overflow-y: auto;
+      box-shadow: 0 24px 48px rgba(0,0,0,0.55);
+      position: relative;
+    }
+    .info-close {
+      position: absolute; top: 10px; right: 10px;
+      background: transparent; border: none; color: var(--muted);
+      font-size: 22px; line-height: 1; cursor: pointer;
+      width: 32px; height: 32px; border-radius: 8px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .info-close:active { background: var(--surface2); color: var(--text); }
+    .info-card h2 {
+      font-size: 19px; font-weight: 800; letter-spacing: -0.3px;
+      padding-right: 32px; margin-bottom: 14px;
+    }
+    .info-steps { display: flex; flex-direction: column; gap: 12px; }
+    .info-step {
+      display: flex; align-items: flex-start; gap: 10px;
+      padding: 10px 12px; background: var(--surface2);
+      border-radius: 10px; border: 1px solid var(--border);
+    }
+    .info-step .info-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      margin-top: 4px; flex-shrink: 0;
+    }
+    .info-step .info-dot.green  { background: var(--green); }
+    .info-step .info-dot.orange { background: var(--orange); }
+    .info-step .info-dot.red    { background: var(--red); }
+    .info-step-text { flex: 1; min-width: 0; }
+    .info-step-title { font-size: 14px; font-weight: 700; color: var(--text); }
+    .info-step-body  { font-size: 13px; color: var(--muted); margin-top: 3px; line-height: 1.4; }
+    .info-ok {
+      display: block; width: 100%; margin-top: 16px;
+      height: 48px; border-radius: 10px; border: none;
+      background: var(--green); color: #111;
+      font-size: 15px; font-weight: 700; letter-spacing: 0.2px;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .info-ok:active { opacity: 0.85; }
+
     /* ─── Toast (centered) ──────────────────────────────────── */
     #toast {
       position: fixed; top: 50%; left: 50%;
@@ -411,7 +463,10 @@
       <div class="logo-icon"><span>J</span></div>
       <div class="logo-text">Jobsite<em>Exchange</em></div>
       <div class="header-right">
-        <div class="shift-badge"><div class="dot"></div><span id="dash-shift-badge">SHIFT ACTIVE</span></div>
+        <button class="info-btn" id="info-btn" type="button" onclick="showInfo()" aria-haspopup="dialog" aria-controls="info-modal">
+          <span class="info-icon" aria-hidden="true">ⓘ</span>
+          <span id="info-btn-label">INFO</span>
+        </button>
       </div>
     </div>
     <div class="content">
@@ -586,6 +641,41 @@
 
 </div><!-- #app -->
 
+<!-- 2026-05-26: Info modal (how-to-use sheet). Opened from the INFO
+     button in the dashboard header (replaces the legacy SHIFT ACTIVE
+     pulse badge). Dismissible via the close button, "Got it" CTA, OR
+     by tapping outside the card (backdrop click). -->
+<div id="info-modal" role="dialog" aria-modal="true" aria-labelledby="info-title" onclick="onInfoBackdropClick(event)">
+  <div class="info-card" onclick="event.stopPropagation()">
+    <button class="info-close" type="button" aria-label="Close" onclick="closeInfo()">×</button>
+    <h2 id="info-title">How to use this app</h2>
+    <div class="info-steps">
+      <div class="info-step">
+        <span class="info-dot green" aria-hidden="true"></span>
+        <div class="info-step-text">
+          <div class="info-step-title" id="info-step1-title">Pick Up Load</div>
+          <div class="info-step-body"  id="info-step1-body">Tap this green button when you load up at the pickup site. You can take a photo of the load (optional).</div>
+        </div>
+      </div>
+      <div class="info-step">
+        <span class="info-dot orange" aria-hidden="true"></span>
+        <div class="info-step-text">
+          <div class="info-step-title" id="info-step2-title">Drop Off Load</div>
+          <div class="info-step-body"  id="info-step2-body">Tap this orange button when you unload at the dropoff site. You can take a photo of the drop-off (optional).</div>
+        </div>
+      </div>
+      <div class="info-step">
+        <span class="info-dot red" aria-hidden="true"></span>
+        <div class="info-step-text">
+          <div class="info-step-title" id="info-step3-title">End Shift</div>
+          <div class="info-step-body"  id="info-step3-body">Tap this red button when you're done for the day. This cannot be undone.</div>
+        </div>
+      </div>
+    </div>
+    <button class="info-ok" type="button" id="info-ok-btn" onclick="closeInfo()">Got it</button>
+  </div>
+</div>
+
 <!-- 2026-05-26: Global footer — fixed-position, visible on every screen.
      Replaces the per-screen "Need help? Call dispatcher" block that was
      previously hardcoded only on the intake screen. -->
@@ -658,7 +748,17 @@ const T = {
     eventPhotoDropoffTitle: 'Take a photo of the drop-off (optional)',
     eventPhotoHint: 'Tap to open camera',
     // Dashboard
-    shiftBadge: 'SHIFT ACTIVE', driverLabel: 'DRIVER',
+    driverLabel: 'DRIVER',
+    // INFO button + how-to-use modal
+    infoBtnLabel: 'INFO',
+    infoTitle: 'How to use this app',
+    infoStep1Title: 'Pick Up Load',
+    infoStep1Body:  'Tap this green button when you load up at the pickup site. You can take a photo of the load (optional).',
+    infoStep2Title: 'Drop Off Load',
+    infoStep2Body:  'Tap this orange button when you unload at the dropoff site. You can take a photo of the drop-off (optional).',
+    infoStep3Title: 'End Shift',
+    infoStep3Body:  "Tap this red button when you're done for the day. This cannot be undone.",
+    infoCloseBtn: 'Got it',
     timerLabel: 'TOTAL TIME',
     inTransitLabel: 'IN TRANSIT', completedLabel: 'COMPLETED',
     pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD', endshiftLabel: 'END SHIFT',
@@ -700,7 +800,17 @@ const T = {
     eventPhotoDropoffTitle: 'Tomar una foto de la entrega (opcional)',
     eventPhotoHint: 'Toca para abrir la cámara',
     // Dashboard
-    shiftBadge: 'TURNO ACTIVO', driverLabel: 'CONDUCTOR',
+    driverLabel: 'CONDUCTOR',
+    // INFO button + how-to-use modal
+    infoBtnLabel: 'INFO',
+    infoTitle: 'Cómo usar esta aplicación',
+    infoStep1Title: 'Recoger Carga',
+    infoStep1Body:  'Toca el botón verde cuando cargues en el sitio de recogida. Puedes tomar una foto de la carga (opcional).',
+    infoStep2Title: 'Entregar Carga',
+    infoStep2Body:  'Toca el botón naranja cuando descargues en el sitio de entrega. Puedes tomar una foto de la entrega (opcional).',
+    infoStep3Title: 'Terminar Turno',
+    infoStep3Body:  'Toca el botón rojo cuando termines tu día. Esto no se puede deshacer.',
+    infoCloseBtn: 'Entendido',
     timerLabel: 'TIEMPO TOTAL',
     inTransitLabel: 'EN TRÁNSITO', completedLabel: 'COMPLETADAS',
     pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA', endshiftLabel: 'TERMINAR TURNO',
@@ -772,7 +882,14 @@ function applyTranslations() {
     'eventphoto-hint': 'eventPhotoHint',
     'eventphoto-take-label': 'truckTakeBtn', 'eventphoto-skip-btn': 'truckSkipBtn',
     // Dashboard
-    'dash-shift-badge': 'shiftBadge', 'dash-driver-label': 'driverLabel',
+    'dash-driver-label': 'driverLabel',
+    // INFO button + how-to-use modal
+    'info-btn-label': 'infoBtnLabel',
+    'info-title': 'infoTitle',
+    'info-step1-title': 'infoStep1Title', 'info-step1-body': 'infoStep1Body',
+    'info-step2-title': 'infoStep2Title', 'info-step2-body': 'infoStep2Body',
+    'info-step3-title': 'infoStep3Title', 'info-step3-body': 'infoStep3Body',
+    'info-ok-btn': 'infoCloseBtn',
     'dash-timer-label': 'timerLabel',
     'dash-intransit-label': 'inTransitLabel', 'dash-completed-label': 'completedLabel',
     'dash-pickup-label': 'pickupLabel', 'dash-dropoff-label': 'dropoffLabel',
@@ -793,6 +910,22 @@ function applyTranslations() {
   // Truck type dropdown placeholder
   const ttPh = document.getElementById('trucktype-placeholder');
   if (ttPh) ttPh.textContent = t('trucktypePlaceholder');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// INFO MODAL (how-to-use)
+// ══════════════════════════════════════════════════════════════════
+function showInfo() {
+  applyTranslations();
+  document.getElementById('info-modal').classList.add('show');
+}
+function closeInfo() {
+  document.getElementById('info-modal').classList.remove('show');
+}
+// Backdrop click — only dismiss when the click is on the backdrop itself,
+// not bubbling up from the inner card (card uses event.stopPropagation()).
+function onInfoBackdropClick(ev) {
+  if (ev.target && ev.target.id === 'info-modal') closeInfo();
 }
 
 // ══════════════════════════════════════════════════════════════════
