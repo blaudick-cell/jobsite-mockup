@@ -70,11 +70,6 @@
     @keyframes pulse {
       0%,100% { opacity: 1; } 50% { opacity: 0.4; }
     }
-    .menu-btn {
-      background: none; border: none; color: var(--text);
-      cursor: pointer; padding: 4px; display: flex; align-items: center;
-    }
-
     /* ─── Content wrapper ──────────────────────────────────── */
     .content {
       flex: 1; display: flex; flex-direction: column;
@@ -388,14 +383,7 @@
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-dash">
     <div class="header">
-      <button class="menu-btn" aria-label="Menu">
-        <svg width="22" height="16" viewBox="0 0 22 16" fill="none">
-          <rect width="22" height="2" rx="1" fill="white"/>
-          <rect y="7" width="22" height="2" rx="1" fill="white"/>
-          <rect y="14" width="22" height="2" rx="1" fill="white"/>
-        </svg>
-      </button>
-      <div class="logo-icon" style="margin-left:10px;"><span>J</span></div>
+      <div class="logo-icon"><span>J</span></div>
       <div class="logo-text">Jobsite<em>Exchange</em></div>
       <div class="header-right">
         <div class="shift-badge"><div class="dot"></div><span id="dash-shift-badge">SHIFT ACTIVE</span></div>
