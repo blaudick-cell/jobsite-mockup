@@ -473,6 +473,39 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
+       SCREEN 4b: Event Photo (optional — gate between pickup/dropoff
+       tap and the actual truck_events insert). Title swaps per
+       event_type so pickup says "Take a photo of the load" and dropoff
+       says "…of the drop-off". Pattern mirrors screen-truck-photo.
+  ══════════════════════════════════════════════════════════ -->
+  <div class="screen" id="screen-event-photo">
+    <div class="header">
+      <div class="logo-icon"><span>J</span></div>
+      <div class="logo-text">Jobsite<em>Exchange</em></div>
+    </div>
+    <div class="content">
+      <h1 id="eventphoto-title">Take a photo (optional)</h1>
+      <p class="subtitle" id="eventphoto-subtitle">&nbsp;</p>
+      <div class="gap-16"></div>
+      <label class="photo-area" for="eventPhotoInput" id="eventPhotoArea">
+        <span class="camera-icon">📷</span>
+        <span class="photo-hint" id="eventphoto-hint">Tap to open camera</span>
+        <img id="eventPhotoPreview" alt="event photo" style="display:none;">
+      </label>
+      <input type="file" id="eventPhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="onEventPhotoPick(this)">
+      <div class="gap-16"></div>
+      <div class="stack">
+        <button class="btn btn-green" id="eventphoto-take-btn" onclick="onTakeOrUseEventPhoto()">
+          📷 <span id="eventphoto-take-label">TAKE PHOTO</span>
+        </button>
+        <button class="btn btn-outline" onclick="skipEventPhoto()">
+          <span id="eventphoto-skip-btn">SKIP</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
        SCREEN 5: Event Logged Confirmation
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-confirm">
@@ -593,9 +626,11 @@ let lastEventId      = null;
 let lastEventType    = null;
 let inTransit        = 0;      // pickup count - dropoff count (0 or 1)
 let completedCount   = 0;
-let lastPickupAt     = null;   // ISO timestamp of most recent pickup_load
+let firstPickupAt    = null;   // ISO timestamp of the FIRST pickup_load of the session
 let pickupTimerInt   = null;   // 1Hz interval handle for HH:MM:SS
 let truckPhotoFile   = null;
+let eventPhotoFile   = null;   // optional photo selected on the event-photo screen
+let pendingEventType = null;   // 'pickup_load' or 'dropoff_load' while photo prompt is open
 
 const STORAGE_KEY = 'jse_driver_v1';
 
@@ -618,9 +653,13 @@ const T = {
     truckPhotoHint: 'Tap to open camera',
     truckTakeBtn: 'TAKE PHOTO', truckUseBtn: 'USE PHOTO', truckSkipBtn: 'SKIP',
     photoSaved: 'Photo saved',
+    // Per-event photo prompts (pickup vs dropoff get different titles)
+    eventPhotoPickupTitle:  'Take a photo of the load (optional)',
+    eventPhotoDropoffTitle: 'Take a photo of the drop-off (optional)',
+    eventPhotoHint: 'Tap to open camera',
     // Dashboard
     shiftBadge: 'SHIFT ACTIVE', driverLabel: 'DRIVER',
-    timerLabel: 'TIME SINCE PICKUP',
+    timerLabel: 'TOTAL TIME',
     inTransitLabel: 'IN TRANSIT', completedLabel: 'COMPLETED',
     pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD', endshiftLabel: 'END SHIFT',
     // Truck-type display names
@@ -656,9 +695,13 @@ const T = {
     truckPhotoHint: 'Toca para abrir la cámara',
     truckTakeBtn: 'TOMAR FOTO', truckUseBtn: 'USAR FOTO', truckSkipBtn: 'OMITIR',
     photoSaved: 'Foto guardada',
+    // Per-event photo prompts
+    eventPhotoPickupTitle:  'Tomar una foto de la carga (opcional)',
+    eventPhotoDropoffTitle: 'Tomar una foto de la entrega (opcional)',
+    eventPhotoHint: 'Toca para abrir la cámara',
     // Dashboard
     shiftBadge: 'TURNO ACTIVO', driverLabel: 'CONDUCTOR',
-    timerLabel: 'TIEMPO DESDE RECOGIDA',
+    timerLabel: 'TIEMPO TOTAL',
     inTransitLabel: 'EN TRÁNSITO', completedLabel: 'COMPLETADAS',
     pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA', endshiftLabel: 'TERMINAR TURNO',
     // Truck-type display names
@@ -724,6 +767,10 @@ function applyTranslations() {
     // Truck photo
     'truckphoto-title': 'truckPhotoTitle', 'truckphoto-hint': 'truckPhotoHint',
     'truckphoto-take-label': 'truckTakeBtn', 'truckphoto-skip-btn': 'truckSkipBtn',
+    // Event photo (the title is set per-event-type via pendingEventType
+    // in startEventPhoto(); the other labels translate uniformly).
+    'eventphoto-hint': 'eventPhotoHint',
+    'eventphoto-take-label': 'truckTakeBtn', 'eventphoto-skip-btn': 'truckSkipBtn',
     // Dashboard
     'dash-shift-badge': 'shiftBadge', 'dash-driver-label': 'driverLabel',
     'dash-timer-label': 'timerLabel',
@@ -908,20 +955,22 @@ function updateBadges() {
   if (endC) endC.textContent = completedCount;
 }
 
-// HH:MM:SS pickup timer — ticks every second, anchored to lastPickupAt.
-// When inTransit === 0 (no load active), digits freeze at 00:00:00 + .idle.
+// HH:MM:SS TOTAL TIME counter — ticks every second, anchored to the FIRST
+// pickup_load of the session. Continues ticking after dropoff and across
+// subsequent pickups; only stops on end_shift. Idle (00:00:00 + .idle) until
+// the very first pickup happens.
 function refreshTimer() {
   clearInterval(pickupTimerInt);
   const digits = document.getElementById('dash-timer-digits');
   if (!digits) return;
   const paint = () => {
-    if (!lastPickupAt || inTransit < 1) {
+    if (!firstPickupAt) {
       digits.textContent = '00:00:00';
       digits.classList.add('idle');
       return;
     }
     digits.classList.remove('idle');
-    const ms = Math.max(0, Date.now() - new Date(lastPickupAt).getTime());
+    const ms = Math.max(0, Date.now() - new Date(firstPickupAt).getTime());
     const totalSec = Math.floor(ms / 1000);
     const hh = String(Math.floor(totalSec / 3600)).padStart(2, '0');
     const mm = String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0');
@@ -929,7 +978,7 @@ function refreshTimer() {
     digits.textContent = `${hh}:${mm}:${ss}`;
   };
   paint();
-  if (inTransit >= 1 && lastPickupAt) {
+  if (firstPickupAt) {
     pickupTimerInt = setInterval(paint, 1000);
   }
   // Mirror shift time onto the End-Shift confirmation screen (hours, 1 decimal).
@@ -949,7 +998,7 @@ function onPickupTap() {
     showWarn(t('warnAlreadyTitle'), t('warnAlreadyBody'));
     return;
   }
-  logEvent('pickup_load');
+  startEventPhoto('pickup_load');
 }
 
 function onDropoffTap() {
@@ -957,7 +1006,82 @@ function onDropoffTap() {
     showWarn(t('warnNoLoadTitle'), t('warnNoLoadBody'));
     return;
   }
-  logEvent('dropoff_load');
+  startEventPhoto('dropoff_load');
+}
+
+// 2026-05-26: Open the optional event-photo prompt. We DON'T insert
+// the truck_events row yet — that happens after Use Photo / Skip so the
+// photo URL can be passed to logEvent and the row's photo_url column
+// (and the matching event_photos row) gets populated in one shot.
+function startEventPhoto(eventType) {
+  pendingEventType = eventType;
+  eventPhotoFile = null;
+  const preview = document.getElementById('eventPhotoPreview');
+  if (preview) { preview.src = ''; preview.style.display = 'none'; }
+  // Title swaps per event_type — pickup says "load", dropoff says "drop-off".
+  const titleKey = eventType === 'pickup_load' ? 'eventPhotoPickupTitle' : 'eventPhotoDropoffTitle';
+  const titleEl = document.getElementById('eventphoto-title');
+  if (titleEl) titleEl.textContent = t(titleKey);
+  const takeLabel = document.getElementById('eventphoto-take-label');
+  if (takeLabel) takeLabel.textContent = t('truckTakeBtn');
+  applyTranslations();
+  showScreen('screen-event-photo');
+}
+
+function onEventPhotoPick(input) {
+  if (!input.files[0]) return;
+  eventPhotoFile = input.files[0];
+  const preview = document.getElementById('eventPhotoPreview');
+  preview.src = URL.createObjectURL(eventPhotoFile);
+  preview.style.display = 'block';
+  // Flip the green button label to "USE PHOTO" once a photo is selected.
+  document.getElementById('eventphoto-take-label').textContent = t('truckUseBtn');
+}
+
+function onTakeOrUseEventPhoto() {
+  if (eventPhotoFile) {
+    finishEventPhoto(true);
+  } else {
+    document.getElementById('eventPhotoInput').click();
+  }
+}
+
+function skipEventPhoto() {
+  finishEventPhoto(false);
+}
+
+// Upload (if usePhoto) → call logEvent with the resulting URL. Storage and
+// event_photos errors are non-fatal: the truck_events row is the source of
+// truth, so a failed photo write must never block the confirmation.
+async function finishEventPhoto(usePhoto) {
+  const btn = document.getElementById('eventphoto-take-btn');
+  btn.classList.add('loading');
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = `<div class="spinner"></div>`;
+  let photoUrl = null;
+  try {
+    if (usePhoto && eventPhotoFile) {
+      toast(t('uploading'));
+      try {
+        const ext  = (eventPhotoFile.name && eventPhotoFile.name.split('.').pop()) || 'jpg';
+        const path = `events/${pendingEventType}_${getDeviceToken()}_${Date.now()}.${ext}`;
+        const { error: upErr } = await db.storage.from('driver-photos').upload(path, eventPhotoFile, { contentType: eventPhotoFile.type });
+        if (!upErr) {
+          const { data: pubData } = db.storage.from('driver-photos').getPublicUrl(path);
+          photoUrl = pubData.publicUrl;
+        }
+      } catch (_) { /* storage failure is non-fatal */ }
+    }
+    const evtType = pendingEventType;
+    pendingEventType = null;
+    eventPhotoFile = null;
+    await logEvent(evtType, photoUrl);
+    if (usePhoto && photoUrl) toast(t('photoSaved'), 1500);
+  } catch (e) {
+    toast('Error: ' + (e && e.message ? e.message : 'unknown'));
+    btn.classList.remove('loading');
+    btn.innerHTML = origHtml;
+  }
 }
 
 function showWarn(title, body) {
@@ -967,7 +1091,7 @@ function showWarn(title, body) {
   showScreen('screen-warn');
 }
 
-async function logEvent(eventType) {
+async function logEvent(eventType, photoUrl) {
   if (!session) return;
   const now = new Date().toISOString();
   // 2026-05-26: geolocation removed from UI copy. The fetch + columns
@@ -975,25 +1099,48 @@ async function logEvent(eventType) {
   // grants permission, but no longer mentioned to the driver.
   const coords = await maybeGetCoords();
 
-  const { data, error } = await db.from('truck_events').insert({
+  // truck_events.photo_url is the canonical mirror — populated atomically
+  // so the row's own snapshot reflects the photo when present.
+  const row = {
     session_id: session.id,
     event_type: eventType,
     event_at:   now,
     latitude:   coords ? coords.lat : null,
     longitude:  coords ? coords.lng : null,
-  }).select().single();
+  };
+  if (photoUrl) row.photo_url = photoUrl;
+
+  const { data, error } = await db.from('truck_events').insert(row).select().single();
 
   if (error) { toast('Error logging event'); return; }
 
   lastEventId   = data.id;
   lastEventType = eventType;
+
+  // Optional companion row in event_photos for richer historical queries
+  // (per-photo coords / capture timestamp distinct from the event). Failure
+  // is silent — truck_events.photo_url already carries the canonical URL.
+  if (photoUrl) {
+    db.from('event_photos').insert({
+      event_id:   data.id,
+      session_id: session.id,
+      photo_url:  photoUrl,
+      latitude:   coords ? coords.lat : null,
+      longitude:  coords ? coords.lng : null,
+      photo_at:   new Date().toISOString(),
+    }).then(() => {}, () => {});
+  }
+
   if (eventType === 'pickup_load') {
     inTransit = 1;
-    lastPickupAt = now;
+    // Anchor the TOTAL TIME counter at the FIRST pickup of the session only.
+    // Subsequent pickups don't reset; the counter keeps ticking from the
+    // session's first pickup regardless of how many cycles have happened.
+    if (!firstPickupAt) firstPickupAt = now;
   } else if (eventType === 'dropoff_load') {
     inTransit = 0;
-    lastPickupAt = null;
     completedCount += 1;
+    // firstPickupAt intentionally NOT cleared — timer keeps ticking.
   }
   updateBadges();
   refreshTimer();
@@ -1076,7 +1223,7 @@ async function confirmEndShift() {
 function saveLocal() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     session, lang, driverName, companyName, truckType,
-    inTransit, completedCount, lastPickupAt,
+    inTransit, completedCount, firstPickupAt,
   }));
 }
 
@@ -1084,7 +1231,7 @@ function clearLocal() {
   localStorage.removeItem(STORAGE_KEY);
   session = null;
   driverName = ''; companyName = ''; truckType = '';
-  inTransit = 0; completedCount = 0; lastPickupAt = null;
+  inTransit = 0; completedCount = 0; firstPickupAt = null;
 }
 
 function loadLocal() {
@@ -1100,7 +1247,11 @@ function loadLocal() {
     truckType      = d.truckType || '';
     inTransit      = d.inTransit || 0;
     completedCount = d.completedCount || 0;
-    lastPickupAt   = d.lastPickupAt || null;
+    // Migrate any in-flight session that was saved under the old key name —
+    // better to preserve their timer than wipe it. Init's truck_events
+    // backfill will overwrite this with the real earliest pickup_load
+    // event_at once it runs.
+    firstPickupAt  = d.firstPickupAt || d.lastPickupAt || null;
     return true;
   } catch { return false; }
 }
@@ -1128,14 +1279,23 @@ async function init() {
           .eq('session_id', session.id)
           .order('event_at', { ascending: true });
         if (Array.isArray(evts)) {
-          let pickups = 0, drops = 0, mostRecentPickup = null;
+          let pickups = 0, drops = 0, earliestPickup = null;
           for (const e of evts) {
-            if (e.event_type === 'pickup_load') { pickups += 1; mostRecentPickup = e.event_at; }
-            else if (e.event_type === 'dropoff_load') { drops += 1; }
+            if (e.event_type === 'pickup_load') {
+              pickups += 1;
+              // evts is ordered ascending by event_at, so the first one we
+              // see is the EARLIEST pickup of the session — that's the
+              // TOTAL TIME anchor.
+              if (!earliestPickup) earliestPickup = e.event_at;
+            } else if (e.event_type === 'dropoff_load') {
+              drops += 1;
+            }
           }
           inTransit = Math.max(0, pickups - drops);
           completedCount = drops;
-          lastPickupAt = inTransit >= 1 ? mostRecentPickup : null;
+          // Anchor TOTAL TIME at the first pickup ever — keeps ticking
+          // through dropoffs and re-pickups, independent of inTransit.
+          firstPickupAt = earliestPickup;
         }
 
         enterDashboard();
