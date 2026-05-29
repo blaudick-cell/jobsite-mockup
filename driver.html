@@ -411,6 +411,7 @@
             <option value="" id="trucktype-placeholder">Select truck type…</option>
             <option value="SD">Single Axle Dump</option>
             <option value="ED">End Dump</option>
+            <option value="SIDE">Side Dump</option>
             <option value="BD">Belly Dump</option>
             <option value="TAN">Tandem</option>
             <option value="HS">Hot Shot</option>
@@ -813,7 +814,7 @@ const T = {
     inTransitLabel: 'IN TRANSIT', completedLabel: 'COMPLETED',
     pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD', endshiftLabel: 'END SHIFT',
     // Truck-type display names
-    tt_SD: 'Single Axle Dump', tt_ED: 'End Dump', tt_BD: 'Belly Dump',
+    tt_SD: 'Single Axle Dump', tt_ED: 'End Dump', tt_SIDE: 'Side Dump', tt_BD: 'Belly Dump',
     tt_TAN: 'Tandem', tt_HS: 'Hot Shot', tt_OTHER: 'Other',
     // Event confirmation
     confirmPickupTitle: 'Pickup Load Logged', confirmDropoffTitle: 'Drop Off Load Logged',
@@ -866,7 +867,7 @@ const T = {
     inTransitLabel: 'EN TRÁNSITO', completedLabel: 'COMPLETADAS',
     pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA', endshiftLabel: 'TERMINAR TURNO',
     // Truck-type display names
-    tt_SD: 'Volqueta de Eje Sencillo', tt_ED: 'Volquete de Descarga Trasera', tt_BD: 'Volquete de Descarga Inferior',
+    tt_SD: 'Volqueta de Eje Sencillo', tt_ED: 'Volquete de Descarga Trasera', tt_SIDE: 'Volqueta Lateral', tt_BD: 'Volquete de Descarga Inferior',
     tt_TAN: 'Volquete Tándem', tt_HS: 'Camioneta Hot Shot', tt_OTHER: 'Otro',
     // Event confirmation
     confirmPickupTitle: 'Carga recogida', confirmDropoffTitle: 'Carga entregada',
@@ -961,6 +962,13 @@ function applyTranslations() {
   // Truck type dropdown placeholder
   const ttPh = document.getElementById('trucktype-placeholder');
   if (ttPh) ttPh.textContent = t('trucktypePlaceholder');
+  // 2026-05-28: rewrite truck-type <option> labels from the tt_* keys.
+  // Option text was hardcoded English; this picks up T.es.tt_SD etc. and
+  // self-heals on every language switch.
+  ['SD','ED','SIDE','BD','TAN','HS','OTHER'].forEach(code => {
+    const opt = document.querySelector('#truckTypeSelect option[value="' + code + '"]');
+    if (opt) opt.textContent = t('tt_' + code);
+  });
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1202,12 +1210,21 @@ function startEventPhoto(eventType) {
   eventPhotoFile = null;
   const preview = document.getElementById('eventPhotoPreview');
   if (preview) { preview.src = ''; preview.style.display = 'none'; }
+  // 2026-05-28: hard reset of the green Take/Use button before showing the
+  // screen. finishEventPhoto() replaces this button's innerHTML with a
+  // spinner during upload; if upload was skipped or the user navigated
+  // away mid-flight, the spinner can linger and clobber the take-label
+  // span. Re-rendering the full innerHTML restores the icon + span shell
+  // so applyTranslations() can wire the label cleanly.
+  const btn = document.getElementById('eventphoto-take-btn');
+  if (btn) {
+    btn.classList.remove('loading');
+    btn.innerHTML = '📷 <span id="eventphoto-take-label">' + t('truckTakeBtn') + '</span>';
+  }
   // Title swaps per event_type — pickup says "load", dropoff says "drop-off".
   const titleKey = eventType === 'pickup_load' ? 'eventPhotoPickupTitle' : 'eventPhotoDropoffTitle';
   const titleEl = document.getElementById('eventphoto-title');
   if (titleEl) titleEl.textContent = t(titleKey);
-  const takeLabel = document.getElementById('eventphoto-take-label');
-  if (takeLabel) takeLabel.textContent = t('truckTakeBtn');
   applyTranslations();
   showScreen('screen-event-photo');
 }
