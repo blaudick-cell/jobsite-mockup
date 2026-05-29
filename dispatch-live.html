@@ -60,14 +60,24 @@
     .logo-text em { font-style: normal; color: var(--green); }
     .header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
     .partner-logo { height: 34px; width: auto; flex-shrink: 0; display: block; }
+    /* 2026-05-29: Health-only refresh chrome. When healthy, the dispatcher
+       sees only a small pulsing green dot — no timestamp clutter. When
+       sync has been stale for >30s, the chip swaps to a warn state with
+       a red border + "Sync issue" copy + the staleness count. */
     .refresh-pill {
       display: inline-flex; align-items: center; gap: 6px;
-      padding: 6px 12px; border-radius: 16px;
-      background: var(--surface); border: 1px solid var(--border);
+      padding: 5px 10px; border-radius: 16px;
+      background: transparent; border: 0;
       font-size: 11px; font-weight: 600; color: var(--muted);
       letter-spacing: 0.3px;
     }
-    .refresh-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 1.6s infinite; }
+    .refresh-pill.warn {
+      background: rgba(239,68,68,0.10); border: 1px solid rgba(239,68,68,0.45);
+      color: var(--red);
+      padding: 5px 12px;
+    }
+    .refresh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 1.6s infinite; flex-shrink: 0; }
+    .refresh-pill.warn .refresh-dot { background: var(--red); animation: none; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
@@ -107,6 +117,14 @@
     .card-value.white { color: var(--text); }
     .card-value.orange { color: var(--orange); }
     .card-sub { font-size: 11px; color: var(--faint); margin-top: 3px; }
+    /* 2026-05-29: upweight the Active Drivers card so it reads as the
+       headline operational number among the 5 summary cards. */
+    .card.dominant {
+      border: 1.5px solid rgba(132,204,22,0.55);
+      box-shadow: 0 0 0 1px rgba(132,204,22,0.18), 0 12px 24px rgba(132,204,22,0.06);
+    }
+    .card.dominant .card-value { font-size: 44px; color: var(--green); }
+    .card.dominant .card-label { color: var(--green); }
 
     /* Filter pills */
     .filters {
@@ -127,6 +145,24 @@
       border-color: rgba(132,204,22,0.45);
     }
     .pill.divider { background: transparent; border: none; color: var(--faint); cursor: default; }
+    /* 2026-05-29: Active / Ended status filters get more visual weight so
+       the dispatcher sees them as a distinct group from the truck-type pills.
+       Bigger padding, bolder weight when selected, group-separator left border. */
+    .pill.status-pill {
+      padding: 8px 18px; font-size: 13px; font-weight: 700;
+    }
+    .pill.status-pill.on[data-status="ACTIVE"] {
+      background: var(--green); color: #111;
+      border-color: var(--green);
+    }
+    .pill.status-pill.on[data-status="ENDED"] {
+      background: var(--surface2); color: var(--text);
+      border-color: var(--border);
+    }
+    .pill-group-sep {
+      display: inline-block; width: 1px; height: 22px;
+      background: var(--border); margin: 0 6px; vertical-align: middle;
+    }
 
     /* Main table */
     .section {
@@ -167,6 +203,17 @@
     .status-dot.yellow { background: var(--yellow); box-shadow: 0 0 0 3px rgba(250,204,21,0.18); }
     .status-dot.red    { background: var(--red); box-shadow: 0 0 0 3px rgba(239,68,68,0.18); }
     .status-dot.muted  { background: var(--faint); }
+    /* 2026-05-29: subtle per-row tint so the dispatcher can scan for
+       trouble groups at a glance. Keep these very faint — should not
+       look like loud colored rows. */
+    table.tbl tbody tr.row-status-green  { background: rgba(132,204,22,0.04); }
+    table.tbl tbody tr.row-status-yellow { background: rgba(249,115,22,0.04); }
+    table.tbl tbody tr.row-status-red    { background: rgba(239,68,68,0.05); }
+    table.tbl tbody tr.row-status-ended  { background: rgba(255,255,255,0.02); opacity: 0.72; }
+    table.tbl tbody tr.row-status-green:hover,
+    table.tbl tbody tr.row-status-yellow:hover,
+    table.tbl tbody tr.row-status-red:hover,
+    table.tbl tbody tr.row-status-ended:hover { background: rgba(255,255,255,0.04); }
     .chip {
       display: inline-block; padding: 2px 8px; border-radius: 10px;
       background: rgba(132,204,22,0.12); color: var(--green);
@@ -273,21 +320,23 @@
     <img class="partner-logo" alt="Cowgirl Demolition &amp; Excavation">
   </div>
   <div class="header-right">
-    <div class="refresh-pill" id="refresh-pill">
+    <div class="refresh-pill" id="refresh-pill" title="Live sync">
       <span class="refresh-dot"></span>
-      <span id="refresh-text">Live · syncing…</span>
+      <span id="refresh-text"></span>
     </div>
     <button class="btn" onclick="exportCSV()">EXPORT CSV</button>
   </div>
 </div>
 
+<!-- 2026-05-29: timestamp span removed; refresh health surfaces silently
+     via the .refresh-pill in the header (green pulse when ok, red warn
+     when sync >30s stale). -->
 <div class="page-title-row">
   <h1>Dispatch — Live</h1>
-  <span class="sub" id="last-fetch-stamp">—</span>
 </div>
 
 <div class="cards" id="summary-cards">
-  <div class="card"><div class="card-label">Active Drivers</div><div class="card-value" id="card-active">0</div><div class="card-sub">sessions open now</div></div>
+  <div class="card dominant"><div class="card-label">Active Drivers</div><div class="card-value" id="card-active">0</div><div class="card-sub">sessions open now</div></div>
   <div class="card"><div class="card-label">Active Hours</div><div class="card-value white" id="card-hours">0.0</div><div class="card-sub">sum across open</div></div>
   <div class="card"><div class="card-label">Total Pickups</div><div class="card-value" id="card-pickups">0</div><div class="card-sub">today (local MT)</div></div>
   <div class="card"><div class="card-label">Total Drop-offs</div><div class="card-value orange" id="card-drops">0</div><div class="card-sub">today (local MT)</div></div>
@@ -300,19 +349,20 @@
   <span class="pill" data-truck="TAN">Tandem</span>
   <span class="pill" data-truck="ED">End Dump</span>
   <span class="pill" data-truck="OTHER">Other</span>
-  <span class="pill divider">·</span>
-  <span class="pill on" data-status="ACTIVE">Active</span>
-  <span class="pill" data-status="ENDED">Ended</span>
+  <span class="pill-group-sep" aria-hidden="true"></span>
+  <span class="pill status-pill on" data-status="ACTIVE">Active</span>
+  <span class="pill status-pill" data-status="ENDED">Ended</span>
 </div>
 
 <div class="section">
   <div class="section-title">Driver activity (newest first)</div>
   <table class="tbl">
     <thead><tr>
+      <th>Status</th>
       <th>Driver</th><th>Company</th><th>Truck Type</th>
-      <th>Start (MT)</th><th class="num-col">Current</th>
+      <th>Start (MT)</th><th class="num-col">SHIFT TIME</th>
       <th class="num-col">Pickups</th><th class="num-col">Drop-offs</th>
-      <th>Last Event</th><th>Status</th>
+      <th>Last Event</th>
     </tr></thead>
     <tbody id="rows"></tbody>
   </table>
@@ -363,6 +413,14 @@
     <div id="drawer-trucktype-chip"></div>
     <div class="meta-grid" id="drawer-meta"></div>
 
+    <!-- 2026-05-29 spec: section order is Meta → Event history →
+         Issues/Notes (per driver) → Dispatcher notes textarea. -->
+    <div class="section-title" style="margin-top:14px;">Event history</div>
+    <div class="feed" id="drawer-feed"><div class="empty">Loading…</div></div>
+
+    <div class="section-title" style="margin-top:14px;">Issues / Notes from driver</div>
+    <div class="feed" id="drawer-issues"><div class="empty">Loading…</div></div>
+
     <div class="section-title" style="margin-top:14px;">Dispatcher notes</div>
     <textarea class="notes" id="drawer-notes" placeholder="Notes (e.g. waiting on loader, flat tire, truck switched…)" onblur="saveNotes()"></textarea>
     <div class="notes-status" id="drawer-notes-status"></div>
@@ -372,9 +430,6 @@
       <span class="sg" onclick="prefillNote('Truck switched')">Truck switched</span>
       <span class="sg" onclick="prefillNote('Other operational note: ')">Other…</span>
     </div>
-
-    <div class="section-title" style="margin-top:14px;">Event history</div>
-    <div class="feed" id="drawer-feed"><div class="empty">Loading…</div></div>
   </div>
 </div>
 
@@ -489,20 +544,47 @@ async function fetchAll() {
     if (!sRes.error) sessions = sRes.data || [];
     if (!eRes.error) events   = eRes.data || [];
     if (!iRes.error) issues   = iRes.data || [];
-    setRefreshStamp();
+    markFetchOk();
     render();
   } catch (e) {
     console.warn('[dispatch] fetch error', e);
-    setRefreshStamp('error');
+    markFetchError();
   }
 }
 
-function setRefreshStamp(suffix) {
-  const stamp = new Date();
-  const txt = 'Last refresh ' + fmtMTHMS(stamp) + ' MT' + (suffix ? ' · ' + suffix : '');
-  document.getElementById('last-fetch-stamp').textContent = txt;
-  document.getElementById('refresh-text').textContent = 'Live · ' + fmtMTHMS(stamp);
+// 2026-05-29: Health-only refresh chrome. The previous explicit
+// "Last refresh HH:MM:SS MT" timestamp got noisy fast; the dispatcher
+// only needs reassurance that sync is live. A pulsing green dot in the
+// header is the silent "all good" signal; if the last successful fetch
+// is >30s in the past, the chip flips to a red warn state with
+// "Sync issue — Xs ago".
+let lastFetchOkMs = Date.now();
+function markFetchOk() {
+  lastFetchOkMs = Date.now();
+  updateRefreshHealth();
 }
+function markFetchError() {
+  updateRefreshHealth();
+}
+function updateRefreshHealth() {
+  const ageMs = Date.now() - lastFetchOkMs;
+  const pill = document.getElementById('refresh-pill');
+  const txt  = document.getElementById('refresh-text');
+  if (!pill || !txt) return;
+  if (ageMs <= 30000) {
+    pill.classList.remove('warn');
+    txt.textContent = '';
+  } else {
+    pill.classList.add('warn');
+    const sec = Math.floor(ageMs / 1000);
+    const mm  = Math.floor(sec / 60);
+    const ago = sec < 60 ? sec + 's ago' : (mm < 60 ? mm + ' min ago' : Math.floor(mm/60) + ' hr ago');
+    txt.textContent = ' Sync issue — last update ' + ago;
+  }
+}
+// Recompute the health pill every 5s so the warn state appears without
+// waiting on an actual fetch attempt.
+setInterval(updateRefreshHealth, 5000);
 
 // ──────────────────────────────────────────────────────────────
 // DERIVE: per-session aggregates
@@ -611,7 +693,12 @@ function render() {
       }
       const tr = document.createElement('tr');
       tr.dataset.sessionId = s.id;
+      // 2026-05-29: per-row faint tint matched to the status color so the
+      // dispatcher can scan for trouble groups at a glance.
+      tr.className = 'row-status-' + (status === 'ended' ? 'ended' : status);
+      // 2026-05-29 column reorder: Status first, Last Event last.
       tr.innerHTML = `
+        <td><span class="status-dot ${dotCls}"></span>${status === 'ended' ? '<span class="chip muted">Ended</span>' : ''}</td>
         <td>${escapeHtml(s.driver_name || '—')}</td>
         <td>${escapeHtml(s.company || '—')}</td>
         <td>${escapeHtml(truckLabel(s.truck_type))}</td>
@@ -620,7 +707,6 @@ function render() {
         <td class="num-col">${b.pickups}</td>
         <td class="num-col">${b.drops}</td>
         <td>${lastStr}</td>
-        <td><span class="status-dot ${dotCls}"></span>${status === 'ended' ? '<span class="chip muted">Ended</span>' : ''}</td>
       `;
       tr.addEventListener('click', () => openDrawer(s.id));
       tbody.appendChild(tr);
@@ -799,13 +885,31 @@ function renderDrawer(b) {
   const started = parseISO(s.started_at);
   const ended   = s.ended_at ? parseISO(s.ended_at) : null;
   const currMs = ended ? (ended.getTime() - started.getTime()) : (nowMs() - started.getTime());
+  // Last event summary for the meta block.
+  const lastEv = b.lastEvent;
+  let lastEvStr = '—';
+  if (lastEv) {
+    const lt = parseISO(lastEv.event_at);
+    const lbl = lastEv.event_type === 'pickup_load' ? 'Pickup'
+              : lastEv.event_type === 'dropoff_load' ? 'Drop-off'
+              : lastEv.event_type === 'end_shift' ? 'End shift'
+              : lastEv.event_type;
+    lastEvStr = lbl + ' &middot; ' + fmtMTHHMMa(lt) + ' MT';
+  }
+  // 2026-05-29 spec: drawer meta carries Driver Name, Company, Truck Type
+  // (expanded), Plate (legacy plate_input column — null for new sessions),
+  // Start Time, SHIFT TIME (live-ticking), Pickups, Drop-offs, Last Event,
+  // End Time (or "Still active"), plus the session id at the bottom.
   document.getElementById('drawer-meta').innerHTML = `
+    <span class="k">Driver Name</span><span class="v">${escapeHtml(s.driver_name || '—')}</span>
     <span class="k">Company</span><span class="v">${escapeHtml(s.company || '—')}</span>
     <span class="k">Truck Type</span><span class="v">${escapeHtml(truckLabel(s.truck_type))}</span>
+    <span class="k">Plate</span><span class="v">${escapeHtml(s.plate_input || '—')}</span>
     <span class="k">Start Time</span><span class="v mono">${fmtMTHHMMa(started)} MT</span>
-    <span class="k">Current Hours</span><span class="v mono">${fmtHMS(currMs)}</span>
+    <span class="k">Shift Time</span><span class="v mono">${fmtHMS(currMs)}</span>
     <span class="k">Pickups</span><span class="v">${b.pickups}</span>
     <span class="k">Drop-offs</span><span class="v">${b.drops}</span>
+    <span class="k">Last Event</span><span class="v">${lastEvStr}</span>
     <span class="k">End Time</span><span class="v ${ended ? 'mono' : ''}">${ended ? fmtMTHHMMa(ended) + ' MT' : '<em>Still active</em>'}</span>
     <span class="k">Session ID</span><span class="v mono" style="font-size:11px;color:var(--muted)">${escapeHtml(s.id)}</span>
   `;
@@ -841,6 +945,42 @@ function renderDrawer(b) {
       `;
       feed.appendChild(row);
     }
+  }
+  // 2026-05-29: per-driver Issues/Notes block. Filters the already-fetched
+  // issue_reports state by session_id. No new fetch needed — the dispatch
+  // page's existing Realtime subscription keeps the `issues` array fresh.
+  renderDrawerIssues(s.id);
+}
+
+function renderDrawerIssues(sessionId) {
+  const box = document.getElementById('drawer-issues');
+  if (!box) return;
+  const mine = issues.filter(r => r.session_id === sessionId)
+    .sort((a, b) => parseISO(b.event_at) - parseISO(a.event_at));
+  if (!mine.length) {
+    box.innerHTML = '<div class="empty" style="padding:14px;">No issues reported.</div>';
+    return;
+  }
+  box.innerHTML = '';
+  for (const r of mine) {
+    const t = parseISO(r.event_at);
+    const tsStr = t ? (fmtMTHMS(t) + ' MT') : '—';
+    const gps = (r.latitude != null && r.longitude != null)
+      ? `<a class="gps-link" href="https://www.google.com/maps?q=${r.latitude},${r.longitude}" target="_blank" rel="noopener">${Number(r.latitude).toFixed(4)},${Number(r.longitude).toFixed(4)} ↗</a>`
+      : '';
+    const photo = r.photo_url
+      ? `<a href="${escapeHtml(r.photo_url)}" target="_blank" rel="noopener"><img class="feed-thumb" src="${escapeHtml(r.photo_url)}" alt=""></a>`
+      : '';
+    const row = document.createElement('div');
+    row.className = 'feed-item issue';
+    row.innerHTML = `
+      <span class="ft">${tsStr}</span>
+      <span class="fb">
+        <div style="white-space:pre-wrap; word-break:break-word; color:var(--text);">${escapeHtml(r.issue_text || '')}</div>
+        <div style="display:flex; align-items:center; gap:8px; margin-top:6px;">${photo}${gps}</div>
+      </span>
+    `;
+    box.appendChild(row);
   }
 }
 
