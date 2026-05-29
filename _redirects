@@ -1,5 +1,9 @@
-# Send dispatch.jobsiteexchange.com root → the dispatch dashboard
-/*  /dispatch-live.html  200!  Host=dispatch.jobsiteexchange.com
-
 # Friendly URL on any host: /dispatch-live → dispatch-live.html
+# Note: a previous attempt at host-conditional routing
+# (`/* /dispatch-live.html 200! Host=dispatch.jobsiteexchange.com`)
+# was removed in 2026-05-29 because Netlify _redirects does NOT support
+# Host= as a conditional. The dispatch.* hostname is now routed by a
+# synchronous head-script at the top of driver.html (index.html) which
+# does location.replace('/dispatch-live.html') when location.hostname
+# starts with 'dispatch.'.
 /dispatch-live  /dispatch-live.html  200

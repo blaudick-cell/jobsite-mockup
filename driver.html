@@ -3,6 +3,19 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <!-- 2026-05-29: hostname-based redirect for dispatch.* aliases. Netlify
+       `_redirects` doesn't support a Host= conditional (verified empirically
+       against the 0e34c24 deploy: requests with Host: dispatch.* still
+       served the driver widget). This synchronous head-script fires before
+       Supabase JS or anything else loads, so the redirect is instant and
+       the driver widget never paints on dispatch.* hostnames. -->
+  <script>
+    if (typeof location !== 'undefined'
+        && location.hostname.toLowerCase().startsWith('dispatch.')
+        && !location.pathname.startsWith('/dispatch-live')) {
+      location.replace('/dispatch-live.html');
+    }
+  </script>
   <!-- 2026-05-28: no-cache so drivers who saved the page as a home-screen
        webapp don't keep running a stale build. Backed up by a sibling
        _headers file on Netlify (same directives in HTTP form). -->
