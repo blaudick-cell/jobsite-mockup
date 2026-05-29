@@ -1223,6 +1223,17 @@ function showScreen(id) {
   document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
   document.getElementById(id).classList.add('active');
   window.scrollTo(0,0);
+  // 2026-05-29: when landing on screen-intake from ANY caller (language
+  // select OR a re-entry after end-shift), re-evaluate the CONTINUE
+  // button's visual state immediately. iOS Safari autofill + restored
+  // form values populate fields without firing change/input events, which
+  // is exactly the bug that left a driver stuck on his second shift
+  // intake — fields were filled but the button still looked dim. The
+  // button never had `disabled` set so taps were always going through
+  // to submitIntake(), but the dim appearance read as broken.
+  if (id === 'screen-intake' && typeof onIntakeChange === 'function') {
+    try { onIntakeChange(); } catch (_) { /* never let this throw */ }
+  }
 }
 
 function goBack(id) { showScreen(id); }
@@ -1370,16 +1381,19 @@ function flashEmptyField(id) {
 }
 
 function submitIntake() {
-  const name = document.getElementById('driverNameInput').value.trim();
-  const company = document.getElementById('companyInput').value.trim();
-  const tt = document.getElementById('truckTypeSelect').value;
-  if (!name || !company || !tt) {
-    // Visual hint instead of silent no-op.
-    if (!name)    flashEmptyField('driverNameInput');
-    if (!company) flashEmptyField('companyInput');
-    if (!tt)      flashEmptyField('truckTypeSelect');
-    return;
-  }
+  // 2026-05-29: bulletproof field reads — optional chaining + explicit
+  // empty-string fallback so a missing element (catastrophic DOM error)
+  // can't blow up the handler. Each field gets its own early-return +
+  // flash so the driver always knows which specific field is empty.
+  const nameEl = document.getElementById('driverNameInput');
+  const compEl = document.getElementById('companyInput');
+  const ttEl   = document.getElementById('truckTypeSelect');
+  const name    = (nameEl?.value || '').trim();
+  const company = (compEl?.value || '').trim();
+  const tt      = (ttEl?.value   || '').trim();
+  if (!name)    { flashEmptyField('driverNameInput');  return; }
+  if (!company) { flashEmptyField('companyInput');     return; }
+  if (!tt)      { flashEmptyField('truckTypeSelect');  return; }
   driverName = name;
   companyName = company;
   truckType = tt;
@@ -2062,6 +2076,21 @@ function clearLocal() {
   session = null;
   driverName = ''; companyName = ''; truckType = '';
   inTransit = 0; completedCount = 0; firstPickupAt = null;
+  truckPhotoFile = null;
+  // 2026-05-29: also reset the intake DOM inputs so a new shift after
+  // end-shift starts from a clean slate. Module-state was already
+  // cleared above; the inputs still held the previous driver's name +
+  // company + truck-type code, which combined with iOS Safari's
+  // autofill-without-events behaviour could leave CONTINUE looking dim
+  // (opacity 0.4) and confuse the driver into thinking it was disabled.
+  // The button has no `disabled` attribute and never has — but blank
+  // inputs after end-shift make the visual state honest.
+  const nameEl = document.getElementById('driverNameInput');
+  const compEl = document.getElementById('companyInput');
+  const ttEl   = document.getElementById('truckTypeSelect');
+  if (nameEl) nameEl.value = '';
+  if (compEl) compEl.value = '';
+  if (ttEl)   ttEl.value   = '';
 }
 
 function loadLocal() {
