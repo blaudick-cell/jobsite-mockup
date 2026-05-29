@@ -162,6 +162,32 @@
     .stat-value.white { color: var(--text); }
     .stat-value.orange { color: var(--orange); }
 
+    /* 2026-05-28: Status pill on the dashboard. Pill size matches
+       .stat-value so the EMPTY/HAULING flip sits at the same baseline
+       as the COMPLETED counter beside it. */
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 10px;
+      margin-top: 4px;
+    }
+    .status-dot {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(132,204,22,0.18);
+      flex-shrink: 0;
+    }
+    .status-text {
+      font-size: 28px; font-weight: 800; color: var(--text);
+      letter-spacing: -0.5px; line-height: 1.05;
+    }
+    .status-sub {
+      font-size: 12px; color: var(--muted); margin-top: 4px;
+      letter-spacing: 0.2px;
+    }
+    /* Faded action button — applied dynamically to whichever of
+       PICK UP / DROP OFF is unavailable. Tap target stays intact so the
+       gate-check modals (warnAlreadyTitle / warnNoLoadTitle) still fire. */
+    .btn-stacked.faded { opacity: 0.35; }
+
     /* ─── HH:MM:SS pickup timer ─────────────────────────────── */
     .timer-card {
       background: var(--surface); border: 1px solid var(--border);
@@ -486,11 +512,18 @@
         <div class="timer-digits idle" id="dash-timer-digits">00:00:00</div>
       </div>
 
-      <!-- In Transit + Completed badges -->
+      <!-- 2026-05-28: STATUS pill + COMPLETED counter. Replaces the prior
+           IN TRANSIT integer with a flip-state pill (EMPTY ↔ HAULING) +
+           a subtitle line that names the next action. updateBadges() also
+           fades whichever action button is currently unavailable. -->
       <div class="stats-row">
-        <div class="stat-box">
-          <div class="stat-label" id="dash-intransit-label">IN TRANSIT</div>
-          <div class="stat-value orange" id="dash-intransit">0</div>
+        <div class="stat-box status-box" id="dash-status-box">
+          <div class="stat-label" id="dash-status-label">STATUS</div>
+          <div class="status-pill" id="dash-status-pill">
+            <span class="status-dot" id="dash-status-dot"></span>
+            <span class="status-text" id="dash-status-text">EMPTY</span>
+          </div>
+          <div class="status-sub" id="dash-status-sub">Heading to pickup</div>
         </div>
         <div class="stat-box">
           <div class="stat-label" id="dash-completed-label">COMPLETED</div>
@@ -811,7 +844,12 @@ const T = {
     infoStep3Body:  "Tap this red button when you're done for the day. This cannot be undone.",
     infoCloseBtn: 'Got it',
     timerLabel: 'TOTAL TIME',
-    inTransitLabel: 'IN TRANSIT', completedLabel: 'COMPLETED',
+    completedLabel: 'COMPLETED',
+    // Status pill (replaces the IN TRANSIT integer counter)
+    statusLabel: 'STATUS',
+    statusEmpty: 'EMPTY', statusHauling: 'HAULING',
+    statusSubEmpty: 'Heading to pickup',
+    statusSubHauling: 'Heading to dropoff',
     pickupLabel: 'PICK UP LOAD', dropoffLabel: 'DROP OFF LOAD', endshiftLabel: 'END SHIFT',
     // Truck-type display names
     tt_SD: 'Single Axle Dump', tt_ED: 'End Dump', tt_SIDE: 'Side Dump', tt_BD: 'Belly Dump',
@@ -864,7 +902,12 @@ const T = {
     infoStep3Body:  'Toca el botón rojo cuando termines tu día. Esto no se puede deshacer.',
     infoCloseBtn: 'Entendido',
     timerLabel: 'TIEMPO TOTAL',
-    inTransitLabel: 'EN TRÁNSITO', completedLabel: 'COMPLETADAS',
+    completedLabel: 'COMPLETADAS',
+    // Status pill (replaces the IN TRANSIT integer counter)
+    statusLabel: 'ESTADO',
+    statusEmpty: 'VACÍO', statusHauling: 'CARGADO',
+    statusSubEmpty: 'Vas a recoger',
+    statusSubHauling: 'Vas a entregar',
     pickupLabel: 'RECOGER CARGA', dropoffLabel: 'ENTREGAR CARGA', endshiftLabel: 'TERMINAR TURNO',
     // Truck-type display names
     tt_SD: 'Volqueta de Eje Sencillo', tt_ED: 'Volquete de Descarga Trasera', tt_SIDE: 'Volqueta Lateral', tt_BD: 'Volquete de Descarga Inferior',
@@ -943,7 +986,7 @@ function applyTranslations() {
     'info-step3-title': 'infoStep3Title', 'info-step3-body': 'infoStep3Body',
     'info-ok-btn': 'infoCloseBtn',
     'dash-timer-label': 'timerLabel',
-    'dash-intransit-label': 'inTransitLabel', 'dash-completed-label': 'completedLabel',
+    'dash-status-label': 'statusLabel', 'dash-completed-label': 'completedLabel',
     'dash-pickup-label': 'pickupLabel', 'dash-dropoff-label': 'dropoffLabel',
     'dash-endshift-label': 'endshiftLabel',
     // Confirmation / warn / end
@@ -969,6 +1012,10 @@ function applyTranslations() {
     const opt = document.querySelector('#truckTypeSelect option[value="' + code + '"]');
     if (opt) opt.textContent = t('tt_' + code);
   });
+  // Status pill text + subtitle are state-driven (EMPTY/HAULING). Re-paint
+  // them via updateBadges so a mid-session language switch picks up the
+  // new strings. Cheap; safe even if the dashboard isn't currently shown.
+  if (document.getElementById('dash-status-text')) updateBadges();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1141,10 +1188,33 @@ function enterDashboard() {
 }
 
 function updateBadges() {
-  document.getElementById('dash-intransit').textContent = inTransit;
+  const hauling = inTransit >= 1;
+  // Status pill flip — EMPTY (green) when idle, HAULING (orange) once a
+  // pickup has happened. Subtitle names the next correct action so the
+  // driver knows where they are in the loop without reading the buttons.
+  const txt = document.getElementById('dash-status-text');
+  const sub = document.getElementById('dash-status-sub');
+  const dot = document.getElementById('dash-status-dot');
+  if (txt) txt.textContent = t(hauling ? 'statusHauling' : 'statusEmpty');
+  if (sub) sub.textContent = t(hauling ? 'statusSubHauling' : 'statusSubEmpty');
+  if (dot) {
+    dot.style.background = hauling ? 'var(--orange)' : 'var(--green)';
+    dot.style.boxShadow = hauling
+      ? '0 0 0 3px rgba(249,115,22,0.22)'
+      : '0 0 0 3px rgba(132,204,22,0.18)';
+  }
+  // Completed counter (unchanged shape — mirrors onto the End Shift card).
   document.getElementById('dash-completed').textContent = completedCount;
   const endC = document.getElementById('end-completed');
   if (endC) endC.textContent = completedCount;
+  // Fade whichever action button is currently unavailable. We don't disable
+  // the button or remove its onclick — the gate-check modals in onPickupTap
+  // / onDropoffTap stay as the safety net, so the faded button still
+  // explains itself if tapped. Keeps tap-target + screen-reader behavior.
+  const pickupBtn  = document.querySelector('#screen-dash .btn-green.btn-stacked');
+  const dropoffBtn = document.querySelector('#screen-dash .btn-orange.btn-stacked');
+  if (pickupBtn)  pickupBtn.classList.toggle('faded',  hauling);
+  if (dropoffBtn) dropoffBtn.classList.toggle('faded', !hauling);
 }
 
 // HH:MM:SS TOTAL TIME counter — ticks every second, anchored to the FIRST
