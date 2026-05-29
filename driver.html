@@ -525,6 +525,44 @@
   </div>
 
   <!-- ══════════════════════════════════════════════════════════
+       SCREEN 2.5: Location permission prompt (2026-05-29)
+       Sits between intake and truck-photo. Asks the OS for location
+       permission while the user has a clear visual rationale, so when
+       the FIRST pickup_load fires the geolocation callback resolves
+       fast (or fails fast — either way the dot lands on the map).
+       FULLY skippable; never blocks the flow.
+  ══════════════════════════════════════════════════════════ -->
+  <div class="screen" id="screen-location-prompt">
+    <div class="header">
+      <div class="header-left">
+        <div class="logo-icon"><span>J</span></div>
+        <div class="logo-text">
+          <span class="logo-line">Jobsite</span>
+          <span class="logo-line"><em>Exchange</em></span>
+        </div>
+        <span class="logo-divider" aria-hidden="true"></span>
+        <img class="partner-logo" alt="Cowgirl Demolition &amp; Excavation">
+      </div>
+    </div>
+    <div class="content center">
+      <div class="confirm-icon" style="background: rgba(56,189,248,0.15); width:96px; height:96px; font-size:48px;">
+        📍
+      </div>
+      <h1 id="loc-prompt-title">Share your location?</h1>
+      <p class="subtitle" id="loc-prompt-subtitle">Lets dispatch see your truck on the live map.</p>
+      <div class="gap-24"></div>
+      <div style="width:100%;" class="stack">
+        <button class="btn btn-green" type="button" onclick="onLocationAllow()">
+          <span id="loc-allow-btn">ALLOW</span>
+        </button>
+        <button class="btn btn-outline" type="button" onclick="onLocationSkip()">
+          <span id="loc-skip-btn">SKIP</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
        SCREEN 3: Truck Photo (optional)
   ══════════════════════════════════════════════════════════ -->
   <div class="screen" id="screen-truck-photo">
@@ -1042,6 +1080,10 @@ const T = {
     truckPhotoTitle: 'Take a photo of your truck (optional)',
     truckPhotoHint: 'Tap to open camera',
     truckTakeBtn: 'TAKE PHOTO', truckUseBtn: 'USE PHOTO', truckSkipBtn: 'SKIP',
+    // 2026-05-29: Location permission prompt (intake → location → truck-photo)
+    locPromptTitle: 'Share your location?',
+    locPromptSubtitle: 'Lets dispatch see your truck on the live map.',
+    locAllowBtn: 'ALLOW', locSkipBtn: 'SKIP',
     photoSaved: 'Photo saved',
     // Shown when a write timed out / failed — driver still saw their counter
     // move because we updated local state optimistically + queued the write.
@@ -1112,6 +1154,10 @@ const T = {
     truckPhotoTitle: 'Tomar una foto de tu camión (opcional)',
     truckPhotoHint: 'Toca para abrir la cámara',
     truckTakeBtn: 'TOMAR FOTO', truckUseBtn: 'USAR FOTO', truckSkipBtn: 'OMITIR',
+    // 2026-05-29: Location permission prompt
+    locPromptTitle: '¿Compartir ubicación?',
+    locPromptSubtitle: 'Permite al despachador ver tu camión en el mapa en vivo.',
+    locAllowBtn: 'PERMITIR', locSkipBtn: 'OMITIR',
     photoSaved: 'Foto guardada',
     localSavePending: 'Guardado localmente — sincronizará cuando haya conexión',
     // 2026-05-29: Issue reporting
@@ -1211,6 +1257,9 @@ function applyTranslations() {
     // Truck photo
     'truckphoto-title': 'truckPhotoTitle', 'truckphoto-hint': 'truckPhotoHint',
     'truckphoto-take-label': 'truckTakeBtn', 'truckphoto-skip-btn': 'truckSkipBtn',
+    // Location permission prompt
+    'loc-prompt-title': 'locPromptTitle', 'loc-prompt-subtitle': 'locPromptSubtitle',
+    'loc-allow-btn': 'locAllowBtn', 'loc-skip-btn': 'locSkipBtn',
     // Event photo (the title is set per-event-type via pendingEventType
     // in startEventPhoto(); the other labels translate uniformly).
     'eventphoto-hint': 'eventPhotoHint',
@@ -1338,6 +1387,49 @@ function submitIntake() {
   document.getElementById('truckPhotoPreview').src = '';
   document.getElementById('truckPhotoPreview').style.display = 'none';
   document.getElementById('truckphoto-take-label').textContent = t('truckTakeBtn');
+  // 2026-05-29: route through screen-location-prompt first so the OS
+  // permission dialog fires while the user has clear visual rationale.
+  // Whatever they tap (Allow/Skip) routes to screen-truck-photo next.
+  applyTranslations();
+  showScreen('screen-location-prompt');
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LOCATION PERMISSION PROMPT (2026-05-29)
+// Sits between intake and truck-photo. Triggers the OS dialog ONCE so
+// the first pickup_load's maybeGetCoords() call resolves fast (or
+// fails fast, either way the dot lands on the dispatch map). Both
+// buttons proceed to screen-truck-photo no matter what — the screen
+// is fully non-blocking. Any JS error in the geolocation call is
+// swallowed; the user is never trapped.
+// Existing in-progress drivers are routed by init()/loadLocal() straight
+// to screen-dash and never see this screen.
+// ══════════════════════════════════════════════════════════════════
+function onLocationAllow() {
+  try {
+    localStorage.setItem('jse_location_asked', '1');
+  } catch (_) { /* private mode etc — non-fatal */ }
+  try {
+    if (navigator && navigator.geolocation
+        && typeof navigator.geolocation.getCurrentPosition === 'function') {
+      // Fire-and-forget. The browser's permission dialog blocks the
+      // success/error callbacks until the user taps Allow/Deny on iOS;
+      // we don't await it, we just transition forward immediately so
+      // the user can keep moving even if the dialog stalls.
+      navigator.geolocation.getCurrentPosition(
+        function() { /* permission granted; coords cached by browser */ },
+        function() { /* permission denied or timed out — non-fatal */ },
+        { timeout: 8000, maximumAge: 60000 }
+      );
+    }
+  } catch (_) { /* even API access can throw in locked-down WebViews */ }
+  showScreen('screen-truck-photo');
+}
+
+function onLocationSkip() {
+  try {
+    localStorage.setItem('jse_location_asked', '1');
+  } catch (_) { /* non-fatal */ }
   showScreen('screen-truck-photo');
 }
 

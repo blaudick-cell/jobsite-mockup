@@ -794,6 +794,17 @@ function render() {
                   : lastEv.event_type;
         lastStr = fmtMTHHMMa(lt) + ' MT · ' + lbl;
       }
+      // 2026-05-29: surface drivers whose events all came in without
+      // coordinates — typically because they denied / never triggered
+      // the OS location permission. Purely informational chip; parallel
+      // to paintDriverMarkers() which already skips these sessions.
+      // Only show once the driver has logged at least one event (a
+      // brand-new session with zero events isn't "no location" yet).
+      const noGeo = b.events.length > 0
+        && !b.events.some(ev => typeof ev.latitude === 'number');
+      const noGeoChip = noGeo
+        ? ' <span class="chip muted" title="No location data for this driver’s events">📍 No location</span>'
+        : '';
       const tr = document.createElement('tr');
       tr.dataset.sessionId = s.id;
       // 2026-05-29: per-row faint tint matched to the status color so the
@@ -809,7 +820,7 @@ function render() {
         <td class="num-col mono">${fmtHMS(refMs)}</td>
         <td class="num-col">${b.pickups}</td>
         <td class="num-col">${b.drops}</td>
-        <td>${lastStr}</td>
+        <td>${lastStr}${noGeoChip}</td>
       `;
       tr.addEventListener('click', () => openDrawer(s.id));
       tbody.appendChild(tr);
