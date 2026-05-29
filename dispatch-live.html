@@ -943,9 +943,19 @@ function initMap() {
       zoom: 9,
       attributionControl: { compact: true },
     });
-    // Disable scroll-zoom so the dispatcher doesn't accidentally zoom
-    // while scrolling the page. Pinch-to-zoom on touch + buttons still work.
-    mapInstance.scrollZoom.disable();
+    // 2026-05-29: zoom enabled per Robert. scrollZoom (mouse wheel),
+    // touchZoom (pinch), doubleClickZoom, and keyboard are all default-on
+    // in MapLibre — no explicit enable calls needed. dragRotate stays off
+    // because dispatcher + drivers don't need a rotated/tilted view (and
+    // an accidental two-finger rotate looks broken).
+    mapInstance.dragRotate.disable();
+    // Zoom in / zoom out buttons in the top-right corner. Compass hidden
+    // since dragRotate is off — the compass would just sit there pointing
+    // north forever.
+    mapInstance.addControl(
+      new maplibregl.NavigationControl({ showCompass: false }),
+      'top-right'
+    );
   } catch (e) {
     console.warn('[dispatch] map init failed', e);
   }
@@ -971,6 +981,14 @@ function paintDriverMarkers(byId) {
   // `if (!loaded() && !isStyleLoaded()) once('load', ...)` gate was
   // never resolving on slow CartoCDN tile fetches, leaving 0 markers
   // visible for the whole session. Just paint.
+  // 2026-05-29: Markers only render for sessions whose most recent
+  // truck_events row has non-null latitude/longitude. Drivers whose phone
+  // denied location permission, or whose geolocation API timed out (6s
+  // outer race in driver.html's maybeGetCoords), will appear in the table
+  // but NOT on the map. This is a data-availability issue, not a map bug
+  // — driver-side reproducer: deny "Allow location" on iOS Safari, then
+  // tap PICK UP LOAD. The truck_events row inserts with lat/lng = null
+  // and statusOf() still counts it as a valid event for the table.
   const desiredKeys = new Set();
   for (const [sid, b] of byId) {
     if (b.session.ended_at) continue;            // skip ended drivers entirely
