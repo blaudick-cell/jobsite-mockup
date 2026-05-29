@@ -1,4 +1,14 @@
+# Default: no-cache for HTML/JS — drivers + dispatcher always get latest build.
 /*
   Cache-Control: no-cache, no-store, must-revalidate
   Pragma: no-cache
   Expires: 0
+
+# 2026-05-29: OG preview PNGs cache aggressively. They're fetched by
+# link-preview bots (iMessage/WhatsApp/Slack), rarely change, and rebuild
+# means a new commit anyway. Specific path rules override the /* wildcard.
+/preview.png
+  Cache-Control: public, max-age=86400, immutable
+
+/preview-dispatch.png
+  Cache-Control: public, max-age=86400, immutable
