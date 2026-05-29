@@ -3,6 +3,12 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <!-- 2026-05-28: no-cache so drivers who saved the page as a home-screen
+       webapp don't keep running a stale build. Backed up by a sibling
+       _headers file on Netlify (same directives in HTTP form). -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -463,7 +469,7 @@
         </div>
       </div>
       <div class="gap-24"></div>
-      <button class="btn btn-green" id="intake-continue-btn" onclick="submitIntake()" disabled style="opacity:0.4;">
+      <button class="btn btn-green" id="intake-continue-btn" onclick="submitIntake()" style="opacity:0.4;">
         <span id="intake-continue-label">CONTINUE</span>
       </button>
     </div>
@@ -1084,26 +1090,49 @@ function selectLanguage(l) {
   lang = l;
   applyTranslations();
   showScreen('screen-intake');
+  // 2026-05-28: keep CONTINUE opacity in sync with any pre-populated fields
+  // (browser autofill, restored values) without waiting for an input event.
+  onIntakeChange();
 }
 
 // ══════════════════════════════════════════════════════════════════
 // INTAKE FORM
 // ══════════════════════════════════════════════════════════════════
+// 2026-05-28: visual-only state — the CONTINUE button is no longer disabled.
+// Real gating moved into submitIntake() so iOS Safari + autofill flows that
+// silently populate fields without firing change/input events can't leave the
+// button non-functional. Robert's bug: form looked filled, opacity stayed at
+// 0.4, taps did nothing.
 function onIntakeChange() {
   const name = document.getElementById('driverNameInput').value.trim();
   const company = document.getElementById('companyInput').value.trim();
   const tt = document.getElementById('truckTypeSelect').value;
   const ok = name.length > 0 && company.length > 0 && tt.length > 0;
   const btn = document.getElementById('intake-continue-btn');
-  btn.disabled = !ok;
   btn.style.opacity = ok ? '1' : '0.4';
+}
+
+// 2026-05-28: brief red-border flash on an empty intake field so a tap with
+// missing data gives the user feedback (matches iOS form-validation idiom).
+function flashEmptyField(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const prev = el.style.borderColor;
+  el.style.borderColor = 'var(--red)';
+  setTimeout(() => { el.style.borderColor = prev || ''; }, 900);
 }
 
 function submitIntake() {
   const name = document.getElementById('driverNameInput').value.trim();
   const company = document.getElementById('companyInput').value.trim();
   const tt = document.getElementById('truckTypeSelect').value;
-  if (!name || !company || !tt) return;
+  if (!name || !company || !tt) {
+    // Visual hint instead of silent no-op.
+    if (!name)    flashEmptyField('driverNameInput');
+    if (!company) flashEmptyField('companyInput');
+    if (!tt)      flashEmptyField('truckTypeSelect');
+    return;
+  }
   driverName = name;
   companyName = company;
   truckType = tt;

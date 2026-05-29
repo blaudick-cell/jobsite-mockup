@@ -1,0 +1,5 @@
+# Send dispatch.jobsiteexchange.com root → the dispatch dashboard
+/*  /dispatch-live.html  200!  Host=dispatch.jobsiteexchange.com
+
+# Friendly URL on any host: /dispatch-live → dispatch-live.html
+/dispatch-live  /dispatch-live.html  200
