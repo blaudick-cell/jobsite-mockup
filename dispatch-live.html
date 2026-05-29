@@ -267,13 +267,12 @@
     .pill.status-pill {
       padding: 8px 18px; font-size: 13px; font-weight: 700;
     }
-    .pill.status-pill.on[data-status="ACTIVE"] {
+    /* 2026-05-29: Active AND Ended share the same bright green selected
+       state — Ended is just as legitimate a filter as Active, and the
+       earlier gray-outline-when-selected styling read as disabled. */
+    .pill.status-pill.on {
       background: var(--green); color: #111;
       border-color: var(--green);
-    }
-    .pill.status-pill.on[data-status="ENDED"] {
-      background: var(--surface2); color: var(--text);
-      border-color: var(--border);
     }
     .pill-group-sep {
       display: inline-block; width: 1px; height: 22px;
