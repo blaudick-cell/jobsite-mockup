@@ -308,6 +308,24 @@
   </table>
 </div>
 
+<!-- 2026-05-29: Issues Feed. Reads from issue_reports + joins client-side
+     against the sessions Map for driver_name / company / truck_type. Same
+     Realtime + polling refresh wiring as the rest of the dashboard. -->
+<div class="section">
+  <div class="section-title">
+    Issues Feed
+    <span id="issues-unread-dot" style="display:none; width:8px; height:8px; border-radius:50%; background: var(--red); display:none; margin-left:6px; vertical-align:middle;"></span>
+    <span id="issues-count" style="color: var(--faint); font-weight: 600; margin-left: 8px;"></span>
+  </div>
+  <table class="tbl">
+    <thead><tr>
+      <th>Time (MT)</th><th>Driver</th><th>Company</th>
+      <th>Truck</th><th>Note</th><th>Photo</th><th>GPS</th>
+    </tr></thead>
+    <tbody id="issues-rows"></tbody>
+  </table>
+</div>
+
 <div class="section">
   <div class="section-title">By company</div>
   <table class="tbl">
@@ -368,6 +386,7 @@ const truckLabel = (c) => c ? (TRUCK_TYPES[c] || c) : '—';
 // State
 let sessions = [];        // raw driver_sessions rows
 let events   = [];        // raw truck_events rows (ordered by event_at asc client-side)
+let issues   = [];        // raw issue_reports rows (ordered by event_at desc, limit 50)
 let activeSessionId = null;
 let activeSessionRow = null;
 let notesSaveTimer = null;
@@ -450,12 +469,16 @@ function startOfTodayMT() {
 async function fetchAll() {
   const startedAt = nowMs();
   try {
-    const [sRes, eRes] = await Promise.all([
+    const [sRes, eRes, iRes] = await Promise.all([
       db.from('driver_sessions').select('*').order('started_at', { ascending: false }),
       db.from('truck_events').select('*').order('event_at', { ascending: true }),
+      // 2026-05-29: issue_reports, newest first, capped at 50 to keep the
+      // page lean (older issues still queryable directly in Supabase).
+      db.from('issue_reports').select('*').order('event_at', { ascending: false }).limit(50),
     ]);
     if (!sRes.error) sessions = sRes.data || [];
     if (!eRes.error) events   = eRes.data || [];
+    if (!iRes.error) issues   = iRes.data || [];
     setRefreshStamp();
     render();
   } catch (e) {
@@ -634,6 +657,51 @@ function render() {
       cotbody.appendChild(tr);
     }
   }
+
+  // 2026-05-29: Issues Feed. Join client-side against sessions for driver
+  // metadata; gracefully show "—" when session is null/missing (deleted
+  // session, or future cross-product issues without a session link).
+  const sessById = new Map(sessions.map(s => [s.id, s]));
+  const issuesTbody = document.getElementById('issues-rows');
+  if (!issues.length) {
+    issuesTbody.innerHTML = '<tr><td colspan="7" class="empty">No issues reported yet.</td></tr>';
+  } else {
+    issuesTbody.innerHTML = '';
+    for (const r of issues) {
+      const t = parseISO(r.event_at);
+      const s = r.session_id ? sessById.get(r.session_id) : null;
+      const driver  = s ? (s.driver_name || '—') : '—';
+      const company = s ? (s.company     || '—') : '—';
+      const truck   = s ? truckLabel(s.truck_type) : '—';
+      const photo = r.photo_url
+        ? `<a href="${escapeHtml(r.photo_url)}" target="_blank" rel="noopener"><img class="feed-thumb" src="${escapeHtml(r.photo_url)}" alt=""></a>`
+        : '—';
+      const gps = (r.latitude != null && r.longitude != null)
+        ? `<a class="gps-link" href="https://www.google.com/maps?q=${r.latitude},${r.longitude}" target="_blank" rel="noopener">${Number(r.latitude).toFixed(4)},${Number(r.longitude).toFixed(4)} ↗</a>`
+        : '—';
+      const tr = document.createElement('tr');
+      tr.style.cursor = 'default';
+      tr.innerHTML = `
+        <td class="mono" style="white-space:nowrap;">${fmtMTHHMMa(t)}</td>
+        <td>${escapeHtml(driver)}</td>
+        <td>${escapeHtml(company)}</td>
+        <td>${escapeHtml(truck)}</td>
+        <td style="max-width:340px; white-space:pre-wrap; word-break:break-word;">${escapeHtml(r.issue_text || '')}</td>
+        <td>${photo}</td>
+        <td>${gps}</td>
+      `;
+      issuesTbody.appendChild(tr);
+    }
+  }
+  // Unread-recent dot: red if any issue within the last hour.
+  const recentMs = nowMs() - 60 * 60 * 1000;
+  const recentCount = issues.filter(r => parseISO(r.event_at) && parseISO(r.event_at).getTime() >= recentMs).length;
+  const dot = document.getElementById('issues-unread-dot');
+  const cnt = document.getElementById('issues-count');
+  if (dot) dot.style.display = recentCount > 0 ? 'inline-block' : 'none';
+  if (cnt) cnt.textContent = issues.length
+    ? `${issues.length} total${recentCount ? ` · ${recentCount} in last hour` : ''}`
+    : '';
 
   // If the drawer is open for a session that still exists, refresh its body.
   if (activeSessionId) {
@@ -834,6 +902,7 @@ function startRealtime() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'driver_sessions' }, debouncedRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'truck_events'    }, debouncedRefresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'event_photos'    }, debouncedRefresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'issue_reports'   }, debouncedRefresh)
       .subscribe();
   } catch (e) {
     console.warn('[dispatch] realtime subscribe failed; relying on polling', e);

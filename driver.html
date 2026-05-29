@@ -121,6 +121,9 @@
     .btn-orange { background: var(--orange); color: #fff; }
     .btn-dark   { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-outline { background: transparent; color: var(--text); border: 1.5px solid var(--border); }
+    /* 2026-05-29: neutral Report Issue button. Sits below the colored
+       action triplet (green/orange/red) without competing with them. */
+    .btn-report { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
     .btn-sm     { height: 50px; font-size: 15px; border-radius: 10px; }
     .btn-icon   { font-size: 22px; }
     .btn-stacked { flex-direction: column; gap: 2px; height: auto; padding: 16px; }
@@ -595,6 +598,81 @@
             </div>
           </div>
         </button>
+        <!-- 2026-05-29: Report Issue. Neutral surface2 background so it
+             doesn't fight the action-button color story above (green/
+             orange/red are reserved for state-flipping actions). -->
+        <button class="btn btn-report btn-stacked" onclick="openIssueReport('dash')">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:22px;">📝</span>
+            <div>
+              <div class="btn-label" id="dash-issue-label">REPORT ISSUE</div>
+            </div>
+          </div>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SCREEN: Issue prompt (End-Shift fork — leave a note first?)
+  ══════════════════════════════════════════════════════════ -->
+  <div class="screen" id="screen-issue-prompt">
+    <div class="header">
+      <div class="logo-icon"><span>J</span></div>
+      <div class="logo-text">Jobsite<em>Exchange</em></div>
+      <div class="header-right"><img class="partner-logo" alt="Cowgirl Demolition &amp; Excavation"></div>
+    </div>
+    <div class="content center">
+      <div class="confirm-icon" style="background:rgba(56,189,248,0.15);">
+        <span style="font-size:40px;color:var(--info,#38bdf8);">📝</span>
+      </div>
+      <h1 id="issue-prompt-title">Need to leave a note for dispatch?</h1>
+      <div class="gap-24"></div>
+      <div style="width:100%;" class="stack">
+        <button class="btn btn-green" onclick="declineIssueAtEndShift()">
+          <span id="issue-no-endshift-btn">NO, END SHIFT</span>
+        </button>
+        <button class="btn btn-outline" onclick="openIssueReport('end')">
+          <span id="issue-leave-note-btn">LEAVE NOTE</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════
+       SCREEN: Issue report form (freeform note + optional photo)
+  ══════════════════════════════════════════════════════════ -->
+  <div class="screen" id="screen-issue-report">
+    <div class="header">
+      <div class="logo-icon"><span>J</span></div>
+      <div class="logo-text">Jobsite<em>Exchange</em></div>
+      <div class="header-right"><img class="partner-logo" alt="Cowgirl Demolition &amp; Excavation"></div>
+    </div>
+    <div class="content">
+      <h1 id="issue-title">Report Issue</h1>
+      <p class="subtitle" id="issue-subtitle">Send a note to dispatch.</p>
+      <div class="gap-16"></div>
+      <div class="field">
+        <span class="label" id="issue-label">What happened?</span>
+        <textarea id="issueTextInput" rows="8" autocapitalize="sentences"
+                  style="width:100%; min-height:140px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius); color:var(--text); font: inherit; font-size:16px; padding:12px 14px; outline:none; resize:vertical; -webkit-appearance:none;"
+                  placeholder=""></textarea>
+      </div>
+      <div class="gap-16"></div>
+      <label class="photo-area" for="issuePhotoInput" id="issuePhotoArea" style="min-height:140px;">
+        <span class="camera-icon">📷</span>
+        <span class="photo-hint" id="issue-add-photo">Add photo (optional)</span>
+        <img id="issuePhotoPreview" alt="issue photo" style="display:none;">
+      </label>
+      <input type="file" id="issuePhotoInput" accept="image/*" capture="environment" style="display:none;" onchange="onIssuePhotoPick(this)">
+      <div class="gap-16"></div>
+      <div class="stack">
+        <button class="btn btn-green" id="issue-submit-btn" onclick="submitIssueReport()">
+          <span id="issue-submit-label">SUBMIT NOTE</span>
+        </button>
+        <button class="btn btn-outline" onclick="cancelIssueReport()">
+          <span id="issue-cancel-label">CANCEL</span>
+        </button>
       </div>
     </div>
   </div>
@@ -812,6 +890,9 @@ let pickupTimerInt   = null;   // 1Hz interval handle for HH:MM:SS
 let truckPhotoFile   = null;
 let eventPhotoFile   = null;   // optional photo selected on the event-photo screen
 let pendingEventType = null;   // 'pickup_load' or 'dropoff_load' while photo prompt is open
+let issuePhotoFile   = null;   // optional photo selected on the issue-report screen
+let issueOrigin      = 'dash'; // 'dash' (open from button) or 'end' (open from End Shift prompt)
+let endingShift      = false;  // when true, post-issue flow continues to screen-end instead of screen-dash
 
 const STORAGE_KEY = 'jse_driver_v1';
 
@@ -884,6 +965,14 @@ const T = {
     // Shown when a write timed out / failed — driver still saw their counter
     // move because we updated local state optimistically + queued the write.
     localSavePending: 'Saved locally — will sync when online',
+    // 2026-05-29: Issue reporting
+    reportIssueBtn: 'REPORT ISSUE',
+    issueTitle: 'Report Issue', issueSubtitle: 'Send a note to dispatch.',
+    issueLabel: 'What happened?', issueAddPhoto: 'Add photo (optional)',
+    issueSubmitBtn: 'SUBMIT NOTE', issueCancelBtn: 'CANCEL',
+    issueSentToast: 'Note sent to dispatch',
+    issueLeaveNotePromptTitle: 'Need to leave a note for dispatch?',
+    issueNoEndShiftBtn: 'NO, END SHIFT', issueLeaveNoteBtn: 'LEAVE NOTE',
     // Per-event photo prompts (pickup vs dropoff get different titles)
     eventPhotoPickupTitle:  'Take a photo of the load (optional)',
     eventPhotoDropoffTitle: 'Take a photo of the drop-off (optional)',
@@ -944,6 +1033,14 @@ const T = {
     truckTakeBtn: 'TOMAR FOTO', truckUseBtn: 'USAR FOTO', truckSkipBtn: 'OMITIR',
     photoSaved: 'Foto guardada',
     localSavePending: 'Guardado localmente — sincronizará cuando haya conexión',
+    // 2026-05-29: Issue reporting
+    reportIssueBtn: 'REPORTAR PROBLEMA',
+    issueTitle: 'Reportar Problema', issueSubtitle: 'Envía una nota al despachador.',
+    issueLabel: '¿Qué pasó?', issueAddPhoto: 'Agregar foto (opcional)',
+    issueSubmitBtn: 'ENVIAR NOTA', issueCancelBtn: 'CANCELAR',
+    issueSentToast: 'Nota enviada al despachador',
+    issueLeaveNotePromptTitle: '¿Necesitas dejar una nota al despachador?',
+    issueNoEndShiftBtn: 'NO, TERMINAR TURNO', issueLeaveNoteBtn: 'DEJAR NOTA',
     // Per-event photo prompts
     eventPhotoPickupTitle:  'Tomar una foto de la carga (opcional)',
     eventPhotoDropoffTitle: 'Tomar una foto de la entrega (opcional)',
@@ -1051,6 +1148,13 @@ function applyTranslations() {
     'dash-status-label': 'statusLabel', 'dash-completed-label': 'completedLabel',
     'dash-pickup-label': 'pickupLabel', 'dash-dropoff-label': 'dropoffLabel',
     'dash-endshift-label': 'endshiftLabel',
+    // Issue reporting
+    'dash-issue-label': 'reportIssueBtn',
+    'issue-title': 'issueTitle', 'issue-subtitle': 'issueSubtitle',
+    'issue-label': 'issueLabel', 'issue-add-photo': 'issueAddPhoto',
+    'issue-submit-label': 'issueSubmitBtn', 'issue-cancel-label': 'issueCancelBtn',
+    'issue-prompt-title': 'issueLeaveNotePromptTitle',
+    'issue-no-endshift-btn': 'issueNoEndShiftBtn', 'issue-leave-note-btn': 'issueLeaveNoteBtn',
     // Confirmation / warn / end
     'confirm-ok-btn': 'ok', 'warn-ok-btn': 'ok',
     'end-title': 'endTitle', 'end-shift-time-label': 'endShiftTimeLabel',
@@ -1572,7 +1676,138 @@ async function maybeGetCoords() {
 // ══════════════════════════════════════════════════════════════════
 // END SHIFT
 // ══════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════
+// ISSUE REPORTING (2026-05-29) — driver can send a freeform note
+// (+optional photo) to dispatch. Two entry points: Report Issue button
+// on the dashboard (origin='dash') and the Leave Note branch of the
+// End Shift prompt (origin='end'). Submit insert is wrapped in the
+// existing withTimeout() helper + falls through to pushOutbox so a
+// hung Supabase can never block the driver.
+// ══════════════════════════════════════════════════════════════════
+function openIssueReport(origin) {
+  issueOrigin = origin || 'dash';
+  issuePhotoFile = null;
+  endingShift = (issueOrigin === 'end');
+  const ta = document.getElementById('issueTextInput');
+  if (ta) { ta.value = ''; ta.style.borderColor = ''; }
+  const prev = document.getElementById('issuePhotoPreview');
+  if (prev) { prev.src = ''; prev.style.display = 'none'; }
+  // Hard-reset Submit button — finishEventPhoto-style spinner could still
+  // be in place if a prior submit was interrupted mid-upload.
+  const sb = document.getElementById('issue-submit-btn');
+  if (sb) {
+    sb.classList.remove('loading');
+    sb.innerHTML = '<span id="issue-submit-label">' + t('issueSubmitBtn') + '</span>';
+  }
+  applyTranslations();
+  showScreen('screen-issue-report');
+}
+
+function onIssuePhotoPick(input) {
+  if (!input.files || !input.files[0]) return;
+  issuePhotoFile = input.files[0];
+  const preview = document.getElementById('issuePhotoPreview');
+  preview.src = URL.createObjectURL(issuePhotoFile);
+  preview.style.display = 'block';
+}
+
+function cancelIssueReport() {
+  // Cancel returns to wherever the user came from. If they were ending
+  // their shift, continue the end-shift flow at the confirmation card.
+  if (endingShift) {
+    endingShift = false;
+    refreshTimer();
+    updateBadges();
+    applyTranslations();
+    showScreen('screen-end');
+  } else {
+    showScreen('screen-dash');
+  }
+}
+
+async function submitIssueReport() {
+  const ta = document.getElementById('issueTextInput');
+  const text = (ta.value || '').trim();
+  if (!text) {
+    flashEmptyField('issueTextInput');
+    return;
+  }
+  const sb = document.getElementById('issue-submit-btn');
+  sb.classList.add('loading');
+  const origHtml = sb.innerHTML;
+  sb.innerHTML = '<div class="spinner"></div>';
+
+  const eventAt = new Date().toISOString();
+  const coords = await maybeGetCoords();
+  let photoUrl = null;
+
+  // Optional photo upload. Silent-on-failure — the note itself is the
+  // source of truth and shouldn't be blocked by a bad upload.
+  if (issuePhotoFile) {
+    try {
+      const ext  = (issuePhotoFile.name && issuePhotoFile.name.split('.').pop()) || 'jpg';
+      const sid  = (session && session.id) ? session.id : getDeviceToken();
+      const path = `issues/${sid}_${Date.now()}.${ext}`;
+      const upRes = await withTimeout(
+        db.storage.from('driver-photos').upload(path, issuePhotoFile, { contentType: issuePhotoFile.type }),
+        10000
+      );
+      if (upRes && !upRes.error) {
+        const { data: pubData } = db.storage.from('driver-photos').getPublicUrl(path);
+        photoUrl = pubData.publicUrl;
+      }
+    } catch (_) { /* upload failure is non-fatal */ }
+  }
+
+  const payload = {
+    session_id: (session && session.id) ? session.id : null,
+    issue_text: text,
+    photo_url: photoUrl,
+    event_at: eventAt,
+    latitude:  coords ? coords.lat : null,
+    longitude: coords ? coords.lng : null,
+  };
+
+  let saved = false;
+  try {
+    const res = await withTimeout(db.from('issue_reports').insert(payload), 10000);
+    saved = !!(res && !res.error);
+  } catch (_) { /* timeout or network — outbox fallback below */ }
+
+  if (!saved) {
+    // Fall through to the same outbox path used by truck_events.
+    pushOutbox({ op: 'insert', table: 'issue_reports', payload });
+    toast(t('localSavePending'));
+  } else {
+    toast(t('issueSentToast'), 1500);
+  }
+
+  issuePhotoFile = null;
+  sb.classList.remove('loading');
+  sb.innerHTML = origHtml;
+
+  // Continue to the destination the driver was on the way to.
+  if (endingShift) {
+    endingShift = false;
+    refreshTimer();
+    updateBadges();
+    applyTranslations();
+    setTimeout(() => showScreen('screen-end'), 600);
+  } else {
+    setTimeout(() => showScreen('screen-dash'), 600);
+  }
+}
+
+// 2026-05-29: End Shift now stops at an issue-prompt screen first — gives
+// the driver one tap to leave a note for dispatch before finishing the shift.
+// declineIssueAtEndShift() continues to the existing screen-end confirmation;
+// the Leave Note button routes through screen-issue-report and rejoins
+// screen-end after submit/cancel (tracked via endingShift).
 function showEndShift() {
+  applyTranslations();
+  showScreen('screen-issue-prompt');
+}
+function declineIssueAtEndShift() {
   refreshTimer();
   updateBadges();
   applyTranslations();
