@@ -164,6 +164,37 @@
       padding: 6px 10px !important; border-radius: 8px !important;
     }
     .maplibregl-popup-tip { display: none !important; }
+    /* 2026-05-29: make the + / − zoom buttons unmistakably visible on the
+       dark-matter basemap. Default MapLibre styling renders them in light
+       grey on white which gets lost against the dim tiles, and Robert
+       reported he couldn't tell zoom was available at all. */
+    .maplibregl-ctrl-group {
+      background: var(--surface2) !important;
+      border: 1px solid var(--border) !important;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.4) !important;
+      border-radius: 8px !important;
+      overflow: hidden;
+    }
+    .maplibregl-ctrl-group button {
+      width: 34px !important; height: 34px !important;
+      background: var(--surface2) !important;
+      border: none !important;
+    }
+    .maplibregl-ctrl-group button:hover {
+      background: var(--surface) !important;
+    }
+    .maplibregl-ctrl-group button + button {
+      border-top: 1px solid var(--border) !important;
+    }
+    .maplibregl-ctrl-group button .maplibregl-ctrl-icon {
+      filter: invert(1) brightness(2);
+    }
+    /* Make sure the control sits comfortably away from the right edge —
+       the previous default placement clipped a few px under #live-map's
+       overflow:hidden border on some viewport widths. */
+    .maplibregl-ctrl-top-right {
+      top: 10px !important; right: 10px !important;
+    }
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 8px 14px; border-radius: 8px; border: none;
@@ -954,17 +985,26 @@ function initMap() {
       zoom: 9,
       attributionControl: { compact: true },
     });
-    // 2026-05-29: zoom enabled per Robert. scrollZoom (mouse wheel),
-    // touchZoom (pinch), doubleClickZoom, and keyboard are all default-on
-    // in MapLibre — no explicit enable calls needed. dragRotate stays off
-    // because dispatcher + drivers don't need a rotated/tilted view (and
-    // an accidental two-finger rotate looks broken).
+    // 2026-05-29 v2: defensive explicit .enable() calls for every zoom +
+    // pan handler. MapLibre defaults all of these to ON, but Robert reported
+    // desktop zoom not responding, and being explicit makes the intent
+    // unambiguous and survives any future copy-paste regression that
+    // accidentally inherits a .disable() from older code.
+    mapInstance.scrollZoom.enable();
+    mapInstance.doubleClickZoom.enable();
+    mapInstance.boxZoom.enable();
+    mapInstance.dragPan.enable();
+    mapInstance.keyboard.enable();
+    mapInstance.touchZoomRotate.enable();
+    // Keep pinch-zoom but drop the twist gesture so a two-finger rotate
+    // doesn't tilt the map sideways — dispatcher + drivers want north-up.
+    mapInstance.touchZoomRotate.disableRotation();
     mapInstance.dragRotate.disable();
     // Zoom in / zoom out buttons in the top-right corner. Compass hidden
     // since dragRotate is off — the compass would just sit there pointing
     // north forever.
     mapInstance.addControl(
-      new maplibregl.NavigationControl({ showCompass: false }),
+      new maplibregl.NavigationControl({ showCompass: false, visualizePitch: false }),
       'top-right'
     );
   } catch (e) {
