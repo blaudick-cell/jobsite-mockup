@@ -28,6 +28,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>JSE Dispatch — Live</title>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <!-- 2026-05-29: MapLibre GL JS for the live operational map. Same stack
+       the JSE mockup uses (CartoCDN dark-matter tiles, no auth, no build). -->
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.css">
+  <script src="https://unpkg.com/maplibre-gl@4/dist/maplibre-gl.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; color: inherit; }
     :root {
@@ -95,6 +99,71 @@
     .refresh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 1.6s infinite; flex-shrink: 0; }
     .refresh-pill.warn .refresh-dot { background: var(--red); animation: none; }
     @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+    /* 2026-05-29: Live operational map. Sits between the summary cards
+       and the filter pills. MapLibre renders into #live-map. Colored
+       driver-markers are HTML elements (not GL features) so we can wire
+       click handlers + reuse the same green/yellow/red palette as the
+       status dots + row tints. */
+    .map-section { padding: 0 24px; margin-top: 4px; }
+    .map-header {
+      display: flex; align-items: center; gap: 12px;
+      padding: 0 2px 8px;
+    }
+    .map-header h3 {
+      font-size: 11px; font-weight: 700; letter-spacing: 0.8px;
+      color: var(--muted); text-transform: uppercase;
+    }
+    .map-legend {
+      display: inline-flex; align-items: center; gap: 12px;
+      font-size: 11px; color: var(--muted);
+    }
+    .legend-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+      margin-right: 4px; vertical-align: middle;
+    }
+    .legend-dot.green  { background: var(--green); }
+    .legend-dot.yellow { background: var(--orange); }
+    .legend-dot.red    { background: var(--red); }
+    .map-fit-btn {
+      margin-left: auto;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); font-size: 11px; font-weight: 700;
+      letter-spacing: 0.4px; padding: 5px 10px; border-radius: 12px;
+      cursor: pointer; -webkit-tap-highlight-color: transparent;
+    }
+    .map-fit-btn:hover { color: var(--text); border-color: var(--green); }
+    #live-map {
+      height: 380px; border-radius: 14px; overflow: hidden;
+      border: 1px solid var(--border);
+    }
+    @media (max-width: 700px) {
+      #live-map { height: 280px; }
+    }
+    /* Driver markers (HTML, not GL features). Click → openDrawer. */
+    .driver-marker {
+      width: 18px; height: 18px; border-radius: 50%;
+      border: 2px solid #111; box-shadow: 0 0 0 3px rgba(255,255,255,0.15);
+      cursor: pointer; transition: transform 0.2s ease;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .driver-marker:hover { transform: scale(1.3); }
+    .driver-marker.green  { background: var(--green); }
+    .driver-marker.yellow { background: var(--orange); }
+    .driver-marker.red    { background: var(--red); }
+    .driver-marker.pulse  { animation: marker-pulse 2s infinite; }
+    @keyframes marker-pulse {
+      0%,100% { box-shadow: 0 0 0 3px rgba(132,204,22,0.45); }
+      50%     { box-shadow: 0 0 0 8px rgba(132,204,22,0.08); }
+    }
+    /* MapLibre popup theming so it blends with the dark dashboard. */
+    .maplibregl-popup-content {
+      background: var(--surface2) !important; color: var(--text) !important;
+      border: 1px solid var(--border) !important;
+      font-size: 12px !important; font-weight: 600 !important;
+      padding: 6px 10px !important; border-radius: 8px !important;
+    }
+    .maplibregl-popup-tip { display: none !important; }
     .btn {
       display: inline-flex; align-items: center; gap: 6px;
       padding: 8px 14px; border-radius: 8px; border: none;
@@ -359,6 +428,23 @@
   <div class="card"><div class="card-label">Total Drop-offs</div><div class="card-value orange" id="card-drops">0</div><div class="card-sub">today (local MT)</div></div>
   <div class="card"><div class="card-label">Companies Active</div><div class="card-value white" id="card-companies">0</div><div class="card-sub">distinct (open)</div></div>
 </div>
+
+<!-- 2026-05-29: Live operational map. Renders last-known position per
+     active driver, color-coded by status. Click a marker → opens the
+     existing driver detail drawer. Realtime updates flow through the
+     same debouncedRefresh path as the rest of the dashboard. -->
+<section class="map-section">
+  <div class="map-header">
+    <h3>Live Map</h3>
+    <div class="map-legend">
+      <span><span class="legend-dot green"></span>Active</span>
+      <span><span class="legend-dot yellow"></span>Idle 20-45 min</span>
+      <span><span class="legend-dot red"></span>Inactive &gt;45 min</span>
+    </div>
+    <button class="map-fit-btn" type="button" onclick="fitMapToDrivers()">FIT TO DRIVERS</button>
+  </div>
+  <div id="live-map"></div>
+</section>
 
 <div class="filters" id="filters">
   <span class="pill on" data-truck="ALL">All trucks</span>
@@ -821,10 +907,135 @@ function render() {
     const b = byId.get(activeSessionId);
     if (b) renderDrawer(b);
   }
+
+  // 2026-05-29: paint/update live-map markers off the same buckets the
+  // table just rendered from. No new fetch — diff-reconciled against
+  // markersRef so existing markers animate via setLngLat() rather than
+  // tear-down + rebuild on every refresh.
+  paintDriverMarkers(byId);
 }
 
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+}
+
+// ══════════════════════════════════════════════════════════════════
+// LIVE MAP (2026-05-29)
+// Position only updates when driver hits pickup / dropoff / end-shift.
+// A continuous heartbeat (e.g. every 5 min from driver.html) would
+// smooth this — not built yet.
+// ══════════════════════════════════════════════════════════════════
+let mapInstance = null;
+let markersRef = new Map();       // session_id -> { marker, popup, lat, lng, status }
+let didInitialFit = false;        // auto-fit once on first paint with ≥1 marker
+
+function initMap() {
+  if (mapInstance) return;
+  if (typeof maplibregl === 'undefined') {
+    console.warn('[dispatch] MapLibre not loaded; skipping map init');
+    return;
+  }
+  try {
+    mapInstance = new maplibregl.Map({
+      container: 'live-map',
+      style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+      center: [-105.0, 39.7],   // Denver metro
+      zoom: 9,
+      attributionControl: { compact: true },
+    });
+    // Disable scroll-zoom so the dispatcher doesn't accidentally zoom
+    // while scrolling the page. Pinch-to-zoom on touch + buttons still work.
+    mapInstance.scrollZoom.disable();
+  } catch (e) {
+    console.warn('[dispatch] map init failed', e);
+  }
+}
+
+function lastKnownCoord(bucket) {
+  // Walk this session's events newest-first, return the first with a
+  // non-null latitude. Returns null if no event with coords exists.
+  const evts = bucket.events || [];
+  for (let i = evts.length - 1; i >= 0; i--) {
+    const e = evts[i];
+    if (e && e.latitude != null && e.longitude != null) {
+      return { lat: Number(e.latitude), lng: Number(e.longitude) };
+    }
+  }
+  return null;
+}
+
+function paintDriverMarkers(byId) {
+  if (!mapInstance) return;
+  // HTML markers don't require the style to be loaded — they just need
+  // the map instance to exist and have a viewport. The original
+  // `if (!loaded() && !isStyleLoaded()) once('load', ...)` gate was
+  // never resolving on slow CartoCDN tile fetches, leaving 0 markers
+  // visible for the whole session. Just paint.
+  const desiredKeys = new Set();
+  for (const [sid, b] of byId) {
+    if (b.session.ended_at) continue;            // skip ended drivers entirely
+    const coord = lastKnownCoord(b);
+    if (!coord) continue;                        // skip sessions with no geocoded events
+    const status = statusOf(b);                  // 'green' | 'yellow' | 'red' | 'ended'
+    if (status === 'ended') continue;
+    desiredKeys.add(sid);
+    const dot = markersRef.get(sid);
+    const label = (b.session.driver_name || '—') + ' · ' + truckLabel(b.session.truck_type);
+    if (dot) {
+      // Diff-reconcile: only touch what changed.
+      if (dot.lat !== coord.lat || dot.lng !== coord.lng) {
+        dot.marker.setLngLat([coord.lng, coord.lat]);
+        dot.lat = coord.lat; dot.lng = coord.lng;
+      }
+      if (dot.status !== status) {
+        dot.marker.getElement().className =
+          'driver-marker ' + status + (status === 'green' ? ' pulse' : '');
+        dot.status = status;
+      }
+      if (dot.popup) dot.popup.setText(label);
+    } else {
+      const el = document.createElement('div');
+      el.className = 'driver-marker ' + status + (status === 'green' ? ' pulse' : '');
+      el.title = label;
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        openDrawer(sid);
+      });
+      const popup = new maplibregl.Popup({
+        closeButton: false, offset: 12, anchor: 'bottom',
+      }).setText(label);
+      el.addEventListener('mouseenter', () => popup.addTo(mapInstance));
+      el.addEventListener('mouseleave', () => popup.remove());
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([coord.lng, coord.lat])
+        .setPopup(popup)
+        .addTo(mapInstance);
+      markersRef.set(sid, { marker, popup, lat: coord.lat, lng: coord.lng, status });
+    }
+  }
+  // Remove markers whose sessions ended or vanished.
+  for (const [sid, dot] of markersRef) {
+    if (!desiredKeys.has(sid)) {
+      try { dot.marker.remove(); } catch (_) {}
+      markersRef.delete(sid);
+    }
+  }
+  // Auto-fit on the first paint that produces ≥1 marker. Subsequent
+  // refreshes don't hijack the dispatcher's pan/zoom — use the FIT TO
+  // DRIVERS button instead.
+  if (!didInitialFit && markersRef.size > 0) {
+    didInitialFit = true;
+    fitMapToDrivers();
+  }
+}
+
+function fitMapToDrivers() {
+  if (!mapInstance || markersRef.size === 0) return;
+  const bounds = new maplibregl.LngLatBounds();
+  for (const dot of markersRef.values()) {
+    bounds.extend([dot.lng, dot.lat]);
+  }
+  mapInstance.fitBounds(bounds, { padding: 60, maxZoom: 13, duration: 600 });
 }
 
 // ──────────────────────────────────────────────────────────────
@@ -1076,15 +1287,36 @@ function startRealtime() {
   }
 }
 
-// Safety: 5-second polling refresh. Lightweight; covers Realtime drop.
-setInterval(fetchAll, 5000);
+// 2026-05-29: intervals tracked so the visibility hook can pause them.
+// MapLibre's WebGL canvas auto-throttles when offscreen; we just need to
+// stop the JS-side polling + 1-Hz re-renders so a backgrounded laptop
+// doesn't burn cycles.
+let pollTimer = null;
+let tickTimer = null;
+function startIntervals() {
+  if (!pollTimer) pollTimer = setInterval(fetchAll, 5000);
+  if (!tickTimer) tickTimer = setInterval(render, 1000);
+}
+function stopIntervals() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    stopIntervals();
+  } else {
+    // Catch up on missed events immediately, then resume the regular cadence.
+    fetchAll();
+    startIntervals();
+  }
+});
+startIntervals();
 
-// Live tick of the "current" duration column without re-fetching.
-setInterval(() => {
-  // Refresh only the rows + headline hours; cheap.
-  // We re-render the whole table — small data, fine for ~50 rows.
-  render();
-}, 1000);
+// 2026-05-29: boot the live map once at startup. Init runs after MapLibre
+// loads (script tag at top of <head> is in the load path before this
+// script runs at end of body). paintDriverMarkers() runs at every render()
+// and is no-op until initMap() succeeds.
+initMap();
 
 // ──────────────────────────────────────────────────────────────
 // CSV EXPORT (current filtered view)
