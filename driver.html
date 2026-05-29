@@ -724,6 +724,53 @@ let pendingEventType = null;   // 'pickup_load' or 'dropoff_load' while photo pr
 
 const STORAGE_KEY = 'jse_driver_v1';
 
+// 2026-05-28 hardening: outbox + hard-timeout helpers. Any write to Supabase
+// that times out gets queued in localStorage; the next init() drains the
+// queue with the same 10s ceiling. Driver UX never blocks on a hung network
+// or a stuck iOS Safari getCurrentPosition callback.
+const OUTBOX_KEY = 'jse_outbox_v1';
+
+const timeoutMs = (ms) => new Promise((_, reject) =>
+  setTimeout(() => reject(new Error('timeout')), ms));
+
+function withTimeout(promise, ms) {
+  return Promise.race([promise, timeoutMs(ms)]);
+}
+
+function pushOutbox(item) {
+  try {
+    const q = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]');
+    q.push({ ...item, ts: Date.now() });
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(q));
+  } catch (_) { /* even outbox failure is non-fatal — log only */ }
+}
+
+async function drainOutbox() {
+  let q;
+  try { q = JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); }
+  catch { q = []; }
+  if (!q.length) return;
+  const remaining = [];
+  for (const item of q) {
+    try {
+      if (item.op === 'insert') {
+        await withTimeout(db.from(item.table).insert(item.payload), 10000);
+      } else if (item.op === 'update') {
+        await withTimeout(
+          db.from(item.table).update(item.payload).eq('id', item.id),
+          10000
+        );
+      }
+    } catch (_) {
+      remaining.push(item);
+    }
+  }
+  try {
+    localStorage.setItem(OUTBOX_KEY, JSON.stringify(remaining));
+  } catch (_) {}
+  console.log('[jse] outbox drained — ' + remaining.length + ' item(s) still queued');
+}
+
 // ══════════════════════════════════════════════════════════════════
 // TRANSLATIONS
 // ══════════════════════════════════════════════════════════════════
@@ -743,6 +790,9 @@ const T = {
     truckPhotoHint: 'Tap to open camera',
     truckTakeBtn: 'TAKE PHOTO', truckUseBtn: 'USE PHOTO', truckSkipBtn: 'SKIP',
     photoSaved: 'Photo saved',
+    // Shown when a write timed out / failed — driver still saw their counter
+    // move because we updated local state optimistically + queued the write.
+    localSavePending: 'Saved locally — will sync when online',
     // Per-event photo prompts (pickup vs dropoff get different titles)
     eventPhotoPickupTitle:  'Take a photo of the load (optional)',
     eventPhotoDropoffTitle: 'Take a photo of the drop-off (optional)',
@@ -795,6 +845,7 @@ const T = {
     truckPhotoHint: 'Toca para abrir la cámara',
     truckTakeBtn: 'TOMAR FOTO', truckUseBtn: 'USAR FOTO', truckSkipBtn: 'OMITIR',
     photoSaved: 'Foto guardada',
+    localSavePending: 'Guardado localmente — sincronizará cuando haya conexión',
     // Per-event photo prompts
     eventPhotoPickupTitle:  'Tomar una foto de la carga (opcional)',
     eventPhotoDropoffTitle: 'Tomar una foto de la entrega (opcional)',
@@ -1230,6 +1281,8 @@ async function logEvent(eventType, photoUrl) {
   // 2026-05-26: geolocation removed from UI copy. The fetch + columns
   // stay so dispatcher-side analytics still get coords when the browser
   // grants permission, but no longer mentioned to the driver.
+  // 2026-05-28: maybeGetCoords is now timeout-wrapped (6s) so a stuck
+  // iOS getCurrentPosition can never block the log path.
   const coords = await maybeGetCoords();
 
   // truck_events.photo_url is the canonical mirror — populated atomically
@@ -1243,27 +1296,53 @@ async function logEvent(eventType, photoUrl) {
   };
   if (photoUrl) row.photo_url = photoUrl;
 
-  const { data, error } = await db.from('truck_events').insert(row).select().single();
-
-  if (error) { toast('Error logging event'); return; }
-
-  lastEventId   = data.id;
-  lastEventType = eventType;
-
-  // Optional companion row in event_photos for richer historical queries
-  // (per-photo coords / capture timestamp distinct from the event). Failure
-  // is silent — truck_events.photo_url already carries the canonical URL.
-  if (photoUrl) {
-    db.from('event_photos').insert({
-      event_id:   data.id,
-      session_id: session.id,
-      photo_url:  photoUrl,
-      latitude:   coords ? coords.lat : null,
-      longitude:  coords ? coords.lng : null,
-      photo_at:   new Date().toISOString(),
-    }).then(() => {}, () => {});
+  // 2026-05-28 hardening: insert raced against an 8s ceiling. On timeout
+  // / network failure we still update local state optimistically AS IF the
+  // write succeeded (so the driver sees their counter move + the confirm
+  // screen appears) and push the payload to the outbox for the next init()
+  // to retry. lastEventId stays null in the optimistic path — the only
+  // caller that uses it (event-photo companion below) skips silently.
+  let didTimeout = false;
+  let data = null;
+  try {
+    const resp = await withTimeout(
+      db.from('truck_events').insert(row).select().single(),
+      8000
+    );
+    if (resp.error) throw resp.error;
+    data = resp.data;
+  } catch (e) {
+    didTimeout = true;
+    pushOutbox({ op: 'insert', table: 'truck_events', payload: row });
   }
 
+  if (didTimeout) {
+    toast(t('localSavePending'));
+  } else if (data) {
+    lastEventId   = data.id;
+    lastEventType = eventType;
+    // Optional companion row in event_photos for richer historical queries
+    // (per-photo coords / capture timestamp distinct from the event). Failure
+    // is silent — truck_events.photo_url already carries the canonical URL.
+    if (photoUrl) {
+      const photoRow = {
+        event_id:   data.id,
+        session_id: session.id,
+        photo_url:  photoUrl,
+        latitude:   coords ? coords.lat : null,
+        longitude:  coords ? coords.lng : null,
+        photo_at:   new Date().toISOString(),
+      };
+      withTimeout(db.from('event_photos').insert(photoRow), 8000).then(
+        () => {},
+        () => pushOutbox({ op: 'insert', table: 'event_photos', payload: photoRow })
+      );
+    }
+  }
+
+  // Optimistic local state update (runs on BOTH the success and the
+  // timeout/error path so the driver experience is identical regardless
+  // of network state).
   if (eventType === 'pickup_load') {
     inTransit = 1;
     // Anchor the TOTAL TIME counter at the FIRST pickup of the session only.
@@ -1298,8 +1377,12 @@ function showConfirmation(eventType, ts) {
 }
 
 // Geolocation kept for backend analytics — silent, no UI mention.
-function maybeGetCoords() {
-  return new Promise((resolve) => {
+// 2026-05-28 hardening: even though the geolocation API has its own
+// `timeout` option, iOS Safari has been observed to hang the callback.
+// Wrap in an outer 6s race so a stuck getCurrentPosition can never block
+// the caller. Resolve to null on timeout — coords are best-effort.
+async function maybeGetCoords() {
+  const geoPromise = new Promise((resolve) => {
     if (!navigator.geolocation) return resolve(null);
     navigator.geolocation.getCurrentPosition(
       pos => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
@@ -1307,6 +1390,11 @@ function maybeGetCoords() {
       { timeout: 5000, maximumAge: 30000 }
     );
   });
+  try {
+    return await withTimeout(geoPromise, 6000);
+  } catch (_) {
+    return null;
+  }
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1319,35 +1407,64 @@ function showEndShift() {
   showScreen('screen-end');
 }
 
+// 2026-05-28 hardening: optimistic-local-end-shift pattern. Robert's
+// iPhone hung on End Shift during testing — spinner forever, no recovery,
+// no end_shift POST ever made it to Supabase. Confirmed via Supabase API
+// logs for session 4d56826a — only the initial driver_sessions POST + 1
+// pickup_load POST landed.
+//
+// Root cause class: confirmEndShift() was awaiting two sequential
+// Supabase writes (plus a geolocation fetch) with NO ceiling. iOS Safari
+// can hang getCurrentPosition even with the timeout option; a network
+// hiccup mid-insert leaves the await unresolved forever.
+//
+// New flow: the moment the driver taps End Shift we IMMEDIATELY clear
+// local state + show the shift-ended toast + navigate to the language
+// screen. THEN we fire the truck_events + driver_sessions writes in the
+// background with a 10s ceiling per call. Any write that fails or times
+// out goes into the localStorage outbox; next init() drains the queue.
 async function confirmEndShift() {
   if (!session) return;
-  const btn = document.getElementById('end-confirm-btn');
-  btn.classList.add('loading');
-  btn.innerHTML = `<div class="spinner"></div>`;
 
-  try {
+  // Snapshot what we need BEFORE clearing local state so the background
+  // writes still have the session id + start info to reference.
+  const sessionId = session.id;
+  const now = new Date().toISOString();
+
+  // 1) Instantaneous local end-shift — the driver experience is over.
+  clearInterval(pickupTimerInt);
+  clearLocal();
+  toast(t('shiftEnded'));
+  setTimeout(() => showScreen('screen-lang'), 1200);
+
+  // 2) Background — fire-and-forget. Each call wrapped in a 10s ceiling.
+  //    Failure of either write queues the payload for the next init() drain.
+  (async () => {
     const coords = await maybeGetCoords();
-    const now = new Date().toISOString();
-
-    await db.from('truck_events').insert({
-      session_id: session.id,
+    const eventRow = {
+      session_id: sessionId,
       event_type: 'end_shift',
       event_at:   now,
       latitude:   coords ? coords.lat : null,
       longitude:  coords ? coords.lng : null,
-    });
-
-    await db.from('driver_sessions').update({ ended_at: now }).eq('id', session.id);
-
-    clearInterval(pickupTimerInt);
-    clearLocal();
-    toast(t('shiftEnded'));
-    setTimeout(() => showScreen('screen-lang'), 1200);
-  } catch(e) {
-    toast('Error: ' + (e && e.message ? e.message : 'unknown'));
-    btn.classList.remove('loading');
-    btn.innerHTML = `<span>${t('endBtnLabel')}</span>`;
-  }
+    };
+    try {
+      await withTimeout(db.from('truck_events').insert(eventRow), 10000);
+    } catch (_) {
+      pushOutbox({ op: 'insert', table: 'truck_events', payload: eventRow });
+    }
+    try {
+      await withTimeout(
+        db.from('driver_sessions').update({ ended_at: now }).eq('id', sessionId),
+        10000
+      );
+    } catch (_) {
+      pushOutbox({
+        op: 'update', table: 'driver_sessions',
+        id: sessionId, payload: { ended_at: now },
+      });
+    }
+  })();
 }
 
 // ══════════════════════════════════════════════════════════════════
@@ -1393,6 +1510,11 @@ function loadLocal() {
 // INIT
 // ══════════════════════════════════════════════════════════════════
 async function init() {
+  // 2026-05-28 hardening: drain any queued offline writes in the
+  // background BEFORE the UI loads. Failures stay queued — the driver
+  // never sees a sync error, the next boot will retry. Non-blocking.
+  drainOutbox().catch(() => {});
+
   if (loadLocal()) {
     try {
       const { data } = await db.from('driver_sessions')
