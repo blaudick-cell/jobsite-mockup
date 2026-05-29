@@ -103,7 +103,7 @@
     /* 2026-05-29: Live operational map. Sits between the summary cards
        and the filter pills. MapLibre renders into #live-map. Colored
        driver-markers are HTML elements (not GL features) so we can wire
-       click handlers + reuse the same green/yellow/red palette as the
+       click handlers + reuse the same green/red palette as the
        status dots + row tints. */
     .map-section { padding: 0 24px; margin-top: 4px; }
     .map-header {
@@ -469,8 +469,7 @@
     <h3>Live Map</h3>
     <div class="map-legend">
       <span><span class="legend-dot green"></span>Active</span>
-      <span><span class="legend-dot yellow"></span>Idle 20-45 min</span>
-      <span><span class="legend-dot red"></span>Inactive &gt;45 min</span>
+      <span><span class="legend-dot red"></span>Inactive &gt;8h</span>
     </div>
     <button class="map-fit-btn" type="button" onclick="fitMapToDrivers()">FIT TO DRIVERS</button>
   </div>
@@ -746,14 +745,19 @@ function aggregateSessions() {
 }
 
 function statusOf(bucket) {
-  // Returns 'green' | 'yellow' | 'red' | 'ended'.
+  // Returns 'green' | 'red' | 'ended'.
+  // 2026-05-29: simplified from 20/45-min idle/red tiers to a single
+  // 8-hour Active vs Inactive split. Long hauls legitimately run silent
+  // for hours between pickups — the old yellow/red thresholds turned
+  // working drivers red. 8h covers a full working day. If the driver
+  // hasn't logged ANYTHING in 8 hours the dispatcher genuinely needs
+  // to check in.
   if (bucket.session.ended_at) return 'ended';
   const last = bucket.lastEvent;
   const refMs = parseISO(last ? last.event_at : bucket.session.started_at).getTime();
-  const ageMin = (nowMs() - refMs) / 60000;
-  if (ageMin <= 20) return 'green';
-  if (ageMin <= 45) return 'yellow';
-  return 'red';
+  const ageMs = nowMs() - refMs;
+  const EIGHT_HOURS = 8 * 60 * 60 * 1000;
+  return ageMs >= EIGHT_HOURS ? 'red' : 'green';
 }
 
 function matchesFilter(bucket) {
@@ -1045,7 +1049,7 @@ function paintDriverMarkers(byId) {
     if (b.session.ended_at) continue;            // skip ended drivers entirely
     const coord = lastKnownCoord(b);
     if (!coord) continue;                        // skip sessions with no geocoded events
-    const status = statusOf(b);                  // 'green' | 'yellow' | 'red' | 'ended'
+    const status = statusOf(b);                  // 'green' | 'red' | 'ended'
     if (status === 'ended') continue;
     desiredKeys.add(sid);
     const dot = markersRef.get(sid);
