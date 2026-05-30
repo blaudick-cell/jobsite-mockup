@@ -11367,6 +11367,78 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
     }, ms));
     return () => { for (const t of timers) clearTimeout(t); };
   }, [drawerSessionId, drawerScrollEventId]);
+
+  // 2026-05-30 (Admin End-Shift): two coupled bits of state.
+  //   endShiftConfirmFor — null OR the bucket whose drawer is currently
+  //     mid-confirmation. Truthy → the confirmation modal renders on top
+  //     of the drawer.
+  //   endShiftInFlight  — true while the two Supabase writes (truck_events
+  //     INSERT + driver_sessions PATCH) are pending. Disables the modal's
+  //     "Yes" button and surfaces a spinner so the dispatcher can't
+  //     double-fire.
+  //   adminFlash       — { text, kind } ephemeral status pill shown in
+  //     the page header. Auto-clears in 4s on success, 6s on error.
+  const [endShiftConfirmFor, setEndShiftConfirmFor] = React.useState(null);
+  const [endShiftInFlight, setEndShiftInFlight] = React.useState(false);
+  const [adminFlash, setAdminFlash] = React.useState(null);
+
+  async function endShiftFromAdmin(session) {
+    if (!session || !session.id) return;
+    if (!_sb.ready || !_sb.client) {
+      setAdminFlash({ text: 'Supabase client not ready — can\'t end shift', kind: 'error' });
+      setTimeout(() => setAdminFlash(null), 6000);
+      return;
+    }
+    setEndShiftInFlight(true);
+    const nowIso = new Date().toISOString();
+    // Audit-trail line. Format matches Robert's spec: clock time +
+    // "Ended by admin at" + clarifying tail. fmtClock() handles the MT
+    // timezone conversion.
+    const auditLine = 'Ended by admin at ' + fmtClock(nowIso) + ' MT — driver did not end shift themselves';
+    const appendedNotes = session.dispatcher_notes
+      ? (session.dispatcher_notes + '\n\n' + auditLine)
+      : auditLine;
+    try {
+      // Step 1: INSERT the end_shift event into truck_events. Same shape
+      // the field widget writes — no admin_entered flag per Robert's Q3
+      // override. latitude/longitude/photo_url default to NULL (admin
+      // has no device GPS or camera for a remote shift-close).
+      const evRes = await _sb.client.from('truck_events').insert({
+        session_id: session.id,
+        event_type: 'end_shift',
+        event_at: nowIso,
+        latitude: null,
+        longitude: null,
+        photo_url: null,
+      });
+      if (evRes.error) throw new Error('truck_events insert: ' + (evRes.error.message || evRes.error));
+      // Step 2: PATCH driver_sessions with ended_at + appended notes.
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ ended_at: nowIso, dispatcher_notes: appendedNotes })
+        .eq('id', session.id);
+      if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
+      // Success — close modal + drawer. The live subscription's
+      // postgres_changes channel will refetch within ~1s and the row
+      // will disappear from the active grid on its own.
+      setAdminFlash({
+        text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
+        kind: 'ok',
+      });
+      setEndShiftConfirmFor(null);
+      setDrawerSessionId(null);
+      setDrawerScrollEventId(null);
+      setTimeout(() => setAdminFlash(null), 4000);
+    } catch (e) {
+      setAdminFlash({
+        text: 'End shift failed — ' + String((e && e.message) || e),
+        kind: 'error',
+      });
+      setTimeout(() => setAdminFlash(null), 6000);
+    } finally {
+      setEndShiftInFlight(false);
+    }
+  }
+
   const drawerBucket = drawerSessionId
     ? activeBuckets.find(b => b.session.id === drawerSessionId)
         || (live.buckets || []).find(b => b.session.id === drawerSessionId)
@@ -11414,6 +11486,19 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
               : 'Live session data from the field widget. Click any session for the event timeline.'}
           </div>
         </div>
+        {/* 2026-05-30 (Admin End-Shift): transient status pill. Auto-
+            clears 4s on success, 6s on error. Slots into the existing
+            header's flex-row so it doesn't shift the layout. */}
+        {adminFlash && (
+          <div style={{
+            ...T.caption, fontWeight: 700, letterSpacing: 0.3,
+            padding: '8px 14px', borderRadius: R.pill,
+            background: adminFlash.kind === 'error' ? C.warnSoft : C.accentSoft,
+            color: adminFlash.kind === 'error' ? C.warn : C.accent,
+            border: '1px solid ' + (adminFlash.kind === 'error' ? C.warn : C.accent),
+            maxWidth: 420,
+          }}>{adminFlash.text}</div>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -11593,6 +11678,38 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
               }}>Close</button>
             </div>
             <div style={{ flex: 1, overflow: 'auto', padding: `${S[3]}px ${S[4]}px` }}>
+              {/* 2026-05-30 (Admin End-Shift): only shows on still-active
+                  sessions. Drawer-only entry — never on the row — so an
+                  accidental row-click can't trigger anything destructive.
+                  Click opens the confirmation modal; modal handles the
+                  actual write so the warning card itself is just a fuse. */}
+              {!drawerBucket.session.ended_at && (
+                <div style={{
+                  marginBottom: S[3],
+                  padding: S[3],
+                  background: C.warnSoft,
+                  border: `1px solid ${C.warn}`,
+                  borderRadius: R.md,
+                }}>
+                  <div style={{ ...T.bodySm, fontWeight: 700, color: C.warn, marginBottom: 2 }}>
+                    ⚠ End shift for this driver
+                  </div>
+                  <div style={{ ...T.caption, color: C.inkDim, marginBottom: S[2] }}>
+                    Use only when the driver can't end it themselves.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setEndShiftConfirmFor(drawerBucket)}
+                    style={{
+                      background: C.warn, color: C.bg,
+                      border: 'none', borderRadius: R.sm,
+                      padding: '6px 14px', fontFamily: F.mono,
+                      fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
+                      textTransform: 'uppercase', cursor: 'pointer',
+                    }}
+                  >End Shift Now</button>
+                </div>
+              )}
               {drawerBucket.events.length === 0 ? (
                 <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
                   No events logged on this session yet.
@@ -11711,6 +11828,107 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           </div>
         </div>
       )}
+
+      {/* 2026-05-30 (Admin End-Shift): confirmation modal. Sits ON TOP of
+          the open drawer (z-index 500 vs drawer's 400). Per the spec the
+          "Yes, End Shift" button is NOT autofocused — Enter must NOT
+          submit accidentally; only an explicit click. tabIndex={-1} on
+          the modal backdrop prevents focus from drifting onto it via
+          shift-tab cycling. */}
+      {endShiftConfirmFor && (() => {
+        const cs = endShiftConfirmFor.session;
+        const cLastEv = endShiftConfirmFor.lastEvent;
+        const startedFmt = fmtClock(cs.started_at);
+        const startedAgo = formatShiftDuration(
+          computeShiftHours(cs, endShiftConfirmFor.events).currentShiftSeconds
+        );
+        const lastEvFmt = cLastEv ? fmtClock(cLastEv.event_at) : '—';
+        const lastEvAgo = cLastEv
+          ? formatShiftDuration(Math.max(0, Math.floor((Date.now() - new Date(cLastEv.event_at).getTime()) / 1000)))
+          : '—';
+        const nowFmt = fmtClock(new Date().toISOString());
+        const cTruck = cs.matched_truck_id ? trucksById.get(cs.matched_truck_id) : null;
+        const cTruckPlate = cTruck ? cTruck.plate : null;
+        return (
+          <div
+            role="dialog" aria-modal="true"
+            aria-label={`Confirm ending shift for ${cs.driver_name || 'driver'}`}
+            onClick={(e) => { if (!endShiftInFlight && e.target === e.currentTarget) setEndShiftConfirmFor(null); }}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
+            }}
+          >
+            <div
+              onClick={e => e.stopPropagation()}
+              tabIndex={-1}
+              style={{
+                background: C.bg, borderRadius: R.lg,
+                width: 'min(520px, 100%)', maxHeight: '90vh', overflow: 'auto',
+                border: `1px solid ${C.warn}`,
+                boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+                padding: `${S[4]}px ${S[5]}px ${S[4]}px`,
+              }}
+            >
+              <div style={{ ...T.h4, fontWeight: 700, color: C.warn, marginBottom: S[2] }}>
+                End shift for {cs.driver_name || 'driver'}?
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '6px 12px', marginTop: S[3], fontSize: 13 }}>
+                <span style={{ color: C.inkDim }}>Driver</span>
+                <span style={{ color: C.ink, fontWeight: 600 }}>{cs.driver_name || '—'}</span>
+                <span style={{ color: C.inkDim }}>Company</span>
+                <span style={{ color: C.ink }}>{cs.company || '—'}</span>
+                <span style={{ color: C.inkDim }}>Truck</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{cTruckPlate ? '#' + cTruckPlate : '—'}</span>
+                <span style={{ color: C.inkDim }}>Started</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{startedFmt} MT <span style={{ color: C.inkDim }}>({startedAgo} ago)</span></span>
+                <span style={{ color: C.inkDim }}>Last activity</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{lastEvFmt}{cLastEv && ' MT'} <span style={{ color: C.inkDim }}>{cLastEv ? '(' + lastEvAgo + ' ago)' : '— no events yet'}</span></span>
+                <span style={{ color: C.inkDim }}>Ended_at →</span>
+                <span style={{ color: C.warn, fontFamily: F.mono, fontWeight: 700 }}>{nowFmt} MT <span style={{ color: C.inkDim, fontWeight: 400 }}>(now)</span></span>
+              </div>
+              <div style={{
+                marginTop: S[4], padding: S[3],
+                background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.sm,
+                ...T.bodySm, color: C.inkDim, lineHeight: 1.5,
+              }}>
+                <span style={{ color: C.warn, fontWeight: 700 }}>⚠ </span>
+                This adds an end_shift event to their timeline and marks
+                the session ended. The driver's widget will continue to
+                work if they're still in the field — they just won't show
+                as Active anymore on dispatch. A note will be appended to
+                this session's <em style={{ color: C.ink, fontStyle: 'normal' }}>dispatcher_notes</em> for the audit trail.
+              </div>
+              <div style={{ display: 'flex', gap: S[2], marginTop: S[4], justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  onClick={() => { if (!endShiftInFlight) setEndShiftConfirmFor(null); }}
+                  disabled={endShiftInFlight}
+                  style={{
+                    background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                    color: C.ink, padding: '8px 16px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                    cursor: endShiftInFlight ? 'not-allowed' : 'pointer',
+                    opacity: endShiftInFlight ? 0.5 : 1,
+                  }}
+                >Cancel</button>
+                <button
+                  type="button"
+                  onClick={() => endShiftFromAdmin(cs)}
+                  disabled={endShiftInFlight}
+                  style={{
+                    background: C.warn, color: C.bg,
+                    border: 'none', padding: '8px 18px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.4,
+                    cursor: endShiftInFlight ? 'wait' : 'pointer',
+                    opacity: endShiftInFlight ? 0.7 : 1,
+                  }}
+                >{endShiftInFlight ? 'Ending…' : 'Yes, End Shift'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
