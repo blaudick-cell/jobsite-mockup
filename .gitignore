@@ -22,3 +22,6 @@ npm-debug.log*
 # Claude Code worktrees (git-internal, but defensive)
 .claude/worktrees/
 .claude/launch.json
+
+# Local Netlify folder
+.netlify
