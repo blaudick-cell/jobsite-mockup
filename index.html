@@ -13053,60 +13053,12 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       { type: 'load.removed', actorRole: isAdmin ? 'admin' : 'hauler', actorId: isAdmin ? null : haulerId, summary: `${isAdmin ? 'Admin' : op.name} removed a ${l.cy || 0} CY load on #${truck.plate}`, refId: id }
     ));
   };
-  const updateHours = (id, patch) => setDb(prev => ({ ...prev, hours: prev.hours.map(h => h.id === id ? { ...h, ...patch } : h) }));
-  const removeHours = (id) => {
-    if (!window.confirm('Delete this hours row? This can\'t be undone.')) return;
-    setDb(prev => ({ ...prev, hours: prev.hours.filter(h => h.id !== id) }));
-  };
-  const addHoursRowForDate = (dateIso) => {
-    const nextNum = (() => {
-      const existing = db.hours.map(h => parseInt((h.id || '').replace(/^hr-/, ''), 10)).filter(n => !isNaN(n));
-      return existing.length ? Math.max(...existing) + 1 : 1;
-    })();
-    // v32: auto-link to a haul request when this truck has exactly one
-    // active assignment on its project.
-    const candidateReqs = (db.haulRequests || []).filter(r =>
-      r && r.projectId === truck.projectId &&
-      Array.isArray(r.assignments) &&
-      r.assignments.some(a => a && a.truckId === truck.id) &&
-      r.status !== 'completed' && r.status !== 'closed'
-    );
-    const autoHaulReqId = candidateReqs.length === 1 ? candidateReqs[0].id : null;
-    const newRow = {
-      id: 'hr-' + nextNum,
-      driverId: driver ? driver.id : null,
-      truckId: truck.id,
-      projectId: truck.projectId || null,
-      clockIn: '07:00',
-      clockOut: null,
-      breakMin: 30,
-      status: 'open',
-      date: dateIso || TODAY_ISO,
-      haulRequestId: autoHaulReqId,
-    };
-    setDb(prev => appendActivity(
-      { ...prev, hours: [...prev.hours, newRow] },
-      { type: 'hours.added', actorRole: isAdmin ? 'admin' : 'hauler', actorId: isAdmin ? null : haulerId, summary: `${isAdmin ? 'Admin' : op.name} added an hours row on #${truck.plate}`, refId: newRow.id }
-    ));
-    // 2026-05-30 Phase 4 C2.5: also write a synthetic driver_sessions row
-    // (no truck_event for an hours-row add — that's pure shift backfill).
-    // started_at = the row's clockIn at the chosen date; ended_at = null
-    // since the row is still "open" until admin enters a clockOut.
-    const startIso = adminCombineDateTimeIso(newRow.date, newRow.clockIn);
-    if (startIso) {
-      adminBackfillToDriverTables({ truck, eventType: null, eventAtIso: startIso, endedAtIso: null });
-    }
-  };
-  // Default "+ Add hours row" steps back one day per existing entry for this
-  // truck so each click pops a new day going backward (today → yesterday → …).
-  const addHoursRow = () => {
-    const existingDates = new Set(truckHoursRows.map(h => h.date).filter(Boolean));
-    let target = TODAY_ISO;
-    for (let i = 0; i < 365 && existingDates.has(target); i++) {
-      target = isoDaysAgo(i + 1);
-    }
-    addHoursRowForDate(target);
-  };
+  // 2026-05-30 Phase 4 C3.3: hour-row editing helpers (updateHours,
+  // removeHours, addHoursRowForDate, addHoursRow) and the corresponding
+  // per-row inline editors + "+ Add hours row" buttons were removed.
+  // Hours come from the driver widget via driver_sessions now — admin
+  // doesn't enter them by hand anymore. Existing db.hours rows still
+  // display per-day total in the day-card header (read-only).
   // Photo viewer — the modal lives at the bottom of the JSX. Replace uses a
   // hidden file input that fires `readAsDataURL` and writes the resulting
   // data URL through setDb (the same shape DriverLogLoad uses, so the photo
@@ -13125,11 +13077,8 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
     { value: 'pending',  label: 'Pending' },
     { value: 'approved', label: 'Approved' },
   ];
-  const hoursStatusOptions = [
-    { value: 'open',     label: 'Open' },
-    { value: 'pending',  label: 'Pending' },
-    { value: 'approved', label: 'Approved' },
-  ];
+  // 2026-05-30 Phase 4 C3.3: hoursStatusOptions retired alongside the
+  // per-row hour status editor. Driver-side events have no status concept.
   const todayCY = truckLoads.reduce((s, l) => s + (l.cy || 0), 0);
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   // 2026-05-25: per-truck rate is now a default (was the source of truth);
@@ -13241,14 +13190,8 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
         <Label>Daily activity</Label>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: S[3], flexWrap: 'wrap' }}>
           <span style={{ ...T.caption, color: C.inkFaint, fontStyle: 'italic' }}>
-            Click any field to edit. Photo, notes, hours, and CY changes sync to every device.
+            Click load fields to edit. Hours come from the driver widget.
           </span>
-          <button
-            onClick={addHoursRow}
-            style={{ ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase', color: C.accent, background: 'transparent', border: `1px solid ${C.rule}`, borderRadius: R.pill, padding: '4px 12px', fontWeight: 700, cursor: 'pointer' }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.background = 'rgba(179,230,53,0.08)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = C.rule; e.currentTarget.style.background = 'transparent'; }}
-          >+ Add hours row</button>
         </div>
       </div>
       {(() => {
@@ -13314,43 +13257,13 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                     </>
                   )}
                 </div>
-                {dayHoursRows.length > 0 ? (
-                  <div style={{ marginTop: S[2], display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {dayHoursRows.map(h => {
-                      const dr = h.driverId ? { name: String(h.driverId) } : null;
-                      return (
-                        <div key={h.id} style={{ ...T.bodySm, color: C.inkDim, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                          <span style={{ fontFamily: F.display }}>{dr ? dr.name : <span style={{ color: C.inkFaint }}>—</span>}</span>
-                          <span style={{ color: C.inkFaint }}>·</span>
-                          <span style={{ fontFamily: F.mono }}><EditableText value={h.clockIn || ''} onSave={(v) => updateHours(h.id, { clockIn: v })} mono placeholder="HH:MM" /></span>
-                          <span style={{ fontFamily: F.mono, color: C.inkFaint }}>{'→'}</span>
-                          <span style={{ fontFamily: F.mono }}><EditableText value={h.clockOut || ''} onSave={(v) => updateHours(h.id, { clockOut: v || null })} mono placeholder="HH:MM" /></span>
-                          <span style={{ color: C.inkFaint }}>·</span>
-                          <span style={{ fontFamily: F.mono }}><EditableText value={String(h.breakMin != null ? h.breakMin : '')} onSave={(v) => updateHours(h.id, { breakMin: parseInt(v, 10) || 0 })} mono placeholder="0" /></span>
-                          <span>min break</span>
-                          <span style={{ color: C.inkFaint }}>·</span>
-                          <EditableSelect value={h.status} options={hoursStatusOptions} onSave={(v) => updateHours(h.id, { status: v })} />
-                          <button
-                            onClick={(e) => { e.stopPropagation(); removeHours(h.id); }}
-                            title="Delete this hours row"
-                            aria-label="Delete this hours row"
-                            style={{ background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 6px', borderRadius: R.xs, marginLeft: 'auto' }}
-                            onMouseEnter={e => { e.currentTarget.style.color = C.danger || C.warn; e.currentTarget.style.background = 'rgba(255,80,80,0.08)'; }}
-                            onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
-                          >×</button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <div style={{ marginTop: S[2], ...T.bodySm, color: C.inkFaint, display: 'flex', alignItems: 'baseline', gap: S[3], flexWrap: 'wrap' }}>
-                    <span style={{ fontStyle: 'italic' }}>no hours logged</span>
-                    <button
-                      onClick={() => addHoursRowForDate(date)}
-                      style={{ ...T.caption, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase', color: C.accent, background: 'transparent', border: 'none', padding: 0, fontWeight: 700, cursor: 'pointer' }}
-                    >+ Log hours {'→'}</button>
-                  </div>
-                )}
+                {/* 2026-05-30 Phase 4 C3.3: per-row hour editor (clockIn /
+                    clockOut / breakMin / status + delete) removed. The
+                    `{fmtHours(dayHoursTotal)} hrs` chip above is the
+                    only hour display for the day; rows underlying the
+                    total come from db.hours (legacy seed) and will fade
+                    out as that collection's writes are retired in C5.
+                    Hours-of-truth: driver_sessions in mockup Supabase. */}
               </div>
               {dayLoads.length === 0 ? (
                 <div style={{ ...T.bodySm, color: C.inkDim, fontStyle: 'italic', padding: `${S[3]}px ${S[4]}px` }}>
