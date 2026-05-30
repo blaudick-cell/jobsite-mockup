@@ -8524,20 +8524,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     {sectionAssignments.map(a => {
             const t = db.trucks.find(x => x.id === a.truckId);
             const aHauler = db.haulers.find(h => h.id === a.haulerId);
-            // v32: per-truck rollups read canonical db.loads + db.hours.
+            // v32: per-truck CY rollup still reads admin-entered db.loads
+            // (HaulerLogLoadForm writes here, tagged with haulRequestId).
+            // Hours per haul-request retired in Phase 4 C4.1: drivers don't
+            // tag sessions to hauls anymore, and admin can't enter hours
+            // by hand (C3.3 deleted the editor). Tiles for hours + $
+            // render "—" below.
             const truckCY = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId).reduce((s, l) => s + (Number(l.cy) || 0), 0);
             const isAddingDay = addingDayFor === a.truckId;
-            // v29-TRUCK-KPI: per-assignment KPI metadata. hours are NOT
-            // tracked per load — daily d.hours is the billing source of truth
-            // (Start to finish elapsed time); dollars derive from h × rate.
             const typeMeta = TRUCK_TYPES.find(x => x.code === (t && t.type)) || null;
             // 2026-05-25: assignment-level ratePerHour is the source of truth.
             // rateForAssignment walks: a.ratePerHour → t.ratePerHour → DEFAULT_RATES[type] → 0.
             const hourlyRate = rateForAssignment(a, t);
-            const totalHoursForTruck = (db.hours || [])
-              .filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId)
-              .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
-            const totalDollarsForTruck = totalHoursForTruck * hourlyRate;
             const todayDay = a.days.find(dd => isToday(dd.date)) || null;
             const todayStart = todayDay ? (todayDay.startTime || '—') : '—';
             const sortedDays = [...a.days].sort((x, y) => (y.date || '').localeCompare(x.date || ''));
@@ -8601,33 +8599,37 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                         </div>
                       </div>
 
-                      {/* TOTAL BILLED HRS — Start to finish */}
+                      {/* TOTAL BILLED HRS + $ — 2026-05-30 Phase 4 C4.1:
+                          per-haul-request hours retired. Hours come from
+                          driver_sessions (not scoped per haul); admin can't
+                          enter hours by hand anymore (C3.3). Both tiles
+                          render "—" with an explainer line so the dispatcher
+                          knows where the values went. */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
                         <span aria-hidden="true" style={{
                           width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.accent}`, color: C.accent, fontSize: 14, lineHeight: 1,
+                          border: `1.5px solid ${C.ruleHi}`, color: C.inkFaint, fontSize: 14, lineHeight: 1,
                         }}>◷</span>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>
-                            {fmtHours(totalHoursForTruck)}<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>HRS</span>
+                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.inkFaint, lineHeight: 1.1 }}>
+                            —<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>HRS</span>
                           </div>
                           <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Start to finish</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Not per-haul</div>
                         </div>
                       </div>
 
-                      {/* TOTAL BILLED $ — based on hours */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
                         <span aria-hidden="true" style={{
                           width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
                           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.accent}`, color: C.accent, fontFamily: F.mono, fontSize: 14, fontWeight: 700, lineHeight: 1,
+                          border: `1.5px solid ${C.ruleHi}`, color: C.inkFaint, fontFamily: F.mono, fontSize: 14, fontWeight: 700, lineHeight: 1,
                         }}>$</span>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtUSD(totalDollarsForTruck)}</div>
+                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.inkFaint, lineHeight: 1.1 }}>—</div>
                           <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Based on hours</div>
+                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Not per-haul</div>
                         </div>
                       </div>
 
@@ -8709,10 +8711,10 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                         date + startTime stub. */}
                     {sortedDays.map(d => {
                       const loadsForDay = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId && l.date === d.date);
-                      const hoursRowsForDay = (db.hours || []).filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId && h.date === d.date);
                       const dailyCY = loadsForDay.reduce((s, l) => s + (Number(l.cy) || 0), 0);
-                      const dailyHours = hoursRowsForDay.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin || 0, h.clockOut), 0);
-                      const dailyDollars = dailyHours * hourlyRate;
+                      // 2026-05-30 Phase 4 C4.1: dailyHours + dailyDollars
+                      // dropped — per-haul-request hours are gone. Day-row
+                      // chip shows "—" in their slots.
                       const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
                       const dayLabel = isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date);
                       return (
@@ -8730,27 +8732,16 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                              {/* Daily hours — editable. v32: edit upserts a
-                                  canonical db.hours row tied to this (req,truck,day). */}
-                              <div style={{ ...T.monoSm, color: C.ink, fontWeight: 600, display: 'inline-flex', alignItems: 'baseline', gap: 2 }}>
-                                <EditableText
-                                  value={(() => {
-                                    // Prefer the explicit override on d.hours so the
-                                    // entered value displays immediately on save
-                                    // (covers the case where the upserted db.hours
-                                    // row is still awaiting a Realtime echo). Falls
-                                    // back to the computed value from db.hours rows.
-                                    if (typeof d.hours === 'number' && d.hours > 0) return String(parseFloat(d.hours.toFixed(2)));
-                                    return dailyHours > 0 ? String(parseFloat(dailyHours.toFixed(2))) : '';
-                                  })()}
-                                  placeholder="0"
-                                  onSave={(v) => { const n = parseHours(v); if (n != null) updateDay(a.truckId, d.date, { hours: n }); }} />
-                                <span style={{ color: C.inkFaint }}>h</span>
-                              </div>
+                              {/* 2026-05-30 Phase 4 C4.1: inline hours
+                                  editor + dailyDollars chip removed. Hours
+                                  no longer per-haul. dailyCY chip stays —
+                                  reads admin-entered db.loads tagged with
+                                  haulRequestId. */}
+                              <span style={{ ...T.monoSm, color: C.inkFaint }}>— h</span>
                               <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
                               <span style={{ ...T.monoSm, color: C.inkDim }}>{dailyCY} CY</span>
                               <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
-                              <span style={{ ...T.monoSm, color: C.ink, fontWeight: 700 }}>{fmtUSD(dailyDollars)}</span>
+                              <span style={{ ...T.monoSm, color: C.inkFaint }}>—</span>
                               {a.days.length > 1 && (
                                 <button onClick={() => removeDay(a.truckId, d.date)} aria-label="Remove day" title="Remove day" style={{
                                   background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
