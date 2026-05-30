@@ -11267,6 +11267,28 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
 
   // Drawer state: selected bucket key, or null when closed.
   const [drawerSessionId, setDrawerSessionId] = React.useState(null);
+  // 2026-05-30 (Series C-mockup): when a photo thumbnail on a session
+  // card is clicked, drawerScrollEventId is set to that event's id.
+  // The useEffect below scrolls the matching `[data-event-id]` row into
+  // view once the drawer mounts. Reset on drawer close.
+  const [drawerScrollEventId, setDrawerScrollEventId] = React.useState(null);
+  React.useEffect(() => {
+    if (!drawerSessionId || !drawerScrollEventId) return;
+    // RAF gives React one frame to mount the drawer + events list before
+    // we query the DOM. setTimeout is the long-tail safety net.
+    const tries = [16, 80, 240];
+    const timers = tries.map(ms => setTimeout(() => {
+      const el = document.querySelector(`[data-event-id="${drawerScrollEventId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        // Brief highlight so the scrolled-to row stands out.
+        const prev = el.style.boxShadow;
+        el.style.boxShadow = `0 0 0 2px ${C.accent}`;
+        setTimeout(() => { el.style.boxShadow = prev; }, 1200);
+      }
+    }, ms));
+    return () => { for (const t of timers) clearTimeout(t); };
+  }, [drawerSessionId, drawerScrollEventId]);
   const drawerBucket = drawerSessionId
     ? activeBuckets.find(b => b.session.id === drawerSessionId)
         || (live.buckets || []).find(b => b.session.id === drawerSessionId)
@@ -11338,7 +11360,22 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
             const truckType = truck ? truck.type : null;
             const truckPlate = truck ? truck.plate : null;
             const cyToday = driverLiveCyForLoadCount(truckType, b.pickupCount);
-            const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length;
+            // 2026-05-30 (Series C-mockup): aggregate photos from both
+            // truck_events.photo_url (direct on the event) AND event_photos
+            // rows (auxiliary photos linked to a session). Most recent wins.
+            const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
+              + b.events.filter(e => e.photo_url).length;
+            const allPhotosForSess = [
+              ...(live.photos || []).filter(p => p.session_id === sess.id).map(p => ({
+                photo_url: p.photo_url, photo_at: p.photo_at || p.created_at, event_id: p.event_id,
+              })),
+              ...b.events.filter(e => e.photo_url).map(e => ({
+                photo_url: e.photo_url, photo_at: e.event_at, event_id: e.id,
+              })),
+            ];
+            const mostRecentPhoto = allPhotosForSess.length
+              ? allPhotosForSess.sort((x, y) => String(y.photo_at || '').localeCompare(String(x.photo_at || '')))[0]
+              : null;
             const lastEvType = b.lastEvent ? b.lastEvent.event_type : null;
             return (
               <Card key={sess.id} padding={S[4]} style={{ cursor: 'pointer' }}>
@@ -11353,7 +11390,31 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                         {truckType && <span style={{ marginLeft: S[2] }}>{truckType}</span>}
                       </div>
                     </div>
-                    <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
+                      {/* 2026-05-30 (Series C-mockup): most-recent photo
+                          thumb. Click stops the card-level handler so the
+                          thumb takes us to the drawer scrolled to THAT
+                          event. Fallback: drawer opens normally if no
+                          event_id matches. */}
+                      {mostRecentPhoto && (
+                        <img
+                          src={mostRecentPhoto.photo_url}
+                          alt="Latest event photo"
+                          title="Open this driver's most recent photo"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDrawerScrollEventId(mostRecentPhoto.event_id || null);
+                            setDrawerSessionId(sess.id);
+                          }}
+                          style={{
+                            width: 40, height: 40, objectFit: 'cover',
+                            borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
+                            cursor: 'pointer',
+                          }}
+                        />
+                      )}
+                      <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+                    </div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
                     <div>
@@ -11419,7 +11480,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           role="dialog"
           aria-modal="true"
           aria-label={`Session detail for ${drawerBucket.session.driver_name || '—'}`}
-          onClick={() => setDrawerSessionId(null)}
+          onClick={() => { setDrawerSessionId(null); setDrawerScrollEventId(null); }}
           style={{
             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
             display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
@@ -11445,7 +11506,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                   {drawerBucket.session.ended_at && <> · <span style={{ color: C.inkFaint }}>Ended {fmtClock(drawerBucket.session.ended_at)}</span></>}
                 </div>
               </div>
-              <button onClick={() => setDrawerSessionId(null)} aria-label="Close" style={{
+              <button onClick={() => { setDrawerSessionId(null); setDrawerScrollEventId(null); }} aria-label="Close" style={{
                 background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
                 padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
                 fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
@@ -11468,19 +11529,32 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                     const es = elapsedS % 60;
                     const elapsedFmt = `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}:${String(es).padStart(2,'0')}`;
                     const hasGps = e.latitude != null && e.longitude != null;
+                    // 2026-05-30 (Series C-mockup): data-event-id powers
+                    // the scroll-to-event behaviour when a thumbnail on a
+                    // session card is clicked. Inline 40x40 photo thumb
+                    // surfaces when truck_events.photo_url is set.
                     return (
-                      <div key={e.id} style={{
-                        display: 'flex', gap: S[2], alignItems: 'flex-start',
+                      <div key={e.id} data-event-id={e.id} style={{
+                        display: 'flex', gap: S[2], alignItems: 'center',
                         padding: `${S[2]}px ${S[3]}px`,
                         background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
-                        fontSize: 12.5,
+                        fontSize: 12.5, transition: 'box-shadow 200ms ease-out',
                       }}>
                         <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64 }}>{fmtClock(e.event_at)}</span>
                         <span style={{ fontWeight: 700, color: eventColor(e.event_type), flexShrink: 0, width: 70 }}>{eventLabel(e.event_type)}</span>
                         <span style={{ fontFamily: F.mono, color: C.inkFaint, flexShrink: 0, width: 64, fontSize: 11.5 }} title="Elapsed shift time at this event">{elapsedFmt}</span>
+                        {e.photo_url && (
+                          <a href={e.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
+                             onClick={ev => ev.stopPropagation()}
+                             style={{ flexShrink: 0, lineHeight: 0 }}>
+                            <img src={e.photo_url} alt=""
+                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, display: 'block' }} />
+                          </a>
+                        )}
                         <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11 }}>
                           {hasGps ? (
                             <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noopener"
+                               onClick={ev => ev.stopPropagation()}
                                style={{ color: C.info, textDecoration: 'none' }}>
                               {Number(e.latitude).toFixed(4)},{Number(e.longitude).toFixed(4)} ↗
                             </a>
@@ -11491,6 +11565,70 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                   })}
                 </div>
               )}
+              {/* 2026-05-30 (Series C-mockup): Issues / Notes from the
+                  driver — filters live.issues to this session. Each row
+                  surfaces issue_text + optional photo thumbnail. Photo
+                  click opens full-size in a new tab. Section hidden
+                  entirely when the driver hasn't reported anything. */}
+              {(() => {
+                const sessIssues = (live.issues || [])
+                  .filter(i => i.session_id === drawerBucket.session.id)
+                  .sort((x, y) => String(y.event_at || y.created_at || '').localeCompare(String(x.event_at || x.created_at || '')));
+                if (sessIssues.length === 0) return null;
+                return (
+                  <div style={{ marginTop: S[4] }}>
+                    <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2] }}>
+                      Issues / notes from driver
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                      {sessIssues.map(iss => {
+                        const issStartMs = new Date(drawerBucket.session.started_at).getTime();
+                        const issEvMs = new Date(iss.event_at || iss.created_at).getTime();
+                        const issElapsedMs = isFinite(issStartMs) && isFinite(issEvMs) ? Math.max(0, issEvMs - issStartMs) : 0;
+                        const issElapsedS = Math.floor(issElapsedMs / 1000);
+                        const ih = Math.floor(issElapsedS / 3600);
+                        const im = Math.floor((issElapsedS % 3600) / 60);
+                        const is = issElapsedS % 60;
+                        const issElapsedFmt = `${String(ih).padStart(2,'0')}:${String(im).padStart(2,'0')}:${String(is).padStart(2,'0')}`;
+                        const issHasGps = iss.latitude != null && iss.longitude != null;
+                        return (
+                          <div key={iss.id} style={{
+                            display: 'flex', gap: S[2], alignItems: 'flex-start',
+                            padding: `${S[2]}px ${S[3]}px`,
+                            background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.md,
+                            fontSize: 12.5,
+                          }}>
+                            {iss.photo_url && (
+                              <a href={iss.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
+                                 onClick={ev => ev.stopPropagation()}
+                                 style={{ flexShrink: 0, lineHeight: 0 }}>
+                                <img src={iss.photo_url} alt=""
+                                  style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.warn}`, display: 'block' }} />
+                              </a>
+                            )}
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.ink, marginBottom: 4 }}>
+                                <span style={{ fontFamily: F.mono, color: C.inkDim, fontSize: 11 }}>{fmtClock(iss.event_at || iss.created_at)}</span>
+                                <span style={{ fontFamily: F.mono, color: C.inkFaint, fontSize: 11 }} title="Elapsed shift time when reported">{issElapsedFmt}</span>
+                                {issHasGps && (
+                                  <a href={`https://www.google.com/maps?q=${iss.latitude},${iss.longitude}`} target="_blank" rel="noopener"
+                                     onClick={ev => ev.stopPropagation()}
+                                     style={{ color: C.info, textDecoration: 'none', fontSize: 11, marginLeft: 'auto' }}>
+                                    map ↗
+                                  </a>
+                                )}
+                              </div>
+                              <div style={{ color: C.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                                {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>
