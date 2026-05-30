@@ -6659,23 +6659,13 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const active    = filtered.filter(e => e.r.status === 'matched' || e.r.status === 'accepted');
   const completed = filtered.filter(e => e.r.status === 'completed');
 
-  // === Operations KPIs ===
-  const openRequests   = enriched.filter(e => e.r.status === 'pending').length;
-  const trucksNeededAll = enriched.filter(e => e.r.status === 'pending').reduce((s, e) => s + (e.trucksNeeded - e.trucksAssigned), 0);
-  const activeMatches  = enriched.filter(e => e.r.status === 'matched' || e.r.status === 'accepted').length;
-  const delayedReqs    = enriched.filter(e => e.priority === 'critical').length;
-  const matchedWaits   = enriched.filter(e => e.r.status === 'matched' || e.r.status === 'accepted').map(e => e.waitingMin);
-  const avgMatchMin    = matchedWaits.length > 0 ? Math.round(matchedWaits.reduce((s,v) => s+v,0) / matchedWaits.length) : 0;
-  const todayVolumeCY  = enriched.filter(e => e.r.status !== 'completed').reduce((s, e) => s + (e.r.volumeCY || 0), 0);
-
-  const kpis = [
-    { label: 'Open requests',         value: openRequests,                                tone: openRequests > 0 ? C.warn : C.inkDim,  sub: 'awaiting match' },
-    { label: 'Trucks needed',         value: trucksNeededAll,                             tone: trucksNeededAll > 0 ? C.accent : C.inkDim, sub: 'across pending' },
-    { label: 'Active matches',        value: activeMatches,                               tone: C.ok,                                  sub: 'in motion' },
-    { label: 'Avg match time',        value: avgMatchMin > 0 ? avgMatchMin + ' min' : '—', tone: C.info,                                sub: 'pickup → assignment' },
-    { label: 'Delayed',               value: delayedReqs,                                 tone: delayedReqs > 0 ? (C.danger || C.warn) : C.inkDim, sub: 'waiting >30 min' },
-    { label: 'Volume today',          value: todayVolumeCY + ' CY',                       tone: C.accent,                              sub: 'requested + active' },
-  ];
+  // 2026-05-30: 6-card Operations KPI strip + its derivations
+  // (openRequests / trucksNeededAll / activeMatches / avgMatchMin /
+  // delayedReqs / todayVolumeCY) retired. Per Robert: "lets remove this
+  // since it is not tied to anything" — the numbers traced to mock data
+  // paths rather than the canonical driver_sessions / truck_events
+  // store, so they were drift-prone noise. The KPI grid JSX below the
+  // map+weather block was deleted alongside.
 
   // === Priority + lifecycle tone helpers ===
   const priTone = (p) => ({
@@ -6896,16 +6886,10 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         </div>
       </div>
 
-      {/* Operations KPI strip */}
-      <div className="hcc-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: S[3], marginBottom: S[5] }}>
-        {kpis.map(k => (
-          <Card key={k.label} padding={S[4]}>
-            <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 6 }}>{k.label.toUpperCase()}</div>
-            <div style={{ ...T.h2, fontWeight: 700, color: k.tone || C.ink, letterSpacing: -0.5, lineHeight: 1 }}>{k.value}</div>
-            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>{k.sub}</div>
-          </Card>
-        ))}
-      </div>
+      {/* 2026-05-30: 6-card "Operations KPI strip" deleted per Robert —
+          numbers were derived from mock fields not tied to the canonical
+          driver_sessions / truck_events store. The Hauling Overview now
+          flows directly from the map+weather row into the filter bar. */}
 
       {/* Filter / sort bar */}
       <Card padding={S[3]} style={{ marginBottom: S[5] }}>
