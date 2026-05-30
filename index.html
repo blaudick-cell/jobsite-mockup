@@ -6891,6 +6891,11 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           driver_sessions / truck_events store. The Hauling Overview now
           flows directly from the map+weather row into the filter bar. */}
 
+      {/* 2026-05-30 (Commit C): Driver Activity table — newest-first
+          live session table embedded between Map+Weather and Haul
+          Requests. Row click opens the shared DriverSessionDrawer. */}
+      <DriverActivityTable db={db} navigate={navigate} />
+
       {/* Filter / sort bar */}
       <Card padding={S[3]} style={{ marginBottom: S[5] }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
@@ -12013,6 +12018,155 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
         );
       })()}
     </div>
+  );
+}
+
+// =====================================================================
+// DriverActivityTable — newest-first table of every driver session
+// =====================================================================
+// 2026-05-30 (Commit C): mirrors the table from dispatch-live.html. Used
+// on the Hauling Overview between the Map + Weather row and the Haul
+// Requests list; row click opens the shared DriverSessionDrawer.
+// Optional `live` prop lets the embedding page pass through its own
+// useDriverSessionsLive() output so we don't open a second channel.
+//
+// Columns: Status | Driver | Company | Truck Type | Start (MT) | Shift
+// Time | Pickups | Drop-offs | CY (Today) | Last Event.
+// Status uses the same 8h green/red threshold the dispatch-live table
+// uses — sessions over 8h pick up a soft-red tint on the row so dispatchers
+// can see at a glance who has been running too long.
+function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
+  const ownLive = useDriverSessionsLive();
+  const live = liveProp || ownLive;
+
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
+
+  // Drawer state — local to the table so the embedding page doesn't have
+  // to thread props through.
+  const [drawerSessionId, setDrawerSessionId] = React.useState(null);
+
+  // Newest-first ordering: started_at desc. unstarted/no-started sessions
+  // sink to the bottom.
+  const rows = React.useMemo(() => {
+    const buckets = (live.buckets || []).slice();
+    buckets.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+    return maxRows ? buckets.slice(0, maxRows) : buckets;
+  }, [live.buckets, maxRows]);
+
+  const fmtClock = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+  const fmtElapsed = (startedIso, endedIso) => {
+    if (!startedIso) return '—';
+    const { currentShiftSeconds } = computeShiftHours(
+      { started_at: startedIso, ended_at: endedIso }, []
+    );
+    return formatShiftDuration(currentShiftSeconds);
+  };
+  const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
+                          : et === 'dropoff_load' ? 'Drop-off'
+                          : et === 'end_shift' ? 'End shift'
+                          : et || '—';
+
+  return (
+    <>
+      <div style={{ marginBottom: S[3] }}>
+        <Label>Driver activity (newest first)</Label>
+      </div>
+      <Card padding={0} style={{ marginBottom: S[5] }}>
+        {live.loading && rows.length === 0 ? (
+          <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
+            Loading driver sessions…
+          </div>
+        ) : live.error ? (
+          <div style={{ ...T.bodySm, color: C.warn, textAlign: 'center', padding: S[5] }}>
+            Live driver data unavailable — {live.error}
+          </div>
+        ) : rows.length === 0 ? (
+          <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
+            No driver sessions yet. The first widget clock-in will appear here.
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr>
+                <Th>Status</Th>
+                <Th>Driver</Th>
+                <Th>Company</Th>
+                <Th>Truck Type</Th>
+                <Th>Start (MT)</Th>
+                <Th>Shift Time</Th>
+                <Th align="right">Pickups</Th>
+                <Th align="right">Drop-offs</Th>
+                <Th align="right">CY (Today)</Th>
+                <Th>Last Event</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map(b => {
+                const sess = b.session;
+                const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+                const truckType = truck ? truck.type : sess.truck_type;
+                const isEnded = !!sess.ended_at;
+                const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
+                const isOver8h = !isEnded && shiftSec > 8 * 3600;
+                const cyToday = driverLiveCyForLoadCount(truckType, b.pickupCount);
+                const lastEvStr = b.lastEvent
+                  ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at)
+                  : '—';
+                const statusColor = isEnded ? C.inkFaint
+                                  : isOver8h ? (C.danger || C.warn)
+                                  : C.ok;
+                const statusLabel = isEnded ? 'Ended'
+                                  : isOver8h ? 'Over 8h'
+                                  : 'On shift';
+                return (
+                  <Tr key={sess.id}
+                      onClick={() => setDrawerSessionId(sess.id)}
+                      style={isOver8h ? { background: 'rgba(239,68,68,0.06)' } : null}>
+                    <Td>
+                      <Pill color={statusColor} soft={isOver8h ? C.warnSoft : (isEnded ? 'rgba(255,255,255,0.04)' : C.okSoft)}>
+                        {statusLabel}
+                      </Pill>
+                    </Td>
+                    <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                    <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                    <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
+                    <Td mono>{fmtClock(sess.started_at)}</Td>
+                    <Td mono>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
+                    <Td align="right" mono>{b.pickupCount}</Td>
+                    <Td align="right" mono>{b.dropCount}</Td>
+                    <Td align="right" mono>{cyToday}</Td>
+                    <Td><span style={{ ...T.caption, color: C.inkDim }}>{lastEvStr}</span></Td>
+                  </Tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </Card>
+
+      {/* Drawer opens for the clicked row. Hoists out of the table so
+          the parent grid doesn't clip its overlay. */}
+      {drawerSessionId && (
+        <DriverSessionDrawer
+          sessionId={drawerSessionId}
+          onClose={() => setDrawerSessionId(null)}
+          db={db}
+          navigate={navigate}
+          live={live}
+        />
+      )}
+    </>
   );
 }
 
