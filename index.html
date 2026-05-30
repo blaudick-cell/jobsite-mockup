@@ -2413,17 +2413,10 @@ function rateForAssignment(assignment, truck) {
   return 0;
 }
 
-// Helper for hours-row-keyed dollar sums (dollarsForRequest, haulerRollupV31):
-// resolves the truck + assignment from a single hours row and returns the
-// effective rate. Picks the first assignment matching (req.id, truckId) — in
-// practice there's at most one per (req,truck), but the data model permits
-// multiple so we take the first deterministic one.
-function rateForHoursRow(h, req, db) {
-  if (!h || !req || !db) return 0;
-  const truck = (db.trucks || []).find(t => t.id === h.truckId) || null;
-  const assignment = (req.assignments || []).find(a => a && a.truckId === h.truckId) || null;
-  return rateForAssignment(assignment, truck);
-}
+// 2026-05-30 Phase 4 C2.3: `rateForHoursRow` retired alongside the per-
+// haul-request helpers it served (dollarsForRequest, haulerRollupV31).
+// Direct callers in the file have been rewritten to look up the truck +
+// rate inline; nothing else references this helper anymore.
 
 // Human-friendly label for a haul request used wherever the raw `hreq-NNN` id
 // previously surfaced in the UI (breadcrumbs, page titles, list rows, headers,
@@ -2445,117 +2438,55 @@ function haulRequestLabel(state, req) {
 // v22: HAS/NEEDS is the haul-direction signal (was on project.haulType only).
 // Derive from the project that owns the request. Falls back to 'NEEDS' so
 // the pill always renders and the toggle has a starting state.
-// === Total billed hours for one haul request =============================
-// 2026-05-25: reads day.hours FIRST (the explicit per-day override the
-// admin enters on the haul-detail day-row chip), falls back to a db.hours
-// row sum for (truck, date) pairs that don't have an override. This makes
-// admin edits flow into haul + project rollups immediately on the same
-// setDb pass without waiting for the db.hours upsert to round-trip
-// through Supabase (Realtime echoes can lag, and a PGRST204 on a missing
-// column would otherwise silently drop the edit from the rollup). The
-// override set is keyed (truckId, date) so we never double-count a day
-// that has both an override AND a matching db.hours row.
-function totalBilledHoursForRequest(req, db) {
-  if (!req || !db) return 0;
-  let total = 0;
-  const overrideKeys = new Set();
-  for (const a of (req.assignments || [])) {
-    if (!a || !Array.isArray(a.days)) continue;
-    for (const d of a.days) {
-      if (d && typeof d.hours === 'number' && d.hours > 0) {
-        total += d.hours;
-        overrideKeys.add(a.truckId + '|' + d.date);
-      }
-    }
-  }
-  for (const h of (db.hours || [])) {
-    if (!h || h.haulRequestId !== req.id) continue;
-    if (overrideKeys.has(h.truckId + '|' + h.date)) continue;
-    total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-  }
-  return total;
-}
-
-// v32: canonical-store reads. Sums db.loads.cy filtered by haulRequestId.
-// Replaces the legacy req.assignments[].days[].loads rollup.
-function deliveredCYForRequest(req, db) {
-  if (!req || !db || !Array.isArray(db.loads)) return 0;
-  let total = 0;
-  for (const l of db.loads) {
-    if (!l || l.haulRequestId !== req.id) continue;
-    total += Number(l.cy) || 0;
-  }
-  return total;
-}
-// v32: dollars for one request — sum hours × truck.ratePerHour (or type
-// fallback rate) over the canonical db.hours rows for this request. Truck
-// rate is looked up per-row from the row's truckId.
-// SCOPE WARNING (F5 — 2026-05-24 value-source audit): this helper sums
-// EVERY hour on the request regardless of which hauler logged it. Callers
-// in a per-hauler context (e.g. HaulerLanding, settlement statement) must
-// filter `db.hours` by `req.assignments.filter(a => a.haulerId === me).truckId`
-// themselves — see `haulsForHauler` line ~11089 for the correct pattern.
-function dollarsForRequest(req, db) {
-  if (!req || !db) return 0;
-  // 2026-05-25: parallel rewrite of totalBilledHoursForRequest. day.hours
-  // overrides win over the matching db.hours row so the dollar rollup
-  // reflects the entered value on the same setDb pass. Rate resolution
-  // still goes through the canonical chain: assignment.ratePerHour ->
-  // truck.ratePerHour -> DEFAULT_RATES[type].
-  let total = 0;
-  const overrideKeys = new Set();
-  for (const a of (req.assignments || [])) {
-    if (!a || !Array.isArray(a.days)) continue;
-    const truck = (db.trucks || []).find(t => t.id === a.truckId) || null;
-    const rate = rateForAssignment(a, truck);
-    for (const d of a.days) {
-      if (d && typeof d.hours === 'number' && d.hours > 0) {
-        total += d.hours * rate;
-        overrideKeys.add(a.truckId + '|' + d.date);
-      }
-    }
-  }
-  for (const h of (db.hours || [])) {
-    if (!h || h.haulRequestId !== req.id) continue;
-    if (overrideKeys.has(h.truckId + '|' + h.date)) continue;
-    const rate = rateForHoursRow(h, req, db);
-    total += calcHours(h.clockIn, h.breakMin || 0, h.clockOut) * rate;
-  }
-  return total;
-}
-// v32: hauler-scoped rollup. Builds the set of haulRequests where this
-// hauler has at least one assignment, then sums canonical db.loads +
-// db.hours filtered by haulRequestId. Matches the per-request helpers
-// above so every surface that displays "this hauler's total CY / hours /
-// revenue" agrees with the per-haul detail page.
-function haulerRollupV31(haulerId, db) {
+// 2026-05-30 Phase 4 C2.3: per-haul-request driver rollup helpers retired.
+// The replaced helpers (totalBilledHoursForRequest, deliveredCYForRequest,
+// dollarsForRequest, haulerRollupV31) all summed `db.loads` / `db.hours`
+// filtered by `haulRequestId`. Per the Phase 4 unification plan, driver-
+// side activity (sessions + events) is no longer tied to haul requests —
+// they're independent line items the contractor creates for tracking what
+// was ordered. We aggregate by driver / truck / hauler / day instead.
+//
+// Per-hauler rollup is the only one that survives in a mockup-internal form
+// (`haulerSimpleRollup` below): same shape, but the haulRequestId filter is
+// dropped in favor of a truckId-based scope. Per-request totals are no
+// longer computed anywhere; AdminHaulRequestDetail's progress dashboard +
+// AdminHaulRequests dispatch-board per-row CY/hours/$ chips were deleted in
+// the same commit.
+function haulerSimpleRollup(haulerId, db) {
   const out = { haulsCount: 0, totalCY: 0, totalLoads: 0, totalHours: 0, totalRevenue: 0 };
   if (!haulerId || !db) return out;
+  const myTruckIds = new Set((db.trucks || []).filter(t => t.haulerId === haulerId).map(t => t.id));
+  if (myTruckIds.size === 0) return out;
+  // haulsCount = distinct projects this hauler is assigned to via haul_requests.
+  // We still count haul-request assignments because the assignments themselves
+  // record contractor intent — they're not driver-data rollups.
   const projectIds = new Set();
-  const reqs = (db.haulRequests || []).filter(r =>
-    Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === haulerId)
-  );
-  const reqIds = new Set(reqs.map(r => r.id));
-  for (const r of reqs) {
-    if (r.projectId) projectIds.add(r.projectId);
+  for (const r of (db.haulRequests || [])) {
+    if (Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === haulerId)) {
+      if (r.projectId) projectIds.add(r.projectId);
+    }
   }
+  out.haulsCount = projectIds.size;
+  // Loads + CY: every load on this hauler's trucks counts, no per-haul filter.
   for (const l of (db.loads || [])) {
-    if (!l || !reqIds.has(l.haulRequestId)) continue;
+    if (!l || !myTruckIds.has(l.truckId)) continue;
     out.totalLoads += 1;
     out.totalCY += Number(l.cy) || 0;
   }
-  // Index reqs by id so rateForHoursRow can resolve the per-haul assignment
-  // without rescanning db.haulRequests for each hours row.
-  const reqsById = new Map(reqs.map(r => [r.id, r]));
+  // Hours + revenue: per-truck rate from truck.ratePerHour or DEFAULT_RATES.
+  // No per-haul assignment.ratePerHour override — those were a per-haul
+  // billing concept that no longer applies.
+  const truckById = new Map((db.trucks || []).map(t => [t.id, t]));
   for (const h of (db.hours || [])) {
-    if (!h || !reqIds.has(h.haulRequestId)) continue;
-    const reqForHr = reqsById.get(h.haulRequestId);
-    const rate = rateForHoursRow(h, reqForHr, db);
+    if (!h || !myTruckIds.has(h.truckId)) continue;
+    const truck = truckById.get(h.truckId);
+    const rate = truck && truck.ratePerHour != null
+      ? Number(truck.ratePerHour)
+      : (truck ? (DEFAULT_RATES[truck.type] || 0) : 0);
     const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
     out.totalHours += hrs;
     out.totalRevenue += hrs * rate;
   }
-  out.haulsCount = projectIds.size;
   return out;
 }
 
@@ -6811,11 +6742,14 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ ...T.bodySm, color: C.inkDim }}>of</span>
             <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{e.material ? e.material.label : e.r.materialCode}</span>
           </div>
-          {/* v30: was "X/N trucks" but N = ceil(volumeCY/18) is loads-needed,
-              not trucks-needed. Split into two honest lines: delivered/target
-              CY (matches detail page) and trucks assigned / distance / time. */}
+          {/* 2026-05-30 Phase 4 C2.3: per-haul CY-delivered / hours-billed /
+              progress-bar chips removed. Driver-side activity no longer rolls
+              up to a specific haul request — the row now displays only the
+              contractor-side scope (volume ordered, assignments, distance /
+              time). Per-driver / per-truck / per-hauler / per-day rollups
+              live elsewhere (AdminActiveTrucks, AdminHaulerDetail). */}
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
-            <span style={{ color: C.ink, fontWeight: 600 }}>{deliveredCYForRequest(e.r, db)}/{e.r.volumeCY || 0}</span> CY
+            <span style={{ color: C.ink, fontWeight: 600 }}>{e.r.volumeCY || 0}</span> CY ordered
             <span style={{ color: C.inkFaint }}> · </span>
             <span>{assignedTruckCountForRequest(e.r)} truck{assignedTruckCountForRequest(e.r) === 1 ? '' : 's'}</span>
             <span style={{ color: C.inkFaint }}> · </span>
@@ -6823,28 +6757,6 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ color: C.inkFaint }}> · </span>
             <span>~{Math.round(e.distance * 1.8)} min</span>
           </div>
-          {/* v27: Total billed hours — sums day.hours across this request's
-              assignments. Same number renders on AdminHaulRequestDetail header
-              and HaulOperationalCard footer. */}
-          <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 4 }}>
-            <span style={{ color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Billed</span>
-            <span style={{ color: C.inkFaint }}> · </span>
-            <span style={{ color: C.ink, fontWeight: 600 }}>{fmtHours(totalBilledHoursForRequest(e.r, db))}</span> hrs
-          </div>
-          {/* v30: Mini fulfillment bar tracks delivered CY / target CY, so it
-              matches the number above the bar and the detail page progress
-              ring. Was previously trucksAssigned/trucksNeeded which read as
-              0% even when half the volume was delivered. */}
-          {(() => {
-            const delivered = deliveredCYForRequest(e.r, db);
-            const target = e.r.volumeCY || 0;
-            const pct = target > 0 ? (delivered / target) * 100 : 0;
-            return (
-              <div style={{ marginTop: 6, height: 4, background: C.surfaceHi, borderRadius: 999, overflow: 'hidden' }}>
-                <div style={{ width: Math.min(100, pct) + '%', height: '100%', background: e.priority === 'critical' ? (C.danger || C.warn) : C.accent, borderRadius: 999 }} />
-              </div>
-            );
-          })()}
         </div>
       </div>
     );
@@ -7614,15 +7526,12 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const matMaterial = material ? material.label : req.materialCode;
   const assignments = req.assignments || [];
   const alreadyAssignedIds = new Set(assignments.map(a => a.truckId));
-  // v32: header total CY reads canonical db.loads filtered by haulRequestId.
-  const totalDeliveredCY = deliveredCYForRequest(req, db);
-  const overallPct = req.volumeCY > 0 ? (totalDeliveredCY / req.volumeCY) * 100 : 0;
-  // v23: TOTAL chip = hours × hourly rate, matching `dollarsForRequest` —
-  // the single source of truth used by the invoice generator and every other
-  // dollar rollup on this haul.
-  const totalDollarsForHaul = dollarsForRequest(req, db);
-  const totalHoursBilledForHaul = totalBilledHoursForRequest(req, db);
-  const fmtTotalDollars = '$' + totalDollarsForHaul.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // 2026-05-30 Phase 4 C2.3: per-haul-request driver rollup tiles
+  // (totalDeliveredCY / totalHoursBilledForHaul / totalDollarsForHaul /
+  // overallPct) and the progress dashboard JSX that consumed them were
+  // removed. AdminHaulRequestDetail is now a contractor-side record only —
+  // what was ordered, where, when, who's assigned. Driver activity flows
+  // through AdminActiveTrucks.
 
   // Hauler lookup map — used to group/filter trucks by their owning hauler in
   // the truck-assignment picker and to render hauler-section headers above the
@@ -8234,70 +8143,23 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 })()}
               </div>
 
-              {/* Thin progress bar */}
-              <div style={{ marginTop: S[3], height: 3, background: C.ruleHi, borderRadius: R.pill, overflow: 'hidden' }}>
-                <div style={{
-                  width: Math.max(0, Math.min(100, overallPct)) + '%',
-                  height: '100%',
-                  background: overallPct >= 100 ? C.ok : C.accent,
-                  transition: 'width 240ms ease-out',
-                }} />
-              </div>
-
-              {/* Compact inline metrics */}
+              {/* 2026-05-30 Phase 4 C2.3: progress bar + inline metrics +
+                  HRS BILLED + TOTAL stat-cards + CY HAULED donut removed.
+                  All were per-haul-request driver-data rollups. Truck-count
+                  chip kept because it reads from req.assignments — that's
+                  contractor-side, not driver-side. */}
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
                 <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 700 }}>
-                  {totalDeliveredCY}<span style={{ color: C.inkFaint, fontWeight: 400 }}> /{req.volumeCY}</span> CY
+                  {req.volumeCY || 0} CY ordered
                 </span>
-                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>{Math.round(overallPct)}%</span>
                 <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
                 <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
                   {(() => {
-                    // F3 (2026-05-24 audit): use canonical helper so this
-                    // count agrees with the dispatch row's truck count even
-                    // when `req.assignments` has duplicate entries for the
-                    // same `truckId` (legacy data / race on assignment).
                     const n = assignedTruckCountForRequest(req);
                     return n === 0 ? 'no trucks' : n + ' truck' + (n === 1 ? '' : 's');
                   })()}
                 </span>
-                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
-                  {fmtHours(totalHoursBilledForHaul)} hrs billed
-                </span>
               </div>
-
-              {/* HRS BILLED + TOTAL stat-card pair — mockup hierarchy */}
-              <div style={{ marginTop: S[3], display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: S[2] }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '10px 12px', background: C.surfaceHi, borderRadius: R.sm, border: `1px solid ${C.rule}` }}>
-                  <span aria-hidden="true" style={{
-                    width: 22, height: 22, borderRadius: '50%', border: `1.5px solid ${C.accent}`,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    fontSize: 12, color: C.accent, fontFamily: F.mono, lineHeight: 1,
-                  }}>◷</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtHours(totalHoursBilledForHaul)}</div>
-                    <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Hrs billed</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '10px 12px', background: C.surfaceHi, borderRadius: R.sm, border: `1px solid ${C.rule}` }}>
-                  <span aria-hidden="true" style={{
-                    width: 22, height: 22, borderRadius: '50%', border: `1.5px solid ${C.accent}`,
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                    fontSize: 12, color: C.accent, fontFamily: F.mono, fontWeight: 700, lineHeight: 1,
-                  }}>$</span>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{fmtTotalDollars}</div>
-                    <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* RIGHT — donut. Center reads pct + "CY HAULED" label. */}
-            <div style={{ flexShrink: 0, alignSelf: 'center' }}>
-              <Donut pct={overallPct} size={108} stroke={8} label="CY HAULED" />
             </div>
           </div>
 
@@ -8555,9 +8417,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               // F3 (2026-05-24 audit): use canonical dedup'd helper so this
               // header agrees with the dispatch row.
               const n = assignedTruckCountForRequest(req);
+              // 2026-05-30 Phase 4 C2.3: removed "X of Y CY delivered (Z%)"
+              // tail — per-haul-request driver rollup is gone.
               return n === 0
                 ? 'No trucks assigned yet.'
-                : `${n} truck${n === 1 ? '' : 's'} assigned · ${totalDeliveredCY} of ${req.volumeCY} CY delivered (${Math.round(overallPct)}%)`;
+                : `${n} truck${n === 1 ? '' : 's'} assigned · ${req.volumeCY || 0} CY ordered`;
             })()}
           </div>
         </div>
@@ -9855,11 +9719,13 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     }
   };
   const truckTypeOptions = TRUCK_TYPES.map(tt => ({ value: tt.code, label: tt.label }));
-  // v31: canonical hauler rollup — same formula family as AdminProjects.
-  // Legacy db.hours / db.loads totals were drifting from reality because
-  // operational data is being entered through haul_requests.assignments.
-  // Kept the `legacy*` shadows in case a downstream UI still reads them.
-  const haulerRollup = haulerRollupV31(hauler.id, db);
+  // 2026-05-30 Phase 4 C2.3: swapped haulerRollupV31 (per-haul-request
+  // filter) for haulerSimpleRollup (per-truck filter). Same shape, same
+  // tile rendering — just no longer scoped through haulRequests.
+  // assignments[].truckId. Hauls count still comes from haul_requests
+  // (contractor-side intent) but CY/loads/hours/revenue come from every
+  // load + hour on this hauler's trucks.
+  const haulerRollup = haulerSimpleRollup(hauler.id, db);
   const totalHours = haulerRollup.totalHours;
   const totalRevenue = haulerRollup.totalRevenue;
   const totalCYDelivered = haulerRollup.totalCY;
