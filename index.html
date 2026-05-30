@@ -1538,45 +1538,35 @@ const HAULERS_SEED = [
 // v15 truck remap — distribution across the 6 real haulers. Legacy `hauler`
 // free-text string updated to match the new haulerId so any UI still reading
 // truck.hauler stays consistent. Type/project/driver pairings preserved.
+// 2026-05-30 Phase 4 C2.1: driverId is now a free-text name string (the
+// dedicated drivers collection went away). Display sites read `truck.driverId`
+// directly. Bench trucks still carry null.
 const TRUCKS_SEED = [
-  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'dr-001' },
-  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'RG', haulerId: 'op-005', driverId: 'dr-002' },
-  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'dr-003' },
-  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'dr-004' },
-  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'dr-005' },
-  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'RG', haulerId: 'op-004', driverId: 'dr-006' },
-  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'dr-007' },
-  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'dr-001' },
-  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-008' },
-  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'dr-009' },
-  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'dr-010' },
-  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'GE', haulerId: 'op-001', driverId: 'dr-011' },
-  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'GE', haulerId: 'op-005', driverId: 'dr-008' },
-  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'dr-013' },
-  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GE', haulerId: 'op-004', driverId: 'dr-014' },
+  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'M. Ortega' },
+  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'RG', haulerId: 'op-005', driverId: 'J. Bui' },
+  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'D. Kowalski' },
+  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'R. Singh' },
+  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'A. Reyes' },
+  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'RG', haulerId: 'op-004', driverId: 'T. Hall' },
+  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'C. Yoon' },
+  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'M. Ortega' },
+  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'S. Park' },
+  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'L. Velazquez' },
+  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'B. Tucker' },
+  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'GE', haulerId: 'op-001', driverId: 'F. Okafor' },
+  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'GE', haulerId: 'op-005', driverId: 'S. Park' },
+  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'P. Larsen' },
+  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GE', haulerId: 'op-004', driverId: 'N. Cabrera' },
   { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
   { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
 ];
 
-const DRIVERS_SEED = [
-  { id: 'dr-001', name: 'M. Ortega',   phone: '(303) 555-2101' },
-  { id: 'dr-002', name: 'J. Bui',      phone: '(303) 555-2102' },
-  { id: 'dr-003', name: 'D. Kowalski', phone: '(303) 555-2103' },
-  { id: 'dr-004', name: 'R. Singh',    phone: '(303) 555-2104' },
-  { id: 'dr-005', name: 'A. Reyes',    phone: '(303) 555-2105' },
-  { id: 'dr-006', name: 'T. Hall',     phone: '(303) 555-2106' },
-  { id: 'dr-007', name: 'C. Yoon',     phone: '(303) 555-2107' },
-  { id: 'dr-008', name: 'S. Park',     phone: '(303) 555-2108' },
-  { id: 'dr-009', name: 'L. Velazquez',phone: '(303) 555-2109' },
-  { id: 'dr-010', name: 'B. Tucker',   phone: '(303) 555-2110' },
-  { id: 'dr-011', name: 'F. Okafor',   phone: '(303) 555-2111' },
-  { id: 'dr-012', name: 'K. Mahoney',  phone: '(303) 555-2112' },
-  { id: 'dr-013', name: 'P. Larsen',   phone: '(303) 555-2113' },
-  { id: 'dr-014', name: 'N. Cabrera',  phone: '(720) 555-2114' },
-  { id: 'dr-015', name: 'H. Pratt',    phone: '(720) 555-2115' },
-  { id: 'dr-016', name: 'W. Stenberg', phone: '(303) 555-2116' },
-];
+// 2026-05-30 Phase 4 C2.1: DRIVERS_SEED removed. Driver identity lives on
+// `truck.driverId` as a free-text name string (admin assignment) and on
+// `driver_sessions.driver_name` (what the driver actually typed in the field
+// widget). No standalone drivers collection — single source of truth per
+// surface.
 
 // Haul requests (v3 collection) — incoming material-hauling needs that admins
 // match to a hauler + truck. Status flows: pending → accepted (hauler opted in) /
@@ -2667,7 +2657,12 @@ function buildSeed() {
     projects: [],
     haulers: HAULERS_SEED,
     trucks: TRUCKS_SEED,
-    drivers: DRIVERS_SEED,
+    // 2026-05-30 Phase 4 C2.1: kept as empty array stub so the doomed
+    // DriverShell/DriverHome components (slated for whole-cloth deletion in
+    // C3) don't crash on `db.drivers.find(...)`. Admin-side read sites have
+    // been rewritten to read `truck.driverId` directly as a name string.
+    // Empty array means lookups return undefined → falsy → display fallback.
+    drivers: [],
     hours: HOURS_SEED,
     loads: LOADS_SEED,
     invoices: INVOICES_SEED,
@@ -3342,7 +3337,9 @@ const SB_TABLES = {
   // Supabase `projects` table is no longer fetched, seeded, synced, or
   // subscribed — Dispatch will DROP the table after this verifies.
   haulers:      { sb: 'haulers',       pk: 'id', overrides: {} },
-  drivers:      { sb: 'drivers',       pk: 'id', overrides: {} },
+  // 2026-05-30 Phase 4 C2.1: `drivers` table removed from sync. Driver
+  // identity lives inline on truck.driverId (admin) + driver_sessions.driver_name
+  // (field widget). Mockup Supabase `drivers` table can be dropped in Phase 7.
   trucks:       { sb: 'trucks',        pk: 'id', overrides: {} },
   loads:        { sb: 'loads',         pk: 'id', overrides: { ticketNo: 'ticket' } },
   hours:        { sb: 'hours',         pk: 'id', overrides: {} },
@@ -3361,7 +3358,6 @@ const SB_TABLE_LIST = Object.keys(SB_TABLES);
 const SB_FIELDS_JS = {
   // 2026-05-25: projects entry removed — see SB_TABLES comment above.
   haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
-  drivers:      ['id','name','phone'],
   trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
   // `haulRequestId` restored after Dispatch applied the matching
   // `ALTER TABLE loads / hours ADD COLUMN haul_request_id` migrations
@@ -3645,7 +3641,9 @@ function assembleDbFromCloud(tableArrays, cloudMeta, localDb) {
     // to [] so any lingering db.projects.find() calls return undefined and
     // existing null-fallbacks (project ? ... : req.projectLabel) kick in.
     projects: [],
-    haulers: byKey.haulers, drivers: byKey.drivers,
+    haulers: byKey.haulers,
+    // 2026-05-30 Phase 4 C2.1: empty stub. See initialState comment.
+    drivers: [],
     trucks: byKey.trucks, loads: byKey.loads, hours: byKey.hours,
     invoices: byKey.invoices, haulRequests: byKey.haulRequests,
     activity: byKey.activity,
@@ -5537,31 +5535,27 @@ function AdminNewDriver({ db, setDb, navigate }) {
 
   const cancel = () => navigate('/admin/haulers');
   const submit = () => {
-    const newId = 'dr-' + Math.random().toString(36).substring(2, 7);
-    const newDriver = {
-      id: newId,
-      name: name.trim(),
-      phone: phone.trim(),
-      ...(licenseNumber.trim() ? { licenseNumber: licenseNumber.trim() } : {}),
-    };
+    // 2026-05-30 Phase 4 C2.1: `db.drivers` collection went away. Driver name
+    // is now written directly onto `truck.driverId` as free text. Phone +
+    // licenseNumber are not persisted (Phase 4 scope: drivers are field-
+    // widget-authored; admin only pre-assigns the name). Component is also
+    // slated for deletion in C3, this is just a not-crash holdover.
+    const driverName = name.trim();
     setDb(prev => appendActivity(
       {
         ...prev,
-        drivers: [...prev.drivers, newDriver],
         trucks: defaultTruckId
-          ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: newId } : t)
+          ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: driverName } : t)
           : prev.trucks,
       },
       {
         type: 'driver.created',
         actorRole: 'admin',
         actorId: null,
-        summary: `Admin added driver ${newDriver.name}`,
-        refId: newId,
+        summary: `Admin added driver ${driverName}`,
+        refId: driverName,
       }
     ));
-    // If a truck was selected, land on that truck's hauler page when known;
-    // otherwise return to the haulers list (no flat driver index exists).
     if (defaultTruckId) {
       const t = db.trucks.find(x => x.id === defaultTruckId);
       if (t && t.haulerId) { navigate('/admin/haulers/' + t.haulerId); return; }
@@ -6190,7 +6184,6 @@ function AdminReports({ db, navigate }) {
     .filter(t => t && t.haulerId && _haulerByIdReports.has(t.haulerId))
     .map(t => {
       const ldsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso) && l.truckId === t.id).length;
-      const driver = db.drivers.find(d => d.id === t.driverId);
       const project = db.projects.find(p => p.id === t.projectId);
       const inService = db.hours.some(h => h.truckId === t.id && h.status === 'open');
       return {
@@ -6198,7 +6191,7 @@ function AdminReports({ db, navigate }) {
         plate: t.plate,
         type: t.type,
         loadsInRange: ldsInRange,
-        driverName: driver ? driver.name : '—',
+        driverName: t.driverId || '—',
         projectName: project ? project.name : '—',
         status: inService ? 'inservice' : 'idle',
       };
@@ -7836,7 +7829,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     // filtered by haulRequestId + truckId.
     const lineItems = (req.assignments || []).map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
-      const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      const driverName = truck && truck.driverId ? String(truck.driverId) : null;
       const cy = (db.loads || [])
         .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
         .reduce((s, l) => s + (Number(l.cy) || 0), 0);
@@ -7862,7 +7855,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
         truckType: truck ? truck.type : '',
-        driverName: driver ? driver.name : '—',
+        driverName: driverName || '—',
         deliveredCY: cy,        // informational; not used in amount
         hours,
         rate: ratePerHour,      // $/hr (kept on shape `rate` to match legacy seed invoices)
@@ -9231,7 +9224,9 @@ function AdminHaulers({ db, setDb, navigate }) {
   };
 
   // === Enrich every hauler with the operational signals the cards expose. ===
-  const todayLoads = (db.loads || []).filter(l => l.status === 'approved' && (l.date === TODAY_ISO));
+  // 2026-05-30 Phase 4 C2.1: dropped `l.status === 'approved'` filter.
+  // Driver-logged events have no status — every event is real by definition.
+  const todayLoads = (db.loads || []).filter(l => l.date === TODAY_ISO);
   const enriched = db.haulers.map(op => {
     const trucks = db.trucks.filter(t => t.haulerId === op.id);
     const truckIds = new Set(trucks.map(t => t.id));
@@ -9258,13 +9253,11 @@ function AdminHaulers({ db, setDb, navigate }) {
     })();
     const verified = insuranceFresh && !!w9Att;
     // Health flags — does any active project this hauler is on look at risk?
-    const isOnDelayedProject = openShifts.some(h => {
-      const proj = db.projects.find(p => p.id === h.projectId);
-      if (!proj) return false;
-      const loads = db.loads.filter(l => l.projectId === proj.id);
-      const pendingLoads = loads.filter(l => l.status === 'pending').length;
-      return pendingLoads >= 3;
-    });
+    // 2026-05-30 Phase 4 C2.1: "delayed project" detection used to fire on
+    // ≥3 pending loads. Driver-logged events have no status — there's no
+    // pending state anymore. Flag stays as `false` until C3 decides whether
+    // to derive a delay signal from event timing (e.g., last event >Xh ago).
+    const isOnDelayedProject = false;
     // Operational status — drives the status pill on the card.
     let opsStatus = 'available';
     if (trucks.length === 0)                   opsStatus = 'offline';
@@ -9376,7 +9369,8 @@ function AdminHaulers({ db, setDb, navigate }) {
           const onDelayed = h.openShifts.some(s => {
             if (s.truckId !== t.id) return false;
             const projLoads = db.loads.filter(l => l.projectId === s.projectId);
-            return projLoads.filter(l => l.status === 'pending').length >= 3;
+            // 2026-05-30 Phase 4 C2.1: pending-load count gone; see comment above.
+            return false;
           });
           const color = !t.driverId ? C.inkFaint
             : onDelayed             ? (C.danger || C.warn)
@@ -10174,7 +10168,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
                     <Td dim>{p.gc}</Td>
                     <Td><StatusPill status={p.status || 'active'} /></Td>
                     <Td align="right" mono>{pTrucks.length}</Td>
-                    <Td align="right" mono>{pLoads.filter(l => l.status === 'approved').length}</Td>
+                    <Td align="right" mono>{pLoads.length}</Td>
                     <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
                   </Tr>
                 );
@@ -10237,7 +10231,7 @@ function AdminReporting({ db, setDb, navigate }) {
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
   const openTotal = invoices.filter(i => i.status === 'sent').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
   const openCount = invoices.filter(i => i.status === 'sent').length;
-  const totalCY = (db.loads || []).filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+  const totalCY = (db.loads || []).reduce((s, l) => s + (l.cy || 0), 0);
 
   const placeholderCards = [
     { label: 'Hauler payouts', value: fmtMoney(paidTotal), sub: `${invoices.filter(i => i.status === 'paid').length} invoices paid YTD`, hint: 'Weekly + monthly disbursement statements per hauler.' },
@@ -10279,7 +10273,7 @@ function AdminReporting({ db, setDb, navigate }) {
     // v32: per-truck line items from canonical store filtered by haulRequestId + truckId.
     const lineItems = myAssignments.map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
-      const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
+      const driverName = truck && truck.driverId ? String(truck.driverId) : null;
       const cy = (db.loads || [])
         .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
         .reduce((s, l) => s + (Number(l.cy) || 0), 0);
@@ -10305,7 +10299,7 @@ function AdminReporting({ db, setDb, navigate }) {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
         truckPlate: truck ? truck.plate : '?',
         truckType: truck ? truck.type : '',
-        driverName: driver ? driver.name : '—',
+        driverName: driverName || '—',
         deliveredCY: cy,        // informational; not in amount
         hours,
         rate: ratePerHour,      // $/hr
@@ -11372,11 +11366,16 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   const [logFor, setLogFor] = useState(null);
 
   const withDriver = all.filter(t => t.driverId).map(t => {
-    const driver = db.drivers.find(d => d.id === t.driverId);
+    // 2026-05-30 Phase 4 C2.1: truck.driverId is now a free-text name string.
+    // Synthesize a minimal driver-shaped object so downstream tile JSX
+    // (eyebrow label, modal subtitle) keeps reading `driver.name` without
+    // a JSX-side rewrite. C3 may collapse this shim when the MiniPhone embed
+    // is replaced with the session card per the Phase 4 audit §3.A.
+    const driver = { id: t.driverId, name: String(t.driverId) };
     const hr = truckHrMap.get(t.id);
     const isPaused = !!(hr && hr.pausedAt);
     return { truck: t, driver, hr, status: hr ? (isPaused ? 'paused' : 'active') : 'idle' };
-  }).filter(x => x.driver);
+  });
 
   // Sort: active > paused > idle, then plate
   const order = { active: 0, paused: 1, idle: 2 };
@@ -12734,7 +12733,6 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[2] }}>
                       {mineHere.map(a => {
                         const truck = db.trucks.find(t => t.id === a.truckId);
-                        const driver = truck ? db.drivers.find(d => d.id === truck.driverId) : null;
                         const truckLoadCount = loadsForReqTruck(req.id, a.truckId).length;
                         return (
                           <button key={a.truckId} onClick={() => navigate(`/hauler/o/${op.id}/p/${req.projectId}/t/${a.truckId}`)} style={{
@@ -12768,7 +12766,7 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                           ) : (
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: S[2] }}>
                               {availableTrucks.map(t => {
-                                const dr = db.drivers.find(d => d.id === t.driverId);
+                                const dr = t.driverId ? { name: String(t.driverId) } : null;
                                 return (
                                   <button key={t.id} onClick={() => addTruckToHaul(req, t.id)} style={{
                                     textAlign: 'left', background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.md,
@@ -12863,9 +12861,12 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
   const hours = db.hours.filter(h => truckIds.has(h.truckId));
   const loads = db.loads.filter(l => truckIds.has(l.truckId));
   const totalHours = hours.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-  const totalCY = loads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+  const totalCY = loads.reduce((s, l) => s + (l.cy || 0), 0);
   const activeTrucks = trucks.filter(t => hours.some(h => h.truckId === t.id && h.status === 'open')).length;
-  const pendingLoads = loads.filter(l => l.status === 'pending').length;
+  // 2026-05-30 Phase 4 C2.1: load.status went away. `pendingLoads` is now
+  // always zero — kept as a binding for any remaining downstream readers
+  // until C3 finishes deleting the pending UI.
+  const pendingLoads = 0;
 
   const truckLink = (tId) => isAdmin
     ? `/admin/p/${projectId}/o/${haulerId}/t/${tId}`
@@ -12898,8 +12899,8 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
         <Card padding={S[4]}><Stat label="Your trucks" value={trucks.length} sub={`${activeTrucks} active`} /></Card>
-        <Card padding={S[4]}><Stat label="Loads" value={loads.filter(l => l.status === 'approved').length} sub={`${pendingLoads} pending`} /></Card>
-        <Card padding={S[4]}><Stat label="Total CY" value={totalCY} sub="approved" /></Card>
+        <Card padding={S[4]}><Stat label="Loads" value={loads.length} /></Card>
+        <Card padding={S[4]}><Stat label="Total CY" value={totalCY} /></Card>
         <Card padding={S[4]}><Stat label="Total hours" value={fmtHours(totalHours)} /></Card>
       </div>
 
@@ -12919,7 +12920,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
             {trucks.map(t => {
               const hr = hours.find(h => h.truckId === t.id);
               const truckLoads = loads.filter(l => l.truckId === t.id);
-              const truckCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+              const truckCY = truckLoads.reduce((s, l) => s + (l.cy || 0), 0);
               const truckHours = hours.filter(h => h.truckId === t.id).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
               return (
                 <Tr key={t.id} onClick={() => navigate(truckLink(t.id))}>
@@ -12932,7 +12933,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
                   </Td>
                   <Td mono>{hr ? hr.clockIn : '—'}</Td>
                   <Td align="right" mono>{fmtHours(truckHours)}</Td>
-                  <Td align="right" mono>{truckLoads.filter(l => l.status === 'approved').length}{truckLoads.filter(l => l.status === 'pending').length > 0 && <span style={{ color: C.warn, marginLeft: S[1] }}>+{truckLoads.filter(l => l.status === 'pending').length}p</span>}</Td>
+                  <Td align="right" mono>{truckLoads.length}</Td>
                   <Td align="right" mono>{truckCY}</Td>
                   <Td>{hr ? <StatusPill status={hr.status} /> : <Pill color={C.inkFaint} soft="rgba(255,255,255,0.04)">Off</Pill>}</Td>
                   <Td align="right" style={{ color: C.accent }}><ChevronRight /></Td>
@@ -12965,7 +12966,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   const project = db.projects.find(p => p.id === projectId);
   const truck = db.trucks.find(t => t.id === truckId);
   if (!op || !project || !truck) return <NotFound navigate={navigate} />;
-  const driver = db.drivers.find(d => d.id === truck.driverId);
+  const driver = truck.driverId ? { id: truck.driverId, name: String(truck.driverId) } : null;
   const truckType = TRUCK_TYPES.find(tt => tt.code === truck.type);
   const truckLoads = db.loads.filter(l => l.truckId === truckId).sort((a, b) => a.time.localeCompare(b.time));
   const truckHoursRows = db.hours.filter(h => h.truckId === truckId);
@@ -13088,7 +13089,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
     { value: 'pending',  label: 'Pending' },
     { value: 'approved', label: 'Approved' },
   ];
-  const todayCY = truckLoads.filter(l => l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+  const todayCY = truckLoads.reduce((s, l) => s + (l.cy || 0), 0);
   const todayHours = truckHoursRows.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
   // 2026-05-25: per-truck rate is now a default (was the source of truth);
   // assignment.ratePerHour overrides it per haul. Fall back to DEFAULT_RATES
@@ -13203,7 +13204,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Today loads" value={truckLoads.filter(l => l.status === 'approved').length} sub={`${truckLoads.filter(l => l.status === 'pending').length} pending`} /></Card>
+        <Card padding={S[4]}><Stat label="Today loads" value={truckLoads.length} /></Card>
         <Card padding={S[4]}><Stat label="Today CY" value={todayCY} /></Card>
         <Card padding={S[4]}><Stat label="Hours" value={fmtHours(todayHours)} /></Card>
         <Card padding={S[4]}><Stat label="Revenue" value={fmtMoney(todayHours * rate)} /></Card>
@@ -13289,7 +13290,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                 {dayHoursRows.length > 0 ? (
                   <div style={{ marginTop: S[2], display: 'flex', flexDirection: 'column', gap: 4 }}>
                     {dayHoursRows.map(h => {
-                      const dr = db.drivers.find(x => x.id === h.driverId);
+                      const dr = h.driverId ? { name: String(h.driverId) } : null;
                       return (
                         <div key={h.id} style={{ ...T.bodySm, color: C.inkDim, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
                           <span style={{ fontFamily: F.display }}>{dr ? dr.name : <span style={{ color: C.inkFaint }}>—</span>}</span>
@@ -13701,8 +13702,10 @@ function AddTruckForm({ onAdd, onCancel }) {
 }
 
 function HaulerApprovals({ projectId, hours, loads, hauler, db, setDb }) {
-  const pendingLoads = loads.filter(l => l.status === 'pending');
-  const pendingHrs = hours.filter(h => h.status === 'pending');
+  // 2026-05-30 Phase 4 C2.1: load.status / hours.status went away. Both
+  // arrays are now empty — kept as bindings until C3 deletes the approve UI.
+  const pendingLoads = [];
+  const pendingHrs = [];
   const updateLoad = (id, patch) => setDb(prev => ({ ...prev, loads: prev.loads.map(l => l.id === id ? { ...l, ...patch } : l) }));
   const updateHr = (id, patch) => setDb(prev => ({ ...prev, hours: prev.hours.map(h => h.id === id ? { ...h, ...patch } : h) }));
   const actorName = hauler ? hauler.name : 'A hauler';
@@ -13735,7 +13738,7 @@ function HaulerApprovals({ projectId, hours, loads, hauler, db, setDb }) {
   };
   const approveHr = (id) => {
     const hr = db.hours.find(h => h.id === id);
-    const drv = hr ? db.drivers.find(d => d.id === hr.driverId) : null;
+    const drv = hr && hr.driverId ? { name: String(hr.driverId) } : null;
     const hrsCalc = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
     setDb(prev => appendActivity(
       { ...prev, hours: prev.hours.map(h => h.id === id ? { ...h, status: 'open' } : h) },
@@ -13822,7 +13825,7 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
     const today = new Date().toISOString().slice(0, 10);
     const lineItems = trucks.filter(t => hours.some(h => h.truckId === t.id)).map(t => {
       const hr = hours.find(h => h.truckId === t.id);
-      const driver = db.drivers.find(d => d.id === t.driverId);
+      const driver = t.driverId ? { name: String(t.driverId) } : null;
       const truckHours = hr ? calcHours(hr.clockIn, hr.breakMin, hr.clockOut) : 0;
       // 2026-05-25: db.rates deprecated. Use truck.ratePerHour with DEFAULT_RATES fallback.
       const rate = (t.ratePerHour != null && Number.isFinite(Number(t.ratePerHour)))
@@ -13834,8 +13837,8 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
         hours: parseFloat(truckHours.toFixed(2)), rate, amount: parseFloat((truckHours * rate).toFixed(2)),
       };
     });
-    const loadCount = db.loads.filter(l => l.projectId === projectId && l.status === 'approved').length;
-    const totalCY = db.loads.filter(l => l.projectId === projectId && l.status === 'approved').reduce((s, l) => s + (l.cy || 0), 0);
+    const loadCount = db.loads.filter(l => l.projectId === projectId).length;
+    const totalCY = db.loads.filter(l => l.projectId === projectId).reduce((s, l) => s + (l.cy || 0), 0);
     const hoursTotal = parseFloat(lineItems.reduce((s, li) => s + (li.hours || 0), 0).toFixed(2));
     const amountTotal = parseFloat(lineItems.reduce((s, li) => s + (li.amount || 0), 0).toFixed(2));
     return {
@@ -14062,7 +14065,10 @@ function DriverShell({ db, setDb, navigate, hash }) {
   const drId = urlDriverId || pickedId;
   // Keep pickedId in sync when the URL changes externally
   useEffect(() => { if (urlDriverId && urlDriverId !== pickedId) setPickedId(urlDriverId); }, [urlDriverId]);
-  const driver = db.drivers.find(d => d.id === drId);
+  // 2026-05-30 Phase 4 C2.1: DriverShell is slated for whole-cloth deletion
+  // in C3. Until then, synthesize a minimal driver shape from the raw drId
+  // so the component renders something instead of crashing.
+  const driver = drId ? { id: drId, name: String(drId) } : null;
   const trucks = db.trucks.filter(t => t.driverId === drId);
   const subIdx = urlDriverId ? 2 : 1;
   const sub = parts[subIdx] || 'home';
