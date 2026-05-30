@@ -7855,31 +7855,19 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
   const generateHaulInvoice = (kind) => {
     const today = new Date().toISOString().slice(0, 10);
-    // v32: per-truck line items derive from canonical db.loads + db.hours
-    // filtered by haulRequestId + truckId.
+    // 2026-05-30 Phase 4 C4.3: per-truck line items still carry admin-
+    // entered deliveredCY (db.loads tagged with haulRequestId) but hours +
+    // amount default to 0. Per-haul-request hours are gone (drivers don't
+    // tag sessions to hauls; admin can't enter hours by hand per C3.3).
+    // A future commit will restructure invoices to period-based hour sums
+    // over driver_sessions; until then invoices show "0 hrs · $0" so the
+    // generator path stays unbroken.
     const lineItems = (req.assignments || []).map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
       const driverName = truck && truck.driverId ? String(truck.driverId) : null;
       const cy = (db.loads || [])
         .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
         .reduce((s, l) => s + (Number(l.cy) || 0), 0);
-      // 2026-05-25: prefer day.hours override on req.assignments[].days[]
-      // over the matching db.hours row (mirrors totalBilledHoursForRequest's
-      // source-of-truth chain). Override keys are per-date so the matching
-      // db.hours row never double-counts the same shift.
-      let hours = 0;
-      const overrideDates = new Set();
-      for (const d of (a.days || [])) {
-        if (d && typeof d.hours === 'number' && d.hours > 0) {
-          hours += d.hours;
-          overrideDates.add(d.date);
-        }
-      }
-      for (const h of (db.hours || [])) {
-        if (!h || h.haulRequestId !== req.id || h.truckId !== a.truckId) continue;
-        if (overrideDates.has(h.date)) continue;
-        hours += calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-      }
       const ratePerHour = rateForAssignment(a, truck);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
@@ -7887,9 +7875,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         truckType: truck ? truck.type : '',
         driverName: driverName || '—',
         deliveredCY: cy,        // informational; not used in amount
-        hours,
+        hours: 0,
         rate: ratePerHour,      // $/hr (kept on shape `rate` to match legacy seed invoices)
-        amount: parseFloat((hours * ratePerHour).toFixed(2)),
+        amount: 0,
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
@@ -10248,30 +10236,16 @@ function AdminReporting({ db, setDb, navigate }) {
     // v23: hours × hourly rate per truck assignment. deliveredCY rides
     // along for the CY column on the printable invoice but does NOT flow
     // into the amount.
-    // v32: per-truck line items from canonical store filtered by haulRequestId + truckId.
+    // 2026-05-30 Phase 4 C4.3: hauler invoice line items mirror the
+    // hreq-side generator above — deliveredCY from admin-tagged db.loads,
+    // hours + amount default to 0 until period-based hour aggregation
+    // lands. See sibling comment in generateHaulInvoice.
     const lineItems = myAssignments.map(a => {
       const truck = db.trucks.find(t => t.id === a.truckId);
       const driverName = truck && truck.driverId ? String(truck.driverId) : null;
       const cy = (db.loads || [])
         .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
         .reduce((s, l) => s + (Number(l.cy) || 0), 0);
-      // 2026-05-25: prefer day.hours override on req.assignments[].days[]
-      // over the matching db.hours row (mirrors totalBilledHoursForRequest's
-      // source-of-truth chain). Override keys are per-date so the matching
-      // db.hours row never double-counts the same shift.
-      let hours = 0;
-      const overrideDates = new Set();
-      for (const d of (a.days || [])) {
-        if (d && typeof d.hours === 'number' && d.hours > 0) {
-          hours += d.hours;
-          overrideDates.add(d.date);
-        }
-      }
-      for (const h of (db.hours || [])) {
-        if (!h || h.haulRequestId !== req.id || h.truckId !== a.truckId) continue;
-        if (overrideDates.has(h.date)) continue;
-        hours += calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-      }
       const ratePerHour = rateForAssignment(a, truck);
       return {
         id: 'li-' + Math.random().toString(36).substring(2, 7),
@@ -10279,9 +10253,9 @@ function AdminReporting({ db, setDb, navigate }) {
         truckType: truck ? truck.type : '',
         driverName: driverName || '—',
         deliveredCY: cy,        // informational; not in amount
-        hours,
+        hours: 0,
         rate: ratePerHour,      // $/hr
-        amount: parseFloat((hours * ratePerHour).toFixed(2)),
+        amount: 0,
       };
     });
     const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
