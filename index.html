@@ -3932,6 +3932,133 @@ function subscribeRealtime(setDbRaw, bumpRemote) {
   };
 }
 
+// =====================================================================
+// useDriverSessionsLive — isolated subscription on the 4 driver-side tables
+// =====================================================================
+// 2026-05-30 Phase 4 C2.2: live read of the field-widget data
+// (driver_sessions / truck_events / event_photos / issue_reports) for the
+// React admin views. Held strictly OUTSIDE the `db` state + hydrateDb
+// cascade — those 4 tables stay isolated per the Phase 4 hard rule. The
+// hook hydrates on mount via REST, then mirrors postgres_changes events
+// into local state. Returns memoized aggregated views.
+//
+// Consumers are pure read-only at the moment. C2.4 will add admin write
+// paths for backfill (PATCH driver_sessions.ended_at + INSERT truck_events
+// with NULL coords/photo when admin manually closes a shift).
+//
+// Channel name `jse-live-ops` is distinct from `jse-db-realtime` so the two
+// subscriptions cleanly coexist + can be torn down independently.
+const DRIVER_LIVE_TABLES = ['driver_sessions', 'truck_events', 'event_photos', 'issue_reports'];
+
+function useDriverSessionsLive() {
+  const [state, setState] = React.useState({
+    sessions: [], events: [], photos: [], issues: [],
+    loading: true, error: null,
+  });
+  const tickRef = React.useRef(0);
+  const debounceRef = React.useRef(null);
+
+  React.useEffect(() => {
+    if (!_sb.ready || !_sb.client) {
+      setState(s => ({ ...s, loading: false, error: 'Supabase client not ready' }));
+      return () => {};
+    }
+
+    let cancelled = false;
+    const fetchAll = async () => {
+      try {
+        const [sessions, events, photos, issues] = await Promise.all([
+          _sb.client.from('driver_sessions').select('*').order('started_at', { ascending: false }),
+          _sb.client.from('truck_events').select('*').order('event_at', { ascending: true }),
+          _sb.client.from('event_photos').select('*'),
+          _sb.client.from('issue_reports').select('*').order('event_at', { ascending: false }),
+        ]);
+        if (cancelled) return;
+        if (sessions.error || events.error || photos.error || issues.error) {
+          const err = sessions.error || events.error || photos.error || issues.error;
+          setState(s => ({ ...s, loading: false, error: String(err.message || err) }));
+          return;
+        }
+        setState({
+          sessions: sessions.data || [],
+          events: events.data || [],
+          photos: photos.data || [],
+          issues: issues.data || [],
+          loading: false,
+          error: null,
+        });
+      } catch (e) {
+        if (!cancelled) setState(s => ({ ...s, loading: false, error: String(e) }));
+      }
+    };
+    fetchAll();
+
+    // Realtime subscription. We debounce 1s so a burst of inserts at end-of-
+    // shift doesn't refetch four times in a row — one refetch covers all of
+    // them. Refetch (vs. incremental patch) is simpler + matches the
+    // dispatch-live.html mental model.
+    const channel = _sb.client.channel('jse-live-ops');
+    const scheduleRefetch = () => {
+      tickRef.current += 1;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => { if (!cancelled) fetchAll(); }, 1000);
+    };
+    for (const t of DRIVER_LIVE_TABLES) {
+      channel.on('postgres_changes',
+        { event: '*', schema: 'public', table: t },
+        scheduleRefetch);
+    }
+    channel.subscribe();
+    return () => {
+      cancelled = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      try { _sb.client.removeChannel(channel); } catch (e) {}
+    };
+  }, []);
+
+  // Aggregated views. Memoized on the raw arrays so React doesn't re-derive
+  // every render. Each session is paired with its events + a derived
+  // bucket of useful fields (CY today, last event, elapsed since started_at).
+  const buckets = React.useMemo(() => {
+    const eventsBySession = new Map();
+    for (const e of state.events) {
+      const list = eventsBySession.get(e.session_id) || [];
+      list.push(e);
+      eventsBySession.set(e.session_id, list);
+    }
+    return state.sessions.map(s => {
+      const evts = eventsBySession.get(s.id) || [];
+      // events are already sorted asc by event_at from the initial fetch;
+      // realtime refetch preserves that order.
+      const lastEvent = evts.length ? evts[evts.length - 1] : null;
+      const pickupCount = evts.filter(e => e.event_type === 'pickup_load').length;
+      const dropCount   = evts.filter(e => e.event_type === 'dropoff_load').length;
+      return { session: s, events: evts, lastEvent, pickupCount, dropCount };
+    });
+  }, [state.sessions, state.events]);
+
+  return {
+    loading: state.loading,
+    error: state.error,
+    sessions: state.sessions,
+    events: state.events,
+    photos: state.photos,
+    issues: state.issues,
+    buckets,
+  };
+}
+
+// Shared CY-per-truck-type lookup. Mirror of the dispatch-live.html constant
+// (Robert-confirmed Tandem = 12; rest are industry-standard semi capacities).
+// Hardcoded for MVP; future: pull from a truck_capacities table or a per-
+// truck override on driver_sessions.
+const DRIVER_LIVE_CY_PER_TRUCK = {
+  SD: 5, TAN: 12, ED: 22, SIDE: 22, HISIDE: 22, BD: 22, HS: 5, OTHER: 0,
+};
+function driverLiveCyForLoadCount(truckType, pickupCount) {
+  return (DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0) * (pickupCount || 0);
+}
+
 // ---- Phase 3: Reset Demo (cloud wipe + re-seed) ------------------------
 // Called from AdminShell's Reset button. Default to confirming — Robert's
 // safest-non-destructive-default rule (the brief explicitly defaults reset
@@ -11352,45 +11479,88 @@ function MiniPhone({ children, label, badge, badgeColor = C.accent, onClick }) {
 }
 
 function AdminActiveTrucks({ db, setDb, navigate }) {
-  // Only consider trucks owned by a real hauler. Trucks whose haulerId no
-  // longer resolves (e.g. after a hauler delete cascade-nulls the FK) are
-  // orphans — rendering them produced un-clickable phantom tiles.
+  // 2026-05-30 Phase 4 C2.2: rewired from mockup `db.hours/db.drivers` to
+  // live `driver_sessions` + `truck_events` via the isolated subscription
+  // hook `useDriverSessionsLive()`. The MiniPhone-embed pattern that
+  // wrapped DriverHome/DriverTruckDetail tiles was excised — the field
+  // widget at driver.jobsiteexchange.com is the source of truth now, so
+  // showing the driver's UI mirrored inside admin no longer fits the data
+  // model. Replaced with a compact session card per session; click opens a
+  // read-only event-timeline drawer.
+  //
+  // KPI tiles: 4 → 3 (Paused dropped per Phase 4 Q4 default; driver_sessions
+  // has no pause concept). Benched-trucks table preserved as-is — trucks
+  // without an admin-assigned driverId still need to be visible somewhere.
+  const live = useDriverSessionsLive();
+
   const haulerById = new Map(db.haulers.map(h => [h.id, h]));
-  const all = db.trucks.filter(t => t.haulerId && haulerById.has(t.haulerId));
-  const openShifts = (db.hours || []).filter(h => h.status === 'open');
-  const truckHrMap = new Map(openShifts.map(h => [h.truckId, h]));
+  const allTrucks = db.trucks.filter(t => t.haulerId && haulerById.has(t.haulerId));
 
-  // Modal state: { driver, truck } when admin is logging a load on someone's
-  // behalf. Embedded DriverHome / DriverTruckDetail open the modal via the
-  // onOpenLogLoad prop instead of navigating to /driver/log.
-  const [logFor, setLogFor] = useState(null);
+  // Index live data by truck so we can show one card per session and the
+  // tile-side stats from the events stream. driver_sessions carries the
+  // matched_truck_id link; events join through session_id.
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of allTrucks) m.set(t.id, t);
+    return m;
+  }, [allTrucks]);
 
-  const withDriver = all.filter(t => t.driverId).map(t => {
-    // 2026-05-30 Phase 4 C2.1: truck.driverId is now a free-text name string.
-    // Synthesize a minimal driver-shaped object so downstream tile JSX
-    // (eyebrow label, modal subtitle) keeps reading `driver.name` without
-    // a JSX-side rewrite. C3 may collapse this shim when the MiniPhone embed
-    // is replaced with the session card per the Phase 4 audit §3.A.
-    const driver = { id: t.driverId, name: String(t.driverId) };
-    const hr = truckHrMap.get(t.id);
-    const isPaused = !!(hr && hr.pausedAt);
-    return { truck: t, driver, hr, status: hr ? (isPaused ? 'paused' : 'active') : 'idle' };
-  });
+  // Active sessions = ended_at IS NULL. Sort newest-started first.
+  const activeBuckets = React.useMemo(() => {
+    return (live.buckets || [])
+      .filter(b => b.session && !b.session.ended_at)
+      .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+  }, [live.buckets]);
 
-  // Sort: active > paused > idle, then plate
-  const order = { active: 0, paused: 1, idle: 2 };
-  withDriver.sort((a, b) => order[a.status] - order[b.status] || a.truck.plate.localeCompare(b.truck.plate));
+  // "Idle" = a truck whose admin-assigned driverId exists but no active
+  // session right now. Useful so dispatch can see "this truck is staffed
+  // but the driver hasn't clocked on yet today."
+  const trucksWithActiveSession = React.useMemo(() => {
+    const s = new Set();
+    for (const b of activeBuckets) {
+      if (b.session.matched_truck_id) s.add(b.session.matched_truck_id);
+    }
+    return s;
+  }, [activeBuckets]);
+  const idleTrucks = allTrucks.filter(t => t.driverId && !trucksWithActiveSession.has(t.id));
+  const benchedTrucks = allTrucks.filter(t => !t.driverId);
 
-  const benchedTrucks = all.filter(t => !t.driverId);
+  const activeCount = activeBuckets.length;
+  const idleCount   = idleTrucks.length;
 
-  // Embedded driver widgets always stay inside admin — never delegate to /driver/*.
-  // No-op for navigation calls from inside the embed; the modal handles log-load
-  // and the back-link / DriverIncomingRequests are hidden by the `embedded` prop.
-  const noopNavigate = () => {};
+  // Drawer state: selected bucket key, or null when closed.
+  const [drawerSessionId, setDrawerSessionId] = React.useState(null);
+  const drawerBucket = drawerSessionId
+    ? activeBuckets.find(b => b.session.id === drawerSessionId)
+        || (live.buckets || []).find(b => b.session.id === drawerSessionId)
+    : null;
 
-  const activeCount = withDriver.filter(w => w.status === 'active').length;
-  const pausedCount = withDriver.filter(w => w.status === 'paused').length;
-  const idleCount   = withDriver.filter(w => w.status === 'idle').length;
+  // Format helpers — local to keep the component self-contained.
+  const fmtElapsed = (startedIso, endedIso) => {
+    const start = startedIso ? new Date(startedIso).getTime() : NaN;
+    const end = endedIso ? new Date(endedIso).getTime() : Date.now();
+    if (!isFinite(start) || !isFinite(end) || end < start) return '—';
+    const s = Math.floor((end - start) / 1000);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+  const fmtClock = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+  const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
+                          : et === 'dropoff_load' ? 'Drop-off'
+                          : et === 'end_shift' ? 'End shift'
+                          : et || '—';
+  const eventColor = (et) => et === 'pickup_load' ? C.ok
+                          : et === 'dropoff_load' ? C.warn
+                          : et === 'end_shift' ? C.warnSoft
+                          : C.inkDim;
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -11399,50 +11569,80 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         <div>
           <Label color={C.accent} style={{ marginBottom: 6 }}>Active Trucks</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What every driver sees, right now.</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Click any widget action to clock in/out, log a load, or pause on behalf of the driver. Changes flow back to their phone via cross-tab sync.</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
+            {live.loading ? 'Loading live driver data…'
+              : live.error ? <span style={{ color: C.warn }}>Live data unavailable — {live.error}</span>
+              : 'Live session data from the field widget. Click any session for the event timeline.'}
+          </div>
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="clocked in, not paused" /></Card>
-        <Card padding={S[4]}><Stat label="Paused" value={pausedCount} sub="on break" /></Card>
-        <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not clocked in" /></Card>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
+        <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="shift in progress" /></Card>
+        <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not on shift" /></Card>
         <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
       </div>
 
-      {withDriver.length === 0 ? (
+      {activeCount === 0 ? (
         <Card padding={S[5]} style={{ textAlign: 'center' }}>
-          <div style={{ ...T.bodySm, color: C.inkDim }}>No drivers assigned to any trucks. Assign a driver from a hauler page to see their widget here.</div>
+          <div style={{ ...T.bodySm, color: C.inkDim }}>
+            {live.loading ? 'Loading…' : 'No drivers on shift right now. Once a driver clocks in via the field widget their session will appear here.'}
+          </div>
         </Card>
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(296px, 1fr))',
-          gap: S[5],
-          justifyItems: 'center',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gap: S[3],
         }}>
-          {withDriver.map(({ truck, driver, hr, status }) => {
-            const driverTrucks = db.trucks.filter(t => t.driverId === driver.id);
-            const badge = status === 'active' ? 'On the clock' : status === 'paused' ? 'Paused' : 'Idle';
-            const badgeColor = status === 'active' ? C.accent : status === 'paused' ? C.warn : C.inkDim;
+          {activeBuckets.map(b => {
+            const sess = b.session;
+            const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+            const truckType = truck ? truck.type : null;
+            const truckPlate = truck ? truck.plate : null;
+            const cyToday = driverLiveCyForLoadCount(truckType, b.pickupCount);
+            const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length;
+            const lastEvType = b.lastEvent ? b.lastEvent.event_type : null;
             return (
-              <MiniPhone
-                key={truck.id}
-                label={`${driver.name} · #${truck.plate}`}
-                badge={badge}
-                badgeColor={badgeColor}
-                onClick={() => {
-                  if (truck.projectId && truck.haulerId) {
-                    navigate(`/admin/p/${truck.projectId}/o/${truck.haulerId}/t/${truck.id}`);
-                  } else if (truck.haulerId) {
-                    navigate(`/admin/haulers/${truck.haulerId}`);
-                  }
-                }}
-              >
-                {driverTrucks.length === 1
-                  ? <DriverHome driver={driver} truck={truck} db={db} setDb={setDb} navigate={noopNavigate} embedded onOpenLogLoad={(tk) => setLogFor({ driver, truck: tk })} />
-                  : <DriverTruckDetail driver={driver} truck={truck} trucks={driverTrucks} db={db} setDb={setDb} navigate={noopNavigate} embedded onOpenLogLoad={(tk) => setLogFor({ driver, truck: tk })} />}
-              </MiniPhone>
+              <Card key={sess.id} padding={S[4]} style={{ cursor: 'pointer' }}>
+                <div onClick={() => setDrawerSessionId(sess.id)}>
+                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
+                        {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
+                      </div>
+                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+                        {truckPlate ? <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truckPlate}</span> : <span style={{ color: C.inkFaint }}>— no truck</span>}
+                        {truckType && <span style={{ marginLeft: S[2] }}>{truckType}</span>}
+                      </div>
+                    </div>
+                    <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
+                    <div>
+                      <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
+                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
+                    </div>
+                    <div>
+                      <div style={{ ...T.micro, color: C.inkFaint }}>ELAPSED</div>
+                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtElapsed(sess.started_at, null)}</div>
+                    </div>
+                    <div>
+                      <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
+                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{cyToday}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+                    <div style={{ ...T.caption, color: C.inkDim }}>
+                      {b.events.length === 0 ? 'No events yet'
+                        : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)}</>}
+                    </div>
+                    <div style={{ ...T.caption, color: C.inkFaint }}>
+                      {b.pickupCount} pickup{b.pickupCount === 1 ? '' : 's'} · {b.dropCount} drop · {photoCount} photo{photoCount === 1 ? '' : 's'}
+                    </div>
+                  </div>
+                </div>
+              </Card>
             );
           })}
         </div>
@@ -11477,48 +11677,83 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         </div>
       )}
 
-      {logFor && (
+      {drawerBucket && (
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={`Log load for ${logFor.driver.name} on truck #${logFor.truck.plate}`}
-          onClick={() => setLogFor(null)}
+          aria-label={`Session detail for ${drawerBucket.session.driver_name || '—'}`}
+          onClick={() => setDrawerSessionId(null)}
           style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 200,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
+            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
+            display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
           }}
         >
           <div
             onClick={e => e.stopPropagation()}
             style={{
-              background: C.bg, borderRadius: R.lg, width: 'min(480px, 100%)', maxHeight: '90vh',
-              overflow: 'hidden', display: 'flex', flexDirection: 'column',
-              border: `1px solid ${C.ruleHi}`, boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
+              width: '100%', maxWidth: 460, background: C.bg,
+              borderLeft: `1px solid ${C.ruleHi}`,
+              boxShadow: '-24px 0 64px rgba(0,0,0,0.45)',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}` }}>
-              <div>
-                <Label color={C.accent}>Log load (admin)</Label>
-                <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2 }}>{logFor.driver.name} · #{logFor.truck.plate}</div>
+            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3] }}>
+              <div style={{ minWidth: 0 }}>
+                <Label color={C.accent}>Session detail</Label>
+                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 700, color: C.ink, marginTop: 2 }}>
+                  {drawerBucket.session.driver_name || '—'}
+                </div>
+                <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+                  Started {fmtClock(drawerBucket.session.started_at)} · Elapsed {fmtElapsed(drawerBucket.session.started_at, drawerBucket.session.ended_at)}
+                  {drawerBucket.session.ended_at && <> · <span style={{ color: C.inkFaint }}>Ended {fmtClock(drawerBucket.session.ended_at)}</span></>}
+                </div>
               </div>
-              <button onClick={() => setLogFor(null)} aria-label="Close" style={{
-                background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                width: 32, height: 32, borderRadius: R.sm, fontSize: 22, lineHeight: 1, padding: 0,
-              }}
-                onMouseEnter={e => { e.currentTarget.style.color = C.ink; e.currentTarget.style.background = C.surfaceHi; }}
-                onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
-              >×</button>
+              <button onClick={() => setDrawerSessionId(null)} aria-label="Close" style={{
+                background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
+                padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
+                fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
+              }}>Close</button>
             </div>
-            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-              <DriverLogLoad
-                driver={logFor.driver}
-                truck={logFor.truck}
-                db={db}
-                setDb={setDb}
-                navigate={() => {}}
-                onSubmitted={() => setLogFor(null)}
-                onCancel={() => setLogFor(null)}
-              />
+            <div style={{ flex: 1, overflow: 'auto', padding: `${S[3]}px ${S[4]}px` }}>
+              {drawerBucket.events.length === 0 ? (
+                <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
+                  No events logged on this session yet.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                  {drawerBucket.events.map(e => {
+                    const startMs = new Date(drawerBucket.session.started_at).getTime();
+                    const evMs = new Date(e.event_at).getTime();
+                    const elapsedMs = isFinite(startMs) && isFinite(evMs) ? Math.max(0, evMs - startMs) : 0;
+                    const elapsedS = Math.floor(elapsedMs / 1000);
+                    const eh = Math.floor(elapsedS / 3600);
+                    const em = Math.floor((elapsedS % 3600) / 60);
+                    const es = elapsedS % 60;
+                    const elapsedFmt = `${String(eh).padStart(2,'0')}:${String(em).padStart(2,'0')}:${String(es).padStart(2,'0')}`;
+                    const hasGps = e.latitude != null && e.longitude != null;
+                    return (
+                      <div key={e.id} style={{
+                        display: 'flex', gap: S[2], alignItems: 'flex-start',
+                        padding: `${S[2]}px ${S[3]}px`,
+                        background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
+                        fontSize: 12.5,
+                      }}>
+                        <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64 }}>{fmtClock(e.event_at)}</span>
+                        <span style={{ fontWeight: 700, color: eventColor(e.event_type), flexShrink: 0, width: 70 }}>{eventLabel(e.event_type)}</span>
+                        <span style={{ fontFamily: F.mono, color: C.inkFaint, flexShrink: 0, width: 64, fontSize: 11.5 }} title="Elapsed shift time at this event">{elapsedFmt}</span>
+                        <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11 }}>
+                          {hasGps ? (
+                            <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noopener"
+                               style={{ color: C.info, textDecoration: 'none' }}>
+                              {Number(e.latitude).toFixed(4)},{Number(e.longitude).toFixed(4)} ↗
+                            </a>
+                          ) : <span style={{ color: C.inkFaint }}>—</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </div>
