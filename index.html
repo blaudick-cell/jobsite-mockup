@@ -8955,52 +8955,18 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         const settleAssignments = assignments.filter(a => a.haulerId === stmtForHauler);
         const fmtMoneyStmt = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-        // Build line items: one per (truck × day). 2026-05-25: per-date
-        // day.hours override (on req.assignments[].days[]) wins over the
-        // matching db.hours row, mirroring the rollup helpers. Days without
-        // an override fall back to calcHours on the db.hours row for that
-        // (truck, date), so legacy Driver clock-in/out shifts still surface.
+        // 2026-05-30 Phase 4 C4.4: per-(truck × day) line-item derivation
+        // retired. The two sources it used — day.hours overrides on
+        // req.assignments[].days[] and db.hours filtered by haulRequestId —
+        // are both stale after Phase 4 (admin can't enter day.hours
+        // anymore per C4.1, and driver_sessions don't tag haul requests).
+        // The statement still renders with empty line-items + subtotal=0
+        // until a future commit restructures it to compute from
+        // driver_sessions over a date range. Truck-list header derived
+        // from assignments still shows who was on this haul (admin-side
+        // intent), so the statement isn't empty.
         const lines = [];
-        for (const a of settleAssignments) {
-          const t = (db.trucks || []).find(x => x.id === a.truckId);
-          if (!t) continue;
-          const hourlyRate = rateForAssignment(a, t);
-          const overrideByDate = new Map();
-          for (const d of (a.days || [])) {
-            if (d && typeof d.hours === 'number' && d.hours > 0) {
-              overrideByDate.set(d.date, d.hours);
-            }
-          }
-          // Emit override-driven lines first.
-          for (const [date, hrs] of overrideByDate) {
-            lines.push({
-              key: a.truckId + '|' + date + '|override',
-              truckPlate: t.plate,
-              truckType: t.type,
-              date,
-              hours: hrs,
-              rate: hourlyRate,
-              amount: hrs * hourlyRate,
-            });
-          }
-          // Then db.hours rows for (truck, date) pairs not in the override set.
-          const hoursRows = (db.hours || []).filter(h => h && h.haulRequestId === req.id && h.truckId === a.truckId);
-          for (const h of hoursRows) {
-            if (overrideByDate.has(h.date)) continue;
-            const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-            lines.push({
-              key: h.id || (a.truckId + '|' + h.date + '|' + (h.clockIn || '')),
-              truckPlate: t.plate,
-              truckType: t.type,
-              date: h.date,
-              hours: hrs,
-              rate: hourlyRate,
-              amount: hrs * hourlyRate,
-            });
-          }
-        }
-        lines.sort((x, y) => (x.truckPlate || '').localeCompare(y.truckPlate || '') || (x.date || '').localeCompare(y.date || ''));
-        const subtotal = lines.reduce((s, l) => s + l.amount, 0);
+        const subtotal = 0;
 
         const stmtDate = TODAY_ISO; // 2026-05-23 frozen
         const hidShort = String(stmtForHauler || '').replace(/^op-/, '');
