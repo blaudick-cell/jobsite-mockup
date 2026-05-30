@@ -5613,7 +5613,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
                 + '</div>'
                 + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul request &rsaquo;</div>';
               // v24: navigate to the SPECIFIC haul request page.
-              const target = reqId ? ('/admin/requests/' + reqId) : (projId ? ('/admin/requests?projectId=' + projId) : '/admin/requests');
+              const target = reqId ? ('/admin/requests/' + reqId) : (projId ? ('/admin/requests?projectId=' + projId) : '/admin');
               el.addEventListener('click', (clickEv) => {
                 clickEv.stopPropagation();
                 try { popup.remove(); } catch (e) {}
@@ -7003,7 +7003,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haul Requests' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Hauling Overview' }]} navigate={navigate} />
       {filterProject && (
         <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
           <div style={{
@@ -7016,7 +7016,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ fontWeight: 700 }}>{filterProject.name}</span>
             <button
               type="button"
-              onClick={() => navigate('/admin/requests')}
+              onClick={() => navigate('/admin')}
               aria-label="Clear haul filter"
               style={{ background: 'transparent', border: 'none', color: C.accent, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: 0 }}
             >&times;</button>
@@ -7031,26 +7031,24 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· {db.haulers.length} haulers connected · GPS active · updated 8s ago</span>
           </div>
           <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Haul Requests</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Pending requests appear at the top with priority + waiting time.</div>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Hauling Overview</h1>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Active drivers up top with capacity at a glance; haul requests list below.</div>
         </div>
         <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
       </div>
 
-      {/* 2026-05-30 (Active Drivers @ top): Robert wants live capacity
-          visible BEFORE the map / weather / haul-requests list so
-          dispatchers can match incoming demand to available trucks at
-          first glance. Each card shows driver + company + truck type +
-          CY/load + loads done / estimated remaining + CY hauled today;
-          summary row aggregates across the active fleet. Card click
-          opens the shared DriverSessionDrawer. */}
-      <ActiveDriversCapacityStrip db={db} navigate={navigate} />
+      {/* 2026-05-30 (Active Drivers @ top, reshuffled): Robert moved
+          the capacity-limits feature back into the active-only
+          DriverActivityTable (one section, table format, not the
+          cards-format strip). Header summary + CY/load column give
+          dispatchers "do I have capacity for this incoming haul?" at
+          a glance. The standalone <ActiveDriversCapacityStrip /> that
+          briefly sat here was superseded by these two props on the
+          shared table. */}
+      <DriverActivityTable db={db} navigate={navigate} activeOnly showCapacitySummary />
 
       {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
-          desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. Both
-          mounts were orphaned when AdminProjects got deleted in 207a80f;
-          re-mounted here so the landing matches Robert's reference screenshot
-          (map on the left, weather on the right). */}
+          desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. */}
       <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
         <div style={{ minWidth: 0 }}>
           <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} />
@@ -7062,12 +7060,9 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 
       {/* 2026-05-30: 6-card "Operations KPI strip" deleted per Robert —
           numbers were derived from mock fields not tied to the canonical
-          driver_sessions / truck_events store. The Hauling Overview now
-          leads with the Active Drivers capacity strip above and flows
-          directly from the map+weather row into the filter bar. The
-          DriverActivityTable that briefly sat here was superseded by
-          the capacity strip — full historical activity remains on
-          /admin/trucks/active. */}
+          driver_sessions / truck_events store. Hauling Overview now
+          leads with the active-only DriverActivityTable + capacity
+          summary header, then map+weather, then haul requests. */}
 
       {/* Filter / sort bar */}
       <Card padding={S[3]} style={{ marginBottom: S[5] }}>
@@ -7253,11 +7248,11 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       navigate={navigate}
       steps={['Details']}
       currentStep={1}
-      onCancel={() => navigate('/admin/requests')}
+      onCancel={() => navigate('/admin')}
       onSubmit={submit}
       submitDisabled={!valid || submitting}
       submitLabel={submitting ? 'Creating…' : 'Create haul'}
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Hauls', to: '/admin/requests' }, { label: 'New haul' }]}
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Hauling Overview', to: '/admin' }, { label: 'New haul' }]}
       eyebrow="New haul"
       title="Create a new haul"
     >
@@ -7810,7 +7805,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
         summary: `Admin deleted haul request ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
-    navigate('/admin/requests');
+    navigate('/admin');
   };
   const pickup  = req.pickupLocation  || { name: '', address: '' };
   const dropoff = req.dropoffLocation || { name: '', address: '' };
@@ -8188,7 +8183,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
         { label: 'Admin', to: '/admin' },
-        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: 'Hauling Overview', to: '/admin' },
         { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
@@ -11357,7 +11352,7 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
       <div className="invoice-print-hide" style={{ marginBottom: S[4] }}>
         <Crumbs items={[
           { label: 'Admin', to: '/admin' },
-          { label: 'Haul Requests', to: '/admin/requests' },
+          { label: 'Hauling Overview', to: '/admin' },
           ...(req ? [{ label: haulRequestLabel(db, req), to: '/admin/requests/' + req.id }] : []),
           { label: inv.number || 'Invoice' },
         ]} navigate={navigate} />
@@ -12394,7 +12389,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
 // Status uses the same 8h green/red threshold the dispatch-live table
 // uses — sessions over 8h pick up a soft-red tint on the row so dispatchers
 // can see at a glance who has been running too long.
-function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
+function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false }) {
   const ownLive = useDriverSessionsLive();
   const live = liveProp || ownLive;
 
@@ -12409,12 +12404,32 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
   const [drawerSessionId, setDrawerSessionId] = React.useState(null);
 
   // Newest-first ordering: started_at desc. unstarted/no-started sessions
-  // sink to the bottom.
+  // sink to the bottom. 2026-05-30: `activeOnly` filters to !ended_at —
+  // used by the Hauling Overview embed so dispatchers see only drivers
+  // currently on shift. Default false preserves the full-history view
+  // for any standalone surface.
   const rows = React.useMemo(() => {
-    const buckets = (live.buckets || []).slice();
+    let buckets = (live.buckets || []).slice();
+    if (activeOnly) buckets = buckets.filter(b => !b.session.ended_at);
     buckets.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
     return maxRows ? buckets.slice(0, maxRows) : buckets;
-  }, [live.buckets, maxRows]);
+  }, [live.buckets, maxRows, activeOnly]);
+
+  // Capacity summary aggregates — used when `showCapacitySummary` is on
+  // (Hauling Overview embed). Mirrors the figures from the original
+  // capacity strip so the dispatcher gets "do I have headroom for this
+  // incoming haul?" at a glance.
+  const capacitySummary = React.useMemo(() => {
+    let cyPerLoadCombined = 0;
+    let cyHauledToday = 0;
+    for (const b of rows) {
+      const truckType = b.session.truck_type;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+      cyPerLoadCombined += cyPerLoad;
+      cyHauledToday += cyPerLoad * b.pickupCount;
+    }
+    return { count: rows.length, cyPerLoadCombined, cyHauledToday };
+  }, [rows]);
 
   const fmtClock = (iso) => {
     if (!iso) return '—';
@@ -12436,10 +12451,30 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
                           : et === 'end_shift' ? 'End shift'
                           : et || '—';
 
+  const sectionLabel = activeOnly ? 'Active drivers (newest first)' : 'Driver activity (newest first)';
+  const emptyMessage = activeOnly
+    ? 'No drivers on shift right now. Sessions surface here as drivers clock in.'
+    : 'No driver sessions yet. The first widget clock-in will appear here.';
+
   return (
     <>
-      <div style={{ marginBottom: S[3] }}>
-        <Label>Driver activity (newest first)</Label>
+      <div style={{
+        marginBottom: S[3],
+        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        gap: S[3], flexWrap: 'wrap',
+      }}>
+        <Label>{sectionLabel}</Label>
+        {/* 2026-05-30: capacity-summary header (originally on the
+            standalone Active Drivers capacity strip). Folded in so
+            "X drivers active · Y CY/load combined · Z CY hauled today"
+            sits right next to the table on Hauling Overview. */}
+        {showCapacitySummary && rows.length > 0 && (
+          <div style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
+            <span><span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.count}</span> driver{capacitySummary.count === 1 ? '' : 's'} active</span>
+            <span><span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyPerLoadCombined}</span> CY/load combined</span>
+            <span><span style={{ color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyHauledToday}</span> CY hauled today</span>
+          </div>
+        )}
       </div>
       <Card padding={0} style={{ marginBottom: S[5] }}>
         {live.loading && rows.length === 0 ? (
@@ -12452,7 +12487,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
           </div>
         ) : rows.length === 0 ? (
           <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
-            No driver sessions yet. The first widget clock-in will appear here.
+            {emptyMessage}
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -12462,6 +12497,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
                 <Th>Driver</Th>
                 <Th>Company</Th>
                 <Th>Truck Type</Th>
+                <Th align="right">CY/Load</Th>
                 <Th>Start (MT)</Th>
                 <Th>Shift Time</Th>
                 <Th align="right">Pickups</Th>
@@ -12475,10 +12511,11 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
                 const sess = b.session;
                 const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
                 const truckType = truck ? truck.type : sess.truck_type;
+                const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
                 const isEnded = !!sess.ended_at;
                 const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
                 const isOver8h = !isEnded && shiftSec > 8 * 3600;
-                const cyToday = driverLiveCyForLoadCount(truckType, b.pickupCount);
+                const cyToday = cyPerLoad * b.pickupCount;
                 const lastEvStr = b.lastEvent
                   ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at)
                   : '—';
@@ -12500,6 +12537,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
                     <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                     <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                     <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
+                    <Td align="right" mono>{cyPerLoad || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                     <Td mono>{fmtClock(sess.started_at)}</Td>
                     <Td mono>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
                     <Td align="right" mono>{b.pickupCount}</Td>
@@ -13176,128 +13214,56 @@ function ActiveDriversCapacityStrip({ db, navigate, live: liveProp }) {
 // On first render, advances db.activityLastReadAt to the latest event timestamp
 // so the sidebar unread badge clears once the user has viewed the page.
 function AdminActivity({ db, setDb, navigate }) {
-  // 2026-05-30 (Activity blend): merge real trucking data with the
-  // existing admin db.activity collection. Trucking stream =
-  // truck_events.{pickup_load,dropoff_load,end_shift} + issue_reports.
-  // Admin stream = db.activity (unchanged). Filter pills above the
-  // feed scope to All / Trucking / Admin. Row click on a trucking
-  // event opens the shared DriverSessionDrawer for that session_id.
-  const live = useDriverSessionsLive();
-  const [activityFilter, setActivityFilter] = React.useState('all'); // 'all' | 'trucking' | 'admin'
-  const [drawerSessionId, setDrawerSessionId] = React.useState(null);
-
-  // Build the unified event list. Each entry shape:
-  //   { id, ts (ms), stream: 'trucking'|'admin', actorRole, actorName,
-  //     summary, type, refId, sessionId, photoUrl, gps }
-  // Sessions get joined to events so we can render driver_name / company /
-  // truck_type without a second fetch. Issue reports use issue_text as
-  // the summary. db.activity rows map 1:1 (timestamp → ts).
-  const sessionsById = React.useMemo(() => {
-    const m = new Map();
-    for (const s of (live.sessions || [])) m.set(s.id, s);
-    return m;
-  }, [live.sessions]);
-
-  const truckTypeShort = (tt) => {
-    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
-                  SIDE: 'Side Dump', HISIDE: 'High Side',
-                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
-    return map[tt] || tt || '—';
+  // 2026-05-30 (admin-only revision): trucking events were stripped
+  // out — drivers' shift / load / issue activity surfaces on Active
+  // Trucks, the Hauling Overview embed, the driver session drawer,
+  // and Reports. The admin Activity Feed is now a clean ledger of
+  // admin-side actions only (haul-request CRUD, hauler edits,
+  // invoice/settlement drafts, dispatcher notes, drawer edits,
+  // admin-initiated end-shifts). Filter pills retired in the same
+  // pass — there's no second stream to filter against anymore.
+  //
+  // Legacy db.activity rows from before the split (eg. seeded
+  // `shift.started` / `load.logged` strings written by mock
+  // generators) get denylisted at render time so they vanish from
+  // the feed without mutating the underlying rows.
+  const TRUCKING_TYPE_PATTERNS = [
+    /^shift\./, /^load\./, /^truck_event\./, /^truck\./,
+    /^issue_report\./, /^driver\./,
+  ];
+  const isTruckingType = (t) => {
+    if (!t || typeof t !== 'string') return false;
+    return TRUCKING_TYPE_PATTERNS.some(re => re.test(t));
   };
 
-  const truckingEvents = React.useMemo(() => {
-    const out = [];
-    // truck_events
-    for (const e of (live.events || [])) {
-      const sess = sessionsById.get(e.session_id);
-      const driverName = (sess && sess.driver_name) || 'Unknown driver';
-      const company    = (sess && sess.company) || '';
-      const truckType  = (sess && sess.truck_type) || '';
-      let verb = e.event_type;
-      let summary = '';
-      if (e.event_type === 'pickup_load') {
-        verb = 'truck.pickup';
-        summary = `${driverName}${truckType ? ' (' + truckTypeShort(truckType) + ')' : ''} picked up a load${company ? ' — ' + company : ''}`;
-      } else if (e.event_type === 'dropoff_load') {
-        verb = 'truck.dropoff';
-        summary = `${driverName}${truckType ? ' (' + truckTypeShort(truckType) + ')' : ''} dropped off${company ? ' — ' + company : ''}`;
-      } else if (e.event_type === 'end_shift') {
-        verb = 'truck.shift_ended';
-        summary = `${driverName} ended shift${company ? ' — ' + company : ''}`;
-      } else {
-        verb = 'truck.' + (e.event_type || 'event');
-        summary = `${driverName} — ${e.event_type}`;
-      }
-      out.push({
-        id: 'tev-' + e.id,
-        ts: new Date(e.event_at).getTime(),
-        stream: 'trucking',
-        actorRole: 'driver',
-        actorName: driverName,
-        summary,
-        type: verb,
-        refId: null,
-        sessionId: e.session_id,
-        photoUrl: e.photo_url || null,
-        gps: (e.latitude != null && e.longitude != null) ? { lat: e.latitude, lng: e.longitude } : null,
-      });
-    }
-    // issue_reports
-    for (const r of (live.issues || [])) {
-      const sess = sessionsById.get(r.session_id);
-      const driverName = (sess && sess.driver_name) || 'Unknown driver';
-      const text = r.issue_text || '(no description)';
-      out.push({
-        id: 'iss-' + r.id,
-        ts: new Date(r.event_at || r.created_at || Date.now()).getTime(),
-        stream: 'trucking',
-        actorRole: 'driver',
-        actorName: driverName,
-        summary: `${driverName} reported an issue: "${text.length > 100 ? text.slice(0, 97) + '…' : text}"`,
-        type: 'truck.issue',
-        refId: null,
-        sessionId: r.session_id,
-        photoUrl: r.photo_url || null,
-        gps: (r.latitude != null && r.longitude != null) ? { lat: r.latitude, lng: r.longitude } : null,
-      });
-    }
-    return out;
-  }, [live.events, live.issues, sessionsById]);
-
   const adminEvents = React.useMemo(() => {
-    return (db.activity || []).map(e => ({
-      id: 'adm-' + (e.id || (e.timestamp + '-' + (e.refId || ''))),
-      ts: e.timestamp,
-      stream: 'admin',
-      actorRole: e.actorRole || 'admin',
-      actorName: e.actorRole === 'hauler' && e.actorId
-        ? ((db.haulers.find(h => h.id === e.actorId) || {}).name || 'Hauler')
-        : (e.actorRole === 'admin' ? 'Admin User'
-        : (e.actorRole === 'driver' ? 'Truck operator'
-        : 'System')),
-      summary: e.summary,
-      type: e.type || '',
-      refId: e.refId || null,
-      sessionId: null,
-      photoUrl: null,
-      gps: null,
-    }));
+    return (db.activity || [])
+      .filter(e => !isTruckingType(e.type))
+      .map(e => ({
+        id: 'adm-' + (e.id || (e.timestamp + '-' + (e.refId || ''))),
+        ts: e.timestamp,
+        actorRole: e.actorRole || 'admin',
+        actorName: e.actorRole === 'hauler' && e.actorId
+          ? ((db.haulers.find(h => h.id === e.actorId) || {}).name || 'Hauler')
+          : (e.actorRole === 'admin' ? 'Admin User'
+          : (e.actorRole === 'driver' ? 'Truck operator'
+          : 'System')),
+        summary: e.summary,
+        type: e.type || '',
+        refId: e.refId || null,
+      }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.activity, db.haulers]);
 
   const merged = React.useMemo(() => {
-    const all = [...truckingEvents, ...adminEvents].sort((a, b) => b.ts - a.ts);
-    if (activityFilter === 'trucking') return all.filter(e => e.stream === 'trucking');
-    if (activityFilter === 'admin')    return all.filter(e => e.stream === 'admin');
-    return all;
-  }, [truckingEvents, adminEvents, activityFilter]);
+    return adminEvents.slice().sort((a, b) => b.ts - a.ts);
+  }, [adminEvents]);
 
   const markedRef = useRef(false);
   useEffect(() => {
     if (markedRef.current) return;
     markedRef.current = true;
-    // mark-as-read tracks the admin stream only — db.activityLastReadAt
-    // gates the sidebar unread badge, which has always been admin-scoped.
-    const latest = adminEvents.length ? adminEvents[0].ts : 0;
+    const latest = merged.length ? merged[0].ts : 0;
     setDb(prev => {
       const lastRead = prev.activityLastReadAt || 0;
       if (latest <= lastRead) return prev;
@@ -13367,29 +13333,9 @@ function AdminActivity({ db, setDb, navigate }) {
 
   // Color the actor avatar by role to give the feed scannable structure.
   const actorColorFor = (role) => {
-    if (role === 'driver') return C.accent;
     if (role === 'hauler') return C.warn || C.accent;
+    if (role === 'driver') return C.accent;
     return C.inkDim;
-  };
-  // Filter-pill button style — matches the map's Hauls/Drivers toggle.
-  const filterBtn = (active) => ({
-    ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
-    textTransform: 'uppercase',
-    padding: '6px 14px', borderRadius: R.pill,
-    border: `1px solid ${active ? C.accent : C.ruleHi}`,
-    background: active ? C.accentSoft : 'transparent',
-    color: active ? C.accent : C.inkDim,
-    cursor: 'pointer', outline: 'none',
-  });
-  const truckingCount = truckingEvents.length;
-  const adminCount    = adminEvents.length;
-  const totalCount    = truckingCount + adminCount;
-  const onRowClick = (evt) => {
-    if (evt.stream === 'trucking' && evt.sessionId) {
-      setDrawerSessionId(evt.sessionId);
-      return;
-    }
-    if (evt.refId) goRef({ refId: evt.refId });
   };
 
   return (
@@ -13397,36 +13343,19 @@ function AdminActivity({ db, setDb, navigate }) {
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Activity' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Activity</Label>
-        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What's been happening.</h1>
+        <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Admin actions ledger.</h1>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-          {merged.length} event{merged.length === 1 ? '' : 's'}
-          {activityFilter !== 'all' && ` (${activityFilter}, of ${totalCount} total)`}
-          {' '}across your network.
+          {merged.length} admin event{merged.length === 1 ? '' : 's'}. Driver activity surfaces on{' '}
+          <a onClick={() => navigate('/admin/trucks/active')} style={{ color: C.accent, cursor: 'pointer' }}>Active Trucks</a>
+          {' '}and the Hauling Overview Active Drivers section.
         </div>
-      </div>
-
-      {/* 2026-05-30: filter pills. Single-select. Truck-event total +
-          admin total exposed in the labels so the dispatcher knows
-          which stream is currently noisy. */}
-      <div style={{ display: 'inline-flex', gap: S[2], marginBottom: S[4],
-                    padding: 2, background: C.surface,
-                    border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
-        <button type="button" onClick={() => setActivityFilter('all')} style={filterBtn(activityFilter === 'all')}>
-          All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
-        </button>
-        <button type="button" onClick={() => setActivityFilter('trucking')} style={filterBtn(activityFilter === 'trucking')}>
-          Trucking <span style={{ opacity: 0.6, marginLeft: 4 }}>{truckingCount}</span>
-        </button>
-        <button type="button" onClick={() => setActivityFilter('admin')} style={filterBtn(activityFilter === 'admin')}>
-          Admin <span style={{ opacity: 0.6, marginLeft: 4 }}>{adminCount}</span>
-        </button>
       </div>
 
       {merged.length === 0 ? (
         <EmptyState
           icon={<ActivityIcon size={36} />}
-          title="No activity yet"
-          body="Events will appear here as loads are logged, haulers approve, and admins assign requests."
+          title="No admin events yet"
+          body="Events will appear here as admins create haul requests, draft invoices, end shifts from the drawer, or edit dispatcher notes."
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
@@ -13435,12 +13364,11 @@ function AdminActivity({ db, setDb, navigate }) {
               <Label style={{ marginBottom: S[3] }}>{label}</Label>
               <Card padding={0}>
                 {byLabel.get(label).map((evt, idx, arr) => {
-                  const clickable = (evt.stream === 'trucking' && !!evt.sessionId) || !!evt.refId;
-                  const streamLabel = evt.stream === 'trucking' ? 'Truck event' : 'Admin event';
+                  const clickable = !!evt.refId;
                   return (
                     <div
                       key={evt.id}
-                      onClick={clickable ? () => onRowClick(evt) : undefined}
+                      onClick={clickable ? () => goRef(evt) : undefined}
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: S[3],
                         padding: `${S[3]}px ${S[4]}px`,
@@ -13455,15 +13383,7 @@ function AdminActivity({ db, setDb, navigate }) {
                       <Avatar name={evt.actorName} color={actorColorFor(evt.actorRole)} size={32} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{evt.summary}</div>
-                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2] }}>
-                          <span style={{
-                            padding: '1px 6px', borderRadius: R.sm,
-                            background: evt.stream === 'trucking' ? C.accentSoft : 'rgba(255,255,255,0.04)',
-                            color: evt.stream === 'trucking' ? C.accent : C.inkDim,
-                            fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700,
-                          }}>{streamLabel}</span>
-                          <span>{evt.type}</span>
-                        </div>
+                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{evt.type}</div>
                       </div>
                     </div>
                   );
@@ -13472,17 +13392,6 @@ function AdminActivity({ db, setDb, navigate }) {
             </div>
           ))}
         </div>
-      )}
-
-      {/* Shared drawer opens when a trucking row is clicked. */}
-      {drawerSessionId && (
-        <DriverSessionDrawer
-          sessionId={drawerSessionId}
-          onClose={() => setDrawerSessionId(null)}
-          db={db}
-          navigate={navigate}
-          live={live}
-        />
       )}
     </div>
   );
@@ -14006,16 +13915,17 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       <Item
         icon={<ProjectIcon size={20} />}
         label="Hauling Overview"
-        active={onOverview}
+        active={onOverview || onRequests}
+        badge={pendingCount}
         onClick={() => go('/admin')}
       />
-      <Item
-        icon={<HaulRequestIcon size={20} />}
-        label="Haul Requests"
-        active={onRequests}
-        badge={pendingCount}
-        onClick={() => go('/admin/requests')}
-      />
+      {/* 2026-05-30: "Haul Requests" tab removed — it duplicated
+          Hauling Overview (which is the same AdminHaulRequests
+          component reachable from /admin). The pendingCount badge
+          relocates onto Hauling Overview so the visual cue stays.
+          /admin/requests routes still resolve in AdminShell so any
+          bookmarked detail-page links keep working; they're just no
+          longer the way users land on the list. */}
       <Item
         icon={<ActivityIcon size={20} />}
         label="Activity"
@@ -14669,7 +14579,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
   const crumbs = isAdmin
     ? [
         { label: 'Admin', to: '/admin' },
-        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: 'Hauling Overview', to: '/admin' },
         { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name },
       ]
@@ -14855,7 +14765,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   const crumbs = isAdmin
     ? [
         { label: 'Admin', to: '/admin' },
-        { label: 'Haul Requests', to: '/admin/requests' },
+        { label: 'Hauling Overview', to: '/admin' },
         { label: project.name, to: `/admin/requests?projectId=${projectId}` },
         { label: op.name, to: `/admin/p/${projectId}/o/${haulerId}` },
         { label: `Truck #${truck.plate}` },
