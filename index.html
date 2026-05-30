@@ -7523,6 +7523,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const [addingDayFor, setAddingDayFor] = useState(null);
   const [newDayDate, setNewDayDate] = useState(TODAY_ISO);
   const [newDayStart, setNewDayStart] = useState('08:00');
+  // 2026-05-30 (Commit D): click the truck plate in an assignment tile
+  // to open the shared DriverSessionDrawer for that truck.
+  const [drawerTruckId, setDrawerTruckId] = useState(null);
   const [addLoadForm, setAddLoadForm] = useState({ truckId: null, date: null, time: '', cy: '' });
   // v32: photo lightbox state — mirrors the HaulerTruckView pattern so a
   // load's photo on the haul-detail load list can be viewed/replaced.
@@ -8599,9 +8602,23 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                         display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                         border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 16, flexShrink: 0,
                       }}>🚚</span>
-                      <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3, minWidth: 0 }}>
+                      {/* 2026-05-30 (Commit D): plate is clickable —
+                          opens the shared DriverSessionDrawer scoped to
+                          this truck (resolves to today's session if any). */}
+                      <button
+                        type="button"
+                        onClick={() => setDrawerTruckId(a.truckId)}
+                        title="Open today's driver session for this truck"
+                        style={{
+                          ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3,
+                          minWidth: 0, background: 'transparent', border: 'none',
+                          padding: 0, cursor: 'pointer', textAlign: 'left',
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.color = C.accent; }}
+                        onMouseLeave={e => { e.currentTarget.style.color = C.ink; }}
+                      >
                         #{t ? t.plate : a.truckId}
-                      </div>
+                      </button>
                       {t && t.type ? (
                         <span style={{
                           ...T.monoSm, padding: '2px 8px', borderRadius: R.sm,
@@ -9195,11 +9212,25 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         );
       })()}
+
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer. Opens
+          when an assignment-tile truck plate is clicked. */}
+      {drawerTruckId && (
+        <DriverSessionDrawer
+          truckId={drawerTruckId}
+          onClose={() => setDrawerTruckId(null)}
+          db={db}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }
 
 function AdminHaulers({ db, setDb, navigate }) {
+  // 2026-05-30 (Commit D): truck-row click inside the expanded fleet
+  // panel opens the shared DriverSessionDrawer for that truck.
+  const [drawerTruckId, setDrawerTruckId] = useState(null);
   // === Helpers — deterministic mock metrics so the UI feels operational.
   //   Hash hauler id → stable response/reliability/on-time values across
   //   renders. Real telemetry slots in here later.
@@ -9410,8 +9441,9 @@ function AdminHaulers({ db, setDb, navigate }) {
                   const status = !shift ? 'Available' : 'En route';
                   const statusColor = status === 'En route' ? C.ok : C.info;
                   return (
-                    <div key={t.id} onClick={() => navigate('/admin/p/' + (proj ? proj.id : '') + (proj ? '/o/' + h.id + '/t/' + t.id : ''))}
-                         style={{ display: 'grid', gridTemplateColumns: '70px 110px 130px 1fr 80px', gap: S[2], ...T.bodySm, padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`, alignItems: 'center', cursor: proj ? 'pointer' : 'default' }}>
+                    <div key={t.id} onClick={() => setDrawerTruckId(t.id)}
+                         title="Open today's driver session for this truck"
+                         style={{ display: 'grid', gridTemplateColumns: '70px 110px 130px 1fr 80px', gap: S[2], ...T.bodySm, padding: `${S[2]}px 0`, borderBottom: `1px solid ${C.rule}`, alignItems: 'center', cursor: 'pointer' }}>
                       <div style={{ fontFamily: F.mono, color: C.accent, fontWeight: 700 }}>#{t.plate}</div>
                       <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{t.type} · {tt ? tt.cap : '—'}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -9682,6 +9714,17 @@ function AdminHaulers({ db, setDb, navigate }) {
           <Card><div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>No haulers match the current filters.</div></Card>
         ) : sorted.map(h => <HaulerCard key={h.id} h={h} isExpanded={expanded === h.id} />)}
       </div>
+
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer. Opens
+          via a truck-row click inside the expanded fleet panel. */}
+      {drawerTruckId && (
+        <DriverSessionDrawer
+          truckId={drawerTruckId}
+          onClose={() => setDrawerTruckId(null)}
+          db={db}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }
@@ -9691,6 +9734,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
   const hauler = db.haulers.find(o => o.id === haulerId);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({ name: '', phone: '', email: '' });
+  // 2026-05-30 (Commit D): per-row "Session" button opens the shared
+  // DriverSessionDrawer for that truck.
+  const [drawerTruckId, setDrawerTruckId] = useState(null);
   // Attachment upload state: which row is currently uploading, last upload
   // error message, and the add-category inline form state.
   const [uploadingType, setUploadingType] = useState(null);
@@ -10020,6 +10066,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
                     <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
                     <Td align="right">
                       <div style={{ display: 'inline-flex', gap: S[2] }}>
+                        <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); setDrawerTruckId(t.id); }} title="Open today's driver session">Session</Btn>
                         <Btn variant="secondary" size="xs" onClick={(e) => { e.stopPropagation(); editTruck(t); }}>Edit</Btn>
                         <Btn variant="danger" size="xs" onClick={(e) => { e.stopPropagation(); removeTruck(t.id); }}>Remove</Btn>
                       </div>
@@ -10209,6 +10256,16 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         );
       })()}
 
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer. Opens
+          via the per-row "Session" button. */}
+      {drawerTruckId && (
+        <DriverSessionDrawer
+          truckId={drawerTruckId}
+          onClose={() => setDrawerTruckId(null)}
+          db={db}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }
@@ -13158,6 +13215,11 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
   // The "add truck" picker is gated to a single active haul request at a
   // time. Stores the haulRequestId being expanded; null means closed.
   const [addingTruckFor, setAddingTruckFor] = useState(null);
+  // 2026-05-30 (Commit D): truck chip click opens the shared
+  // DriverSessionDrawer instead of navigating to the truck page. Drawer
+  // resolves truckId → most-recent active session (falls back to last
+  // ended session, then to a static-truck placeholder).
+  const [drawerTruckId, setDrawerTruckId] = useState(null);
 
   const op = db.haulers.find(o => o.id === haulerId);
   if (!op) return <NotFound navigate={navigate} />;
@@ -13435,7 +13497,7 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                       {mineHere.map(a => {
                         const truck = db.trucks.find(t => t.id === a.truckId);
                         return (
-                          <button key={a.truckId} onClick={() => navigate(`/hauler/o/${op.id}/p/${req.projectId}/t/${a.truckId}`)} style={{
+                          <button key={a.truckId} onClick={() => setDrawerTruckId(a.truckId)} style={{
                             textAlign: 'left', background: C.surfaceHi, border: `1px solid ${C.rule}`, borderRadius: R.md,
                             padding: S[3], cursor: 'pointer', color: C.ink,
                           }}>
@@ -13443,9 +13505,10 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                               <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truck ? truck.plate : '?'}</span>
                               {truck && <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{truck.type}</Pill>}
                             </div>
-                            {/* 2026-05-30 Phase 4 C4.2: per-truck per-haul
-                                load count chip removed. Click to drill in to
-                                the truck's full per-day activity. */}
+                            {/* 2026-05-30 (Commit D): click opens the shared
+                                DriverSessionDrawer (was: navigates to the
+                                truck page). Drawer surfaces today's session
+                                snapshot — events, photos, dispatcher notes. */}
                           </button>
                         );
                       })}
@@ -13549,6 +13612,17 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
           </table>
         )}
       </Card>
+
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer. Opens
+          when a truck chip on an active assignment is clicked. */}
+      {drawerTruckId && (
+        <DriverSessionDrawer
+          truckId={drawerTruckId}
+          onClose={() => setDrawerTruckId(null)}
+          db={db}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }
@@ -13657,6 +13731,9 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
   // lightbox; `replacePhotoRef` is the hidden file input for replace/upload.
   const [photoFor, setPhotoFor] = useState(null);
   const replacePhotoRef = useRef(null);
+  // 2026-05-30 (Commit D): "Open driver session" header button opens the
+  // shared DriverSessionDrawer scoped to this truck.
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const op = db.haulers.find(o => o.id === haulerId);
   const project = db.projects.find(p => p.id === projectId);
   const truck = db.trucks.find(t => t.id === truckId);
@@ -13778,6 +13855,12 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[5], marginBottom: S[5] }}>
         <div style={{ flex: 1 }}>
+          {/* 2026-05-30 (Commit D): open the shared dispatcher-style drawer
+              for this truck. Shows today's session + events + dispatcher
+              notes — same widget used everywhere else in the app. */}
+          <Btn variant="ghost" size="sm" onClick={() => setDrawerOpen(true)} style={{ marginBottom: S[3] }}>
+            📡 Open driver session →
+          </Btn>
           {isAdmin ? (
             <>
               <Label color={C.accent}>
@@ -14047,6 +14130,17 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       )}
 
       <HaulerLogLoadForm truck={truck} driver={driver} project={project} db={db} setDb={setDb} />
+
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer scoped to
+          this truck. Triggered by the "Open driver session →" button. */}
+      {drawerOpen && (
+        <DriverSessionDrawer
+          truckId={truck.id}
+          onClose={() => setDrawerOpen(false)}
+          db={db}
+          navigate={navigate}
+        />
+      )}
     </div>
   );
 }
