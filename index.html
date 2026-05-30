@@ -3990,6 +3990,91 @@ function driverLiveCyForLoadCount(truckType, pickupCount) {
   return (DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0) * (pickupCount || 0);
 }
 
+// =====================================================================
+// adminBackfillToDriverTables — admin write path into the canonical store
+// =====================================================================
+// 2026-05-30 Phase 4 C2.5: when admin uses one of the kept manual entry
+// forms (HaulerLogLoadForm, AdminHaulRequestDetail "Add Load", or
+// HaulerTruckView "+ Add hours row") we ALSO write a synthetic
+// driver_sessions row + (for loads) a truck_events row, so the driver-
+// side canonical store has a record of the admin backfill. The existing
+// mockup-side db.loads / db.hours setDb push is preserved so the local
+// React UI still updates immediately — see commit message for the
+// "double-write transitional state" rationale.
+//
+// matched_truck_id is left NULL because the mockup's truck IDs (e.g.
+// `tk-447`) are not UUIDs and the column is UUID-typed. The truck is
+// still identifiable via the synthetic session's `plate_input` (set to
+// truck.plate) and `driver_name` (truck.driverId). device_token +
+// language are NOT NULL columns on driver_sessions so they're populated
+// with stable admin-backfill values.
+//
+// Fire-and-forget: failures log to console but don't block the form
+// or surface as user-visible errors. The activity-feed entry that the
+// form emits records the admin action even if the Supabase write fails.
+async function adminBackfillToDriverTables({ truck, eventType, eventAtIso, endedAtIso }) {
+  if (!_sb.ready || !_sb.client) {
+    console.warn('[admin-backfill] Supabase client not ready; skipping');
+    return { ok: false, reason: 'sb_not_ready' };
+  }
+  if (!eventAtIso) {
+    return { ok: false, reason: 'missing_event_at' };
+  }
+  try {
+    // 2026-05-30: explicit-null vs undefined matters here. The hours-row
+    // "+ Add hours row" case passes ended_at=null on purpose (the
+    // synthetic session is still "open" until admin enters a clockOut),
+    // while the load-entry cases pass endedAtIso=undefined and we
+    // default to eventAtIso (zero-duration session for the manual entry).
+    const sessionPayload = {
+      driver_name: truck && truck.driverId ? String(truck.driverId) : 'Admin backfill',
+      truck_type: truck ? (truck.type || null) : null,
+      company: null,
+      started_at: eventAtIso,
+      ended_at: endedAtIso === undefined ? eventAtIso : endedAtIso,
+      plate_input: truck ? (truck.plate || null) : null,
+      device_token: 'admin-backfill',
+      language: 'en',
+    };
+    const sessRes = await _sb.client
+      .from('driver_sessions')
+      .insert(sessionPayload)
+      .select()
+      .single();
+    if (sessRes.error || !sessRes.data) {
+      console.warn('[admin-backfill] driver_sessions insert failed', sessRes.error);
+      return { ok: false, reason: sessRes.error ? sessRes.error.message : 'no_data' };
+    }
+    if (eventType) {
+      const evRes = await _sb.client.from('truck_events').insert({
+        session_id: sessRes.data.id,
+        event_type: eventType,
+        event_at: eventAtIso,
+      });
+      if (evRes.error) {
+        console.warn('[admin-backfill] truck_events insert failed', evRes.error);
+        return { ok: false, reason: evRes.error.message };
+      }
+    }
+    return { ok: true, sessionId: sessRes.data.id };
+  } catch (e) {
+    console.warn('[admin-backfill] threw', e);
+    return { ok: false, reason: String(e) };
+  }
+}
+
+// Combine a YYYY-MM-DD date string + HH:MM time string into a full ISO
+// timestamp at local time (the admin's browser timezone). Used by every
+// manual entry form to pass a proper timestamp to the helper above.
+function adminCombineDateTimeIso(dateIso, timeHHMM) {
+  if (!dateIso) return null;
+  const t = timeHHMM && /^\d{1,2}:\d{2}$/.test(timeHHMM) ? timeHHMM : '12:00';
+  try {
+    const d = new Date(dateIso + 'T' + (t.length === 4 ? '0' + t : t) + ':00');
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  } catch (e) { return null; }
+}
+
 // ---- Phase 3: Reset Demo (cloud wipe + re-seed) ------------------------
 // Called from AdminShell's Reset button. Default to confirming — Robert's
 // safest-non-destructive-default rule (the brief explicitly defaults reset
@@ -7683,6 +7768,13 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     };
     setDb(prev => ({ ...prev, loads: [...(prev.loads || []), newLoad] }));
     setAddLoadForm({ truckId: null, date: null, time: '', cy: '' });
+    // 2026-05-30 Phase 4 C2.5: also write a synthetic driver_sessions +
+    // truck_events row to the canonical store. Fire-and-forget — the
+    // mockup-side setDb above keeps the day-row table responsive.
+    const evIso = adminCombineDateTimeIso(date, time);
+    if (evIso) {
+      adminBackfillToDriverTables({ truck, eventType: 'pickup_load', eventAtIso: evIso });
+    }
   };
 
   const removeLoad = (truckId, date, loadId) => {
@@ -13156,6 +13248,14 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
       { ...prev, hours: [...prev.hours, newRow] },
       { type: 'hours.added', actorRole: isAdmin ? 'admin' : 'hauler', actorId: isAdmin ? null : haulerId, summary: `${isAdmin ? 'Admin' : op.name} added an hours row on #${truck.plate}`, refId: newRow.id }
     ));
+    // 2026-05-30 Phase 4 C2.5: also write a synthetic driver_sessions row
+    // (no truck_event for an hours-row add — that's pure shift backfill).
+    // started_at = the row's clockIn at the chosen date; ended_at = null
+    // since the row is still "open" until admin enters a clockOut.
+    const startIso = adminCombineDateTimeIso(newRow.date, newRow.clockIn);
+    if (startIso) {
+      adminBackfillToDriverTables({ truck, eventType: null, eventAtIso: startIso, endedAtIso: null });
+    }
   };
   // Default "+ Add hours row" steps back one day per existing entry for this
   // truck so each click pops a new day going backward (today → yesterday → …).
@@ -13646,6 +13746,12 @@ function HaulerLogLoadForm({ truck, driver, project, db, setDb }) {
         refId: newLoad.id,
       }
     ));
+    // 2026-05-30 Phase 4 C2.5: also write a synthetic driver_sessions +
+    // truck_events row to the canonical store. See helper docstring.
+    const evIso = adminCombineDateTimeIso(TODAY_ISO, time);
+    if (evIso) {
+      adminBackfillToDriverTables({ truck, eventType: 'pickup_load', eventAtIso: evIso });
+    }
     setCy('');
     setTicketNo('');
     const d = new Date();
