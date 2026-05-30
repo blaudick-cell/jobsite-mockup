@@ -11597,6 +11597,161 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
                   BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
     return map[tt] || tt || '—';
   };
+  const TRUCK_TYPE_OPTIONS = [
+    { v: 'SD', l: 'Single Dump' }, { v: 'TAN', l: 'Tandem' },
+    { v: 'ED', l: 'End Dump' }, { v: 'SIDE', l: 'Side Dump' },
+    { v: 'HISIDE', l: 'High Side' }, { v: 'BD', l: 'Belly Dump' },
+    { v: 'HS', l: 'Hot Shot' }, { v: 'OTHER', l: 'Other' },
+  ];
+
+  // ── Editable-field plumbing ─────────────────────────────────────
+  // Admin click-to-edit on meta fields. Each save:
+  //   1. PATCHes driver_sessions (or trucks, for plate).
+  //   2. Appends an audit line to dispatcher_notes — "Admin edited
+  //      <field> at HH:MM MT: '<old>' → '<new>'".
+  //   3. Flashes a "Saved" / "Error" status next to the field for 2s.
+  // Driver-impact: the field widget reads from localStorage and does
+  // NOT subscribe to driver_sessions row changes (confirmed by Robert),
+  // so these edits do not propagate to drivers' phones mid-shift.
+  const [editingField, setEditingField] = React.useState(null);
+  const [editDraft, setEditDraft] = React.useState('');
+  const [fieldFlash, setFieldFlash] = React.useState({});
+  // To save a `started_at` / `ended_at` value coming from a
+  // <input type="datetime-local"> we have to convert local-MT back to
+  // an ISO timestamp. The widget writes ISO; if we preserved local-MT
+  // here, the round-trip would shift by the MT offset.
+  function mtIsoFromDatetimeLocal(localStr) {
+    if (!localStr) return null;
+    // localStr is "YYYY-MM-DDTHH:MM" in *whatever* timezone the user's
+    // device reports. Treat it as MT (America/Denver). Build an ISO by
+    // appending MT's current offset.
+    try {
+      const probe = new Date(localStr + ':00');
+      // Find the MT offset for that probe (DST-aware).
+      const mt = new Date(probe.toLocaleString('en-US', { timeZone: 'America/Denver' }));
+      const offsetMin = (mt.getTime() - probe.getTime()) / 60000;
+      const total = probe.getTime() - offsetMin * 60000;
+      return new Date(total).toISOString();
+    } catch (_) { return null; }
+  }
+  function datetimeLocalFromIso(iso) {
+    if (!iso) return '';
+    try {
+      // Format as YYYY-MM-DDTHH:MM in MT.
+      const fmt = new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Denver', year: 'numeric', month: '2-digit',
+        day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+      }).formatToParts(new Date(iso));
+      const get = (t) => (fmt.find(p => p.type === t) || {}).value;
+      return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}`;
+    } catch (_) { return ''; }
+  }
+  async function saveSessionField(fieldKey, newValue, prevValue, fieldLabel) {
+    if (!drawerBucket) return;
+    if (newValue === prevValue) { setEditingField(null); return; }
+    const sess = drawerBucket.session;
+    setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saving' }));
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const displayOld = (prevValue == null || prevValue === '') ? '—' : String(prevValue);
+      const displayNew = (newValue == null || newValue === '') ? '—' : String(newValue);
+      const auditLine = `Admin edited ${fieldLabel} at ${fmtClock(new Date().toISOString())} MT: '${displayOld}' → '${displayNew}'`;
+      const appendedNotes = sess.dispatcher_notes
+        ? (sess.dispatcher_notes + '\n\n' + auditLine)
+        : auditLine;
+      const patch = { [fieldKey]: newValue, dispatcher_notes: appendedNotes };
+      const { error } = await _sb.client.from('driver_sessions').update(patch).eq('id', sess.id);
+      if (error) throw error;
+      setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saved' }));
+      setEditingField(null);
+      setTimeout(() => {
+        setFieldFlash(prev => { const n = { ...prev }; delete n[fieldKey]; return n; });
+      }, 1800);
+    } catch (e) {
+      console.warn('[DriverSessionDrawer] saveSessionField', e);
+      setFieldFlash(prev => ({ ...prev, [fieldKey]: 'error' }));
+      setTimeout(() => {
+        setFieldFlash(prev => { const n = { ...prev }; delete n[fieldKey]; return n; });
+      }, 3000);
+    }
+  }
+  // Renders a clickable value that converts to an input on click. Type
+  // controls the input shape: 'text' | 'select' | 'datetime'. options
+  // is required when type === 'select'.
+  function MetaField({ fieldKey, fieldLabel, value, displayValue, type, options }) {
+    const isEditing = editingField === fieldKey;
+    const flash = fieldFlash[fieldKey];
+    const onActivate = () => {
+      setEditDraft(type === 'datetime' ? datetimeLocalFromIso(value) : (value || ''));
+      setEditingField(fieldKey);
+    };
+    const onCommit = () => {
+      let nextVal = editDraft;
+      if (type === 'datetime') nextVal = mtIsoFromDatetimeLocal(editDraft);
+      else if (type === 'text') nextVal = (editDraft || '').trim() || null;
+      saveSessionField(fieldKey, nextVal, value, fieldLabel);
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape') { setEditingField(null); }
+      else if (e.key === 'Enter' && type !== 'datetime') { e.currentTarget.blur(); }
+    };
+    const flashColor = flash === 'saving' ? C.inkDim
+                     : flash === 'saved'  ? C.ok
+                     : flash === 'error'  ? C.warn : null;
+    const flashLabel = flash === 'saving' ? '…' : flash === 'saved' ? '✓ Saved' : flash === 'error' ? '✗ Error' : '';
+    const inputStyle = {
+      width: '100%', background: C.surface, color: C.ink,
+      border: `1px solid ${C.accent}`, borderRadius: R.sm,
+      padding: '2px 6px', fontFamily: F.body, fontSize: 12.5,
+      outline: 'none',
+    };
+    if (isEditing) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          {type === 'text' && (
+            <input autoFocus value={editDraft}
+              onChange={(e) => setEditDraft(e.target.value)}
+              onBlur={onCommit} onKeyDown={onKeyDown}
+              style={inputStyle} />
+          )}
+          {type === 'select' && (
+            <select autoFocus value={editDraft}
+              onChange={(e) => { setEditDraft(e.target.value); }}
+              onBlur={onCommit} onKeyDown={onKeyDown}
+              style={inputStyle}>
+              {options.map(o => <option key={o.v} value={o.v}>{o.l}</option>)}
+            </select>
+          )}
+          {type === 'datetime' && (
+            <input autoFocus type="datetime-local" value={editDraft}
+              onChange={(e) => setEditDraft(e.target.value)}
+              onBlur={onCommit} onKeyDown={onKeyDown}
+              style={inputStyle} />
+          )}
+        </span>
+      );
+    }
+    return (
+      <span
+        role="button" tabIndex={0}
+        title={`Click to edit ${fieldLabel}`}
+        onClick={onActivate}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onActivate(); } }}
+        style={{
+          cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+          padding: '1px 4px', borderRadius: 3,
+          background: flash === 'saved' ? C.okSoft : flash === 'error' ? C.warnSoft : 'transparent',
+          transition: 'background 200ms ease-out',
+        }}
+        onMouseEnter={e => { if (!flash) e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+        onMouseLeave={e => { if (!flash) e.currentTarget.style.background = 'transparent'; }}
+      >
+        <span>{displayValue}</span>
+        <span aria-hidden="true" style={{ ...T.micro, color: C.inkFaint, opacity: 0.6 }}>✎</span>
+        {flashColor && <span style={{ ...T.micro, color: flashColor, fontWeight: 700 }}>{flashLabel}</span>}
+      </span>
+    );
+  }
 
   // ── Scroll-to-event when invoked with `scrollEventId` ───────────
   React.useEffect(() => {
@@ -11910,18 +12065,46 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
                 display: 'grid', gridTemplateColumns: '130px 1fr',
                 gap: '6px 12px', marginBottom: S[4], fontSize: 12.5,
               }}>
+                {/* 2026-05-30: editable fields. Click any of these to
+                    inline-edit; PATCH driver_sessions + append audit
+                    line to dispatcher_notes. Pickups/Drop-offs/CY/Last
+                    Event/Session ID stay read-only — they're derived
+                    from truck_events or immutable. */}
                 <span style={{ color: C.inkDim }}>Driver</span>
-                <span style={{ color: C.ink, fontWeight: 600 }}>{sess.driver_name || '—'}</span>
+                <span style={{ color: C.ink, fontWeight: 600 }}>
+                  <MetaField fieldKey="driver_name" fieldLabel="driver name"
+                    value={sess.driver_name}
+                    displayValue={sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}
+                    type="text" />
+                </span>
                 <span style={{ color: C.inkDim }}>Company</span>
-                <span style={{ color: C.ink }}>{sess.company || (hauler ? hauler.name : '—')}</span>
+                <span style={{ color: C.ink }}>
+                  <MetaField fieldKey="company" fieldLabel="company"
+                    value={sess.company}
+                    displayValue={sess.company || (hauler ? hauler.name : <span style={{ color: C.inkFaint }}>—</span>)}
+                    type="text" />
+                </span>
                 <span style={{ color: C.inkDim }}>Truck Type</span>
-                <span style={{ color: C.ink }}>{truckTypeLabel(truckType || sess.truck_type)}</span>
+                <span style={{ color: C.ink }}>
+                  <MetaField fieldKey="truck_type" fieldLabel="truck type"
+                    value={sess.truck_type || truckType || ''}
+                    displayValue={truckTypeLabel(truckType || sess.truck_type)}
+                    type="select" options={TRUCK_TYPE_OPTIONS} />
+                </span>
                 <span style={{ color: C.inkDim }}>Plate</span>
                 <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>
-                  {truckPlate ? '#' + truckPlate : (sess.plate_input ? '#' + sess.plate_input : '—')}
+                  <MetaField fieldKey="plate_input" fieldLabel="plate"
+                    value={sess.plate_input || (truck ? truck.plate : '')}
+                    displayValue={truckPlate ? '#' + truckPlate : (sess.plate_input ? '#' + sess.plate_input : <span style={{ color: C.inkFaint }}>—</span>)}
+                    type="text" />
                 </span>
                 <span style={{ color: C.inkDim }}>Start Time</span>
-                <span style={{ color: C.ink, fontFamily: F.mono }}>{fmtClock(sess.started_at)} MT</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>
+                  <MetaField fieldKey="started_at" fieldLabel="start time"
+                    value={sess.started_at}
+                    displayValue={`${fmtClock(sess.started_at)} MT`}
+                    type="datetime" />
+                </span>
                 <span style={{ color: C.inkDim }}>Shift Time</span>
                 <span style={{ color: C.ink, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
                 <span style={{ color: C.inkDim }}>Pickups</span>
@@ -11934,7 +12117,10 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
                 <span style={{ color: C.ink }}>{lastEvStr}</span>
                 <span style={{ color: C.inkDim }}>End Time</span>
                 <span style={{ color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
-                  {endedDt ? fmtClock(sess.ended_at) + ' MT' : 'Still active'}
+                  <MetaField fieldKey="ended_at" fieldLabel="end time"
+                    value={sess.ended_at}
+                    displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
+                    type="datetime" />
                 </span>
                 <span style={{ color: C.inkDim }}>Session ID</span>
                 <span style={{ color: C.inkFaint, fontFamily: F.mono, fontSize: 11 }}>{sess.id}</span>
@@ -12337,6 +12523,194 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows }) {
 }
 
 // =====================================================================
+// ActiveTruckCard — single card on AdminActiveTrucks.
+// =====================================================================
+// 2026-05-30 (Hauler grouping): pulled out as its own component so the
+// inline company-edit chip can hold local state without churning the
+// parent on every keystroke. PATCHes driver_sessions.company + appends
+// an audit line to dispatcher_notes.
+function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElapsed, eventLabel, eventColor }) {
+  const sess = b.session;
+  const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+  const truckType = truck ? truck.type : null;
+  const truckPlate = truck ? truck.plate : null;
+  const cyToday = driverLiveCyForLoadCount(truckType || sess.truck_type, b.pickupCount);
+  const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
+    + b.events.filter(e => e.photo_url).length;
+  const allPhotosForSess = [
+    ...(live.photos || []).filter(p => p.session_id === sess.id).map(p => ({
+      photo_url: p.photo_url, photo_at: p.photo_at || p.created_at, event_id: p.event_id,
+    })),
+    ...b.events.filter(e => e.photo_url).map(e => ({
+      photo_url: e.photo_url, photo_at: e.event_at, event_id: e.id,
+    })),
+  ];
+  const mostRecentPhoto = allPhotosForSess.length
+    ? allPhotosForSess.sort((x, y) => String(y.photo_at || '').localeCompare(String(x.photo_at || '')))[0]
+    : null;
+  const lastEvType = b.lastEvent ? b.lastEvent.event_type : null;
+
+  // Inline company-edit chip. Click → input replaces chip. Blur saves.
+  // Audit line lands in dispatcher_notes so admin actions are traceable.
+  const [companyEditing, setCompanyEditing] = React.useState(false);
+  const [companyDraft, setCompanyDraft] = React.useState(sess.company || '');
+  const [companyFlash, setCompanyFlash] = React.useState(null);
+  // Known-company suggestions (for the datalist) — distinct non-empty
+  // companies across all sessions. Helps the dispatcher pick from
+  // existing haulers without re-typing.
+  const knownCompanies = React.useMemo(() => {
+    const s = new Set();
+    for (const sx of (live.sessions || [])) {
+      if (sx.company && sx.company.trim()) s.add(sx.company.trim());
+    }
+    return Array.from(s).sort();
+  }, [live.sessions]);
+  const datalistId = 'company-suggest-' + sess.id;
+  async function saveCompany() {
+    const next = (companyDraft || '').trim() || null;
+    const prev = sess.company || null;
+    if (next === prev) { setCompanyEditing(false); return; }
+    setCompanyFlash('saving');
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const stamp = new Date().toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+      const auditLine = `Admin edited company at ${stamp} MT: '${prev || '—'}' → '${next || '—'}'`;
+      const appendedNotes = sess.dispatcher_notes
+        ? sess.dispatcher_notes + '\n\n' + auditLine
+        : auditLine;
+      const { error } = await _sb.client.from('driver_sessions')
+        .update({ company: next, dispatcher_notes: appendedNotes })
+        .eq('id', sess.id);
+      if (error) throw error;
+      setCompanyFlash('saved');
+      setCompanyEditing(false);
+      setTimeout(() => setCompanyFlash(null), 1800);
+    } catch (e) {
+      console.warn('[ActiveTruckCard] saveCompany', e);
+      setCompanyFlash('error');
+      setTimeout(() => setCompanyFlash(null), 3000);
+    }
+  }
+
+  const chipBg = sess.company ? C.accentSoft : 'rgba(255,255,255,0.04)';
+  const chipColor = sess.company ? C.accent : C.inkFaint;
+  const chipBorder = sess.company ? C.accent : C.ruleHi;
+  const flashColor = companyFlash === 'saved' ? C.ok
+                   : companyFlash === 'error' ? C.warn
+                   : companyFlash === 'saving' ? C.inkDim : null;
+  const flashLabel = companyFlash === 'saved' ? '✓' : companyFlash === 'error' ? '✗' : '…';
+
+  return (
+    <Card padding={S[4]} style={{ cursor: 'pointer' }}>
+      <div onClick={() => onOpenDrawer()}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
+              {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
+            </div>
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+              {truckPlate ? <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truckPlate}</span> : <span style={{ color: C.inkFaint }}>— no truck</span>}
+              {truckType && <span style={{ marginLeft: S[2] }}>{truckType}</span>}
+            </div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
+            {mostRecentPhoto && (
+              <img
+                src={mostRecentPhoto.photo_url}
+                alt="Latest event photo"
+                title="Open this driver's most recent photo"
+                onClick={(e) => { e.stopPropagation(); onOpenDrawer(mostRecentPhoto.event_id); }}
+                style={{
+                  width: 40, height: 40, objectFit: 'cover',
+                  borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
+                  cursor: 'pointer',
+                }}
+              />
+            )}
+            <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+          </div>
+        </div>
+
+        {/* 2026-05-30: hauler-assignment chip. Stops card-click so the
+            drawer doesn't open when editing the chip. */}
+        <div onClick={(e) => e.stopPropagation()} style={{ marginTop: S[2], marginBottom: S[2] }}>
+          {!companyEditing ? (
+            <button
+              type="button"
+              onClick={() => { setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
+              title={sess.company ? 'Change hauler' : 'Assign to a hauler'}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                padding: '4px 10px', borderRadius: R.pill,
+                background: chipBg, color: chipColor, border: `1px solid ${chipBorder}`,
+                fontFamily: F.mono, fontSize: 10.5, fontWeight: 700,
+                letterSpacing: 0.5, textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
+            >
+              {sess.company || 'Unassigned'}
+              <span aria-hidden="true" style={{ opacity: 0.6 }}>✎</span>
+              {flashColor && <span style={{ color: flashColor }}>{flashLabel}</span>}
+            </button>
+          ) : (
+            <>
+              <input
+                autoFocus
+                list={datalistId}
+                value={companyDraft}
+                onChange={(e) => setCompanyDraft(e.target.value)}
+                onBlur={saveCompany}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
+                  else if (e.key === 'Enter') { e.currentTarget.blur(); }
+                }}
+                placeholder="Hauler / company"
+                style={{
+                  width: '100%', maxWidth: 240,
+                  background: C.surface, color: C.ink,
+                  border: `1px solid ${C.accent}`, borderRadius: R.pill,
+                  padding: '4px 12px', fontFamily: F.mono, fontSize: 11,
+                  letterSpacing: 0.3, outline: 'none',
+                }}
+              />
+              <datalist id={datalistId}>
+                {knownCompanies.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </>
+          )}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
+            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint }}>ELAPSED</div>
+            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtElapsed(sess.started_at, null)}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
+            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{cyToday}</div>
+          </div>
+        </div>
+        <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
+          <div style={{ ...T.caption, color: C.inkDim }}>
+            {b.events.length === 0 ? 'No events yet'
+              : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)}</>}
+          </div>
+          <div style={{ ...T.caption, color: C.inkFaint }}>
+            {b.pickupCount} pickup{b.pickupCount === 1 ? '' : 's'} · {b.dropCount} drop · {photoCount} photo{photoCount === 1 ? '' : 's'}
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+// =====================================================================
 // AdminActiveTrucks — live session grid at /admin/trucks/active.
 // Reads driver_sessions + truck_events via useDriverSessionsLive() and
 // renders one card per active session. Click a card to open a read-only
@@ -12464,103 +12838,72 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
             {live.loading ? 'Loading…' : 'No drivers on shift right now. Once a driver clocks in via the field widget their session will appear here.'}
           </div>
         </Card>
-      ) : (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-          gap: S[3],
-        }}>
-          {activeBuckets.map(b => {
-            const sess = b.session;
-            const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
-            const truckType = truck ? truck.type : null;
-            const truckPlate = truck ? truck.plate : null;
-            const cyToday = driverLiveCyForLoadCount(truckType, b.pickupCount);
-            // 2026-05-30 (Series C-mockup): aggregate photos from both
-            // truck_events.photo_url (direct on the event) AND event_photos
-            // rows (auxiliary photos linked to a session). Most recent wins.
-            const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
-              + b.events.filter(e => e.photo_url).length;
-            const allPhotosForSess = [
-              ...(live.photos || []).filter(p => p.session_id === sess.id).map(p => ({
-                photo_url: p.photo_url, photo_at: p.photo_at || p.created_at, event_id: p.event_id,
-              })),
-              ...b.events.filter(e => e.photo_url).map(e => ({
-                photo_url: e.photo_url, photo_at: e.event_at, event_id: e.id,
-              })),
-            ];
-            const mostRecentPhoto = allPhotosForSess.length
-              ? allPhotosForSess.sort((x, y) => String(y.photo_at || '').localeCompare(String(x.photo_at || '')))[0]
-              : null;
-            const lastEvType = b.lastEvent ? b.lastEvent.event_type : null;
-            return (
-              <Card key={sess.id} padding={S[4]} style={{ cursor: 'pointer' }}>
-                <div onClick={() => setDrawerSessionId(sess.id)}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
-                        {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
-                      </div>
-                      <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-                        {truckPlate ? <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truckPlate}</span> : <span style={{ color: C.inkFaint }}>— no truck</span>}
-                        {truckType && <span style={{ marginLeft: S[2] }}>{truckType}</span>}
-                      </div>
+      ) : (() => {
+        // 2026-05-30 (Hauler grouping): bucket activeBuckets by
+        // session.company. Unassigned sinks to the bottom; the rest
+        // sort alphabetically. Each card carries an inline-edit chip
+        // to set/change the company. Editing PATCHes driver_sessions
+        // + appends an audit line to dispatcher_notes (same pattern
+        // as the drawer-level edits).
+        const grouped = new Map();
+        for (const b of activeBuckets) {
+          const key = (b.session.company && b.session.company.trim()) || '__unassigned__';
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key).push(b);
+        }
+        const groupNames = Array.from(grouped.keys())
+          .filter(k => k !== '__unassigned__')
+          .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+        if (grouped.has('__unassigned__')) groupNames.push('__unassigned__');
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
+            {groupNames.map(key => {
+              const cards = grouped.get(key);
+              const isUnassigned = key === '__unassigned__';
+              const headerLabel = isUnassigned ? 'Unassigned' : key;
+              return (
+                <div key={key}>
+                  <div style={{
+                    display: 'flex', alignItems: 'baseline', gap: S[2],
+                    paddingBottom: S[2], marginBottom: S[3],
+                    borderBottom: `1px solid ${C.rule}`,
+                  }}>
+                    <div style={{ ...T.h4, fontWeight: 700, color: isUnassigned ? C.inkFaint : C.ink,
+                                  letterSpacing: -0.2, textTransform: 'uppercase' }}>
+                      {headerLabel}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
-                      {/* 2026-05-30 (Series C-mockup): most-recent photo
-                          thumb. Click stops the card-level handler so the
-                          thumb takes us to the drawer scrolled to THAT
-                          event. Fallback: drawer opens normally if no
-                          event_id matches. */}
-                      {mostRecentPhoto && (
-                        <img
-                          src={mostRecentPhoto.photo_url}
-                          alt="Latest event photo"
-                          title="Open this driver's most recent photo"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setDrawerScrollEventId(mostRecentPhoto.event_id || null);
-                            setDrawerSessionId(sess.id);
-                          }}
-                          style={{
-                            width: 40, height: 40, objectFit: 'cover',
-                            borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
-                            cursor: 'pointer',
-                          }}
-                        />
-                      )}
-                      <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
-                    </div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
-                    <div>
-                      <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
-                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
-                    </div>
-                    <div>
-                      <div style={{ ...T.micro, color: C.inkFaint }}>ELAPSED</div>
-                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtElapsed(sess.started_at, null)}</div>
-                    </div>
-                    <div>
-                      <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
-                      <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{cyToday}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
                     <div style={{ ...T.caption, color: C.inkDim }}>
-                      {b.events.length === 0 ? 'No events yet'
-                        : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)}</>}
+                      {cards.length} active
                     </div>
-                    <div style={{ ...T.caption, color: C.inkFaint }}>
-                      {b.pickupCount} pickup{b.pickupCount === 1 ? '' : 's'} · {b.dropCount} drop · {photoCount} photo{photoCount === 1 ? '' : 's'}
-                    </div>
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: S[3],
+                  }}>
+                    {cards.map(b => (
+                      <ActiveTruckCard
+                        key={b.session.id}
+                        b={b}
+                        trucksById={trucksById}
+                        live={live}
+                        onOpenDrawer={(eventId) => {
+                          setDrawerScrollEventId(eventId || null);
+                          setDrawerSessionId(b.session.id);
+                        }}
+                        fmtClock={fmtClock}
+                        fmtElapsed={fmtElapsed}
+                        eventLabel={eventLabel}
+                        eventColor={eventColor}
+                      />
+                    ))}
                   </div>
                 </div>
-              </Card>
-            );
-          })}
-        </div>
-      )}
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {benchedTrucks.length > 0 && (
         <div style={{ marginTop: S[6] }}>
@@ -12615,19 +12958,133 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
 // On first render, advances db.activityLastReadAt to the latest event timestamp
 // so the sidebar unread badge clears once the user has viewed the page.
 function AdminActivity({ db, setDb, navigate }) {
-  const activity = (db.activity || []).slice().sort((a, b) => b.timestamp - a.timestamp);
+  // 2026-05-30 (Activity blend): merge real trucking data with the
+  // existing admin db.activity collection. Trucking stream =
+  // truck_events.{pickup_load,dropoff_load,end_shift} + issue_reports.
+  // Admin stream = db.activity (unchanged). Filter pills above the
+  // feed scope to All / Trucking / Admin. Row click on a trucking
+  // event opens the shared DriverSessionDrawer for that session_id.
+  const live = useDriverSessionsLive();
+  const [activityFilter, setActivityFilter] = React.useState('all'); // 'all' | 'trucking' | 'admin'
+  const [drawerSessionId, setDrawerSessionId] = React.useState(null);
+
+  // Build the unified event list. Each entry shape:
+  //   { id, ts (ms), stream: 'trucking'|'admin', actorRole, actorName,
+  //     summary, type, refId, sessionId, photoUrl, gps }
+  // Sessions get joined to events so we can render driver_name / company /
+  // truck_type without a second fetch. Issue reports use issue_text as
+  // the summary. db.activity rows map 1:1 (timestamp → ts).
+  const sessionsById = React.useMemo(() => {
+    const m = new Map();
+    for (const s of (live.sessions || [])) m.set(s.id, s);
+    return m;
+  }, [live.sessions]);
+
+  const truckTypeShort = (tt) => {
+    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                  SIDE: 'Side Dump', HISIDE: 'High Side',
+                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+    return map[tt] || tt || '—';
+  };
+
+  const truckingEvents = React.useMemo(() => {
+    const out = [];
+    // truck_events
+    for (const e of (live.events || [])) {
+      const sess = sessionsById.get(e.session_id);
+      const driverName = (sess && sess.driver_name) || 'Unknown driver';
+      const company    = (sess && sess.company) || '';
+      const truckType  = (sess && sess.truck_type) || '';
+      let verb = e.event_type;
+      let summary = '';
+      if (e.event_type === 'pickup_load') {
+        verb = 'truck.pickup';
+        summary = `${driverName}${truckType ? ' (' + truckTypeShort(truckType) + ')' : ''} picked up a load${company ? ' — ' + company : ''}`;
+      } else if (e.event_type === 'dropoff_load') {
+        verb = 'truck.dropoff';
+        summary = `${driverName}${truckType ? ' (' + truckTypeShort(truckType) + ')' : ''} dropped off${company ? ' — ' + company : ''}`;
+      } else if (e.event_type === 'end_shift') {
+        verb = 'truck.shift_ended';
+        summary = `${driverName} ended shift${company ? ' — ' + company : ''}`;
+      } else {
+        verb = 'truck.' + (e.event_type || 'event');
+        summary = `${driverName} — ${e.event_type}`;
+      }
+      out.push({
+        id: 'tev-' + e.id,
+        ts: new Date(e.event_at).getTime(),
+        stream: 'trucking',
+        actorRole: 'driver',
+        actorName: driverName,
+        summary,
+        type: verb,
+        refId: null,
+        sessionId: e.session_id,
+        photoUrl: e.photo_url || null,
+        gps: (e.latitude != null && e.longitude != null) ? { lat: e.latitude, lng: e.longitude } : null,
+      });
+    }
+    // issue_reports
+    for (const r of (live.issues || [])) {
+      const sess = sessionsById.get(r.session_id);
+      const driverName = (sess && sess.driver_name) || 'Unknown driver';
+      const text = r.issue_text || '(no description)';
+      out.push({
+        id: 'iss-' + r.id,
+        ts: new Date(r.event_at || r.created_at || Date.now()).getTime(),
+        stream: 'trucking',
+        actorRole: 'driver',
+        actorName: driverName,
+        summary: `${driverName} reported an issue: "${text.length > 100 ? text.slice(0, 97) + '…' : text}"`,
+        type: 'truck.issue',
+        refId: null,
+        sessionId: r.session_id,
+        photoUrl: r.photo_url || null,
+        gps: (r.latitude != null && r.longitude != null) ? { lat: r.latitude, lng: r.longitude } : null,
+      });
+    }
+    return out;
+  }, [live.events, live.issues, sessionsById]);
+
+  const adminEvents = React.useMemo(() => {
+    return (db.activity || []).map(e => ({
+      id: 'adm-' + (e.id || (e.timestamp + '-' + (e.refId || ''))),
+      ts: e.timestamp,
+      stream: 'admin',
+      actorRole: e.actorRole || 'admin',
+      actorName: e.actorRole === 'hauler' && e.actorId
+        ? ((db.haulers.find(h => h.id === e.actorId) || {}).name || 'Hauler')
+        : (e.actorRole === 'admin' ? 'Admin User'
+        : (e.actorRole === 'driver' ? 'Truck operator'
+        : 'System')),
+      summary: e.summary,
+      type: e.type || '',
+      refId: e.refId || null,
+      sessionId: null,
+      photoUrl: null,
+      gps: null,
+    }));
+  }, [db.activity, db.haulers]);
+
+  const merged = React.useMemo(() => {
+    const all = [...truckingEvents, ...adminEvents].sort((a, b) => b.ts - a.ts);
+    if (activityFilter === 'trucking') return all.filter(e => e.stream === 'trucking');
+    if (activityFilter === 'admin')    return all.filter(e => e.stream === 'admin');
+    return all;
+  }, [truckingEvents, adminEvents, activityFilter]);
+
   const markedRef = useRef(false);
   useEffect(() => {
     if (markedRef.current) return;
     markedRef.current = true;
-    const latest = activity.length ? activity[0].timestamp : 0;
+    // mark-as-read tracks the admin stream only — db.activityLastReadAt
+    // gates the sidebar unread badge, which has always been admin-scoped.
+    const latest = adminEvents.length ? adminEvents[0].ts : 0;
     setDb(prev => {
       const lastRead = prev.activityLastReadAt || 0;
       if (latest <= lastRead) return prev;
       return { ...prev, activityLastReadAt: latest };
     });
-    // Only run once on mount — mark-as-read fires on first view, not on every
-    // re-render that follows new events arriving while the page is open.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -12679,8 +13136,8 @@ function AdminActivity({ db, setDb, navigate }) {
   };
   const groups = [];
   const byLabel = new Map();
-  activity.forEach(e => {
-    const lbl = labelFor(e.timestamp);
+  merged.forEach(e => {
+    const lbl = labelFor(e.ts);
     if (!byLabel.has(lbl)) { byLabel.set(lbl, []); groups.push(lbl); }
     byLabel.get(lbl).push(e);
   });
@@ -12696,41 +13153,25 @@ function AdminActivity({ db, setDb, navigate }) {
     if (role === 'hauler') return C.warn || C.accent;
     return C.inkDim;
   };
-  // Build a "name" string for the Avatar component to derive initials from.
-  // Avatar splits on whitespace and takes first letters — we feed it whatever
-  // the actor's display name is so it produces sensible initials.
-  const actorNameFor = (evt) => {
-    if (evt.actorRole === 'admin') return 'Admin User';
-    // Legacy rows in Supabase may still carry the old actorRole — surface
-    // them generically so no person-name leaks into the avatar label.
-    if (evt.actorRole === 'driver') return 'Truck operator';
-    if (evt.actorRole === 'hauler' && evt.actorId) {
-      const h = db.haulers.find(x => x.id === evt.actorId);
-      if (h) return h.name;
+  // Filter-pill button style — matches the map's Hauls/Drivers toggle.
+  const filterBtn = (active) => ({
+    ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    padding: '6px 14px', borderRadius: R.pill,
+    border: `1px solid ${active ? C.accent : C.ruleHi}`,
+    background: active ? C.accentSoft : 'transparent',
+    color: active ? C.accent : C.inkDim,
+    cursor: 'pointer', outline: 'none',
+  });
+  const truckingCount = truckingEvents.length;
+  const adminCount    = adminEvents.length;
+  const totalCount    = truckingCount + adminCount;
+  const onRowClick = (evt) => {
+    if (evt.stream === 'trucking' && evt.sessionId) {
+      setDrawerSessionId(evt.sessionId);
+      return;
     }
-    return '?';
-  };
-  // Normalize legacy person-attributed summaries at render time (Supabase
-  // already holds them; mutating server data is destructive). Patterns:
-  //   "X. Lastname [verb] ... on #PLATE"  -> "Truck #PLATE [verb] ..."
-  //   "X. Lastname [verb] X CY ..."       -> "Truck [verb] X CY ..."
-  //   "A {operator} [verb] ... on #PLATE" -> "Truck #PLATE [verb] ..."
-  //   "Admin added {operator} X. Lastname"-> "Admin added a truck operator"
-  //   "... for X. Lastname"               -> "... for a truck operator"
-  const normalizeActivitySummary = (s) => {
-    if (!s || typeof s !== 'string') return s;
-    let out = s;
-    // "A driver <verb> ... on #PLATE"
-    out = out.replace(/^A driver (\w+(?:-\w+)?)\s+(.+?)\s+on\s+(#\S.+)$/i, 'Truck $3 $1 $2');
-    // "Initial. Lastname <verb> ... on #PLATE"
-    out = out.replace(/^[A-Z]\.\s*[A-Z][a-z]+\s+(\w+(?:-\w+)?)\s+(.+?)\s+on\s+(#\S.+)$/, 'Truck $3 $1 $2');
-    // "Initial. Lastname <verb> ..."  (no truck in line)
-    out = out.replace(/^[A-Z]\.\s*[A-Z][a-z]+\s+(logged|clocked|ended|quick-logged|started|paused|approved|rejected)\b/, 'Truck operator $1');
-    // "Admin added driver X. Lastname"
-    out = out.replace(/Admin added driver [A-Z]\.\s*[A-Z][a-z]+/, 'Admin added a truck operator');
-    // Trailing "... for X. Lastname"
-    out = out.replace(/\bfor\s+[A-Z]\.\s*[A-Z][a-z]+\b/, 'for a truck operator');
-    return out;
+    if (evt.refId) goRef({ refId: evt.refId });
   };
 
   return (
@@ -12740,11 +13181,30 @@ function AdminActivity({ db, setDb, navigate }) {
         <Label color={C.accent} style={{ marginBottom: 6 }}>Activity</Label>
         <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What's been happening.</h1>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-          {activity.length} event{activity.length === 1 ? '' : 's'} across your network.
+          {merged.length} event{merged.length === 1 ? '' : 's'}
+          {activityFilter !== 'all' && ` (${activityFilter}, of ${totalCount} total)`}
+          {' '}across your network.
         </div>
       </div>
 
-      {activity.length === 0 ? (
+      {/* 2026-05-30: filter pills. Single-select. Truck-event total +
+          admin total exposed in the labels so the dispatcher knows
+          which stream is currently noisy. */}
+      <div style={{ display: 'inline-flex', gap: S[2], marginBottom: S[4],
+                    padding: 2, background: C.surface,
+                    border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
+        <button type="button" onClick={() => setActivityFilter('all')} style={filterBtn(activityFilter === 'all')}>
+          All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+        </button>
+        <button type="button" onClick={() => setActivityFilter('trucking')} style={filterBtn(activityFilter === 'trucking')}>
+          Trucking <span style={{ opacity: 0.6, marginLeft: 4 }}>{truckingCount}</span>
+        </button>
+        <button type="button" onClick={() => setActivityFilter('admin')} style={filterBtn(activityFilter === 'admin')}>
+          Admin <span style={{ opacity: 0.6, marginLeft: 4 }}>{adminCount}</span>
+        </button>
+      </div>
+
+      {merged.length === 0 ? (
         <EmptyState
           icon={<ActivityIcon size={36} />}
           title="No activity yet"
@@ -12757,26 +13217,35 @@ function AdminActivity({ db, setDb, navigate }) {
               <Label style={{ marginBottom: S[3] }}>{label}</Label>
               <Card padding={0}>
                 {byLabel.get(label).map((evt, idx, arr) => {
-                  const hasRef = !!evt.refId;
+                  const clickable = (evt.stream === 'trucking' && !!evt.sessionId) || !!evt.refId;
+                  const streamLabel = evt.stream === 'trucking' ? 'Truck event' : 'Admin event';
                   return (
                     <div
                       key={evt.id}
-                      onClick={hasRef ? () => goRef(evt) : undefined}
+                      onClick={clickable ? () => onRowClick(evt) : undefined}
                       style={{
                         display: 'flex', alignItems: 'flex-start', gap: S[3],
                         padding: `${S[3]}px ${S[4]}px`,
                         borderBottom: idx < arr.length - 1 ? `1px solid ${C.rule}` : 'none',
-                        cursor: hasRef ? 'pointer' : 'default',
+                        cursor: clickable ? 'pointer' : 'default',
                         transition: 'background 0.12s',
                       }}
-                      onMouseEnter={e => { if (hasRef) e.currentTarget.style.background = C.surfaceHi; }}
-                      onMouseLeave={e => { if (hasRef) e.currentTarget.style.background = 'transparent'; }}
+                      onMouseEnter={e => { if (clickable) e.currentTarget.style.background = C.surfaceHi; }}
+                      onMouseLeave={e => { if (clickable) e.currentTarget.style.background = 'transparent'; }}
                     >
-                      <div style={{ ...T.monoSm, color: C.inkFaint, width: 44, flexShrink: 0, paddingTop: 6 }}>{fmtTime(evt.timestamp)}</div>
-                      <Avatar name={actorNameFor(evt)} color={actorColorFor(evt.actorRole)} size={32} />
+                      <div style={{ ...T.monoSm, color: C.inkFaint, width: 44, flexShrink: 0, paddingTop: 6 }}>{fmtTime(evt.ts)}</div>
+                      <Avatar name={evt.actorName} color={actorColorFor(evt.actorRole)} size={32} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{normalizeActivitySummary(evt.summary)}</div>
-                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2 }}>{(evt.type || '').replace(/^driver\./, 'truck.')}</div>
+                        <div style={{ ...T.body, color: C.ink, lineHeight: 1.45 }}>{evt.summary}</div>
+                        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 2, display: 'flex', alignItems: 'center', gap: S[2] }}>
+                          <span style={{
+                            padding: '1px 6px', borderRadius: R.sm,
+                            background: evt.stream === 'trucking' ? C.accentSoft : 'rgba(255,255,255,0.04)',
+                            color: evt.stream === 'trucking' ? C.accent : C.inkDim,
+                            fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.5, textTransform: 'uppercase', fontWeight: 700,
+                          }}>{streamLabel}</span>
+                          <span>{evt.type}</span>
+                        </div>
                       </div>
                     </div>
                   );
@@ -12785,6 +13254,17 @@ function AdminActivity({ db, setDb, navigate }) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Shared drawer opens when a trucking row is clicked. */}
+      {drawerSessionId && (
+        <DriverSessionDrawer
+          sessionId={drawerSessionId}
+          onClose={() => setDrawerSessionId(null)}
+          db={db}
+          navigate={navigate}
+          live={live}
+        />
       )}
     </div>
   );
