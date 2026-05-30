@@ -1982,7 +1982,10 @@ const jseStripePayUrl = (invoiceId) => 'https://stripe.com/pay/jse/' + encodeURI
 // overwrite to the new default) vs "user edited the rate" (preserve). Only
 // codes whose default has actually changed need an entry here.
 const RATES_PREV_DEFAULTS = { HS: 125 };
-const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity', 'geocode', 'routes'];
+// 2026-05-30 Series E: `drivers` retired from the required-keys list.
+// The collection went away in C2.1 + C3.1; nothing reads db.drivers
+// anymore.
+const DB_REQUIRED_KEYS = ['projects', 'haulers', 'trucks', 'hours', 'loads', 'invoices', 'rates', 'haulRequests', 'activity', 'geocode', 'routes'];
 
 // v17: cache of OSRM driving routes keyed by `<pickupAddress>|<dumpAddress>`.
 // Value shape: { coords: [[lng, lat], ...], distanceMeters, durationSeconds }.
@@ -2588,12 +2591,10 @@ function buildSeed() {
     projects: [],
     haulers: HAULERS_SEED,
     trucks: TRUCKS_SEED,
-    // 2026-05-30 Phase 4 C2.1: kept as empty array stub so the doomed
-    // DriverShell/DriverHome components (slated for whole-cloth deletion in
-    // C3) don't crash on `db.drivers.find(...)`. Admin-side read sites have
-    // been rewritten to read `truck.driverId` directly as a name string.
-    // Empty array means lookups return undefined → falsy → display fallback.
-    drivers: [],
+    // 2026-05-30 Series E: db.drivers fully retired. The C2.1 stub
+    // protected the doomed DriverShell/DriverHome components from
+    // crashing; those components are gone (C3.1) and nothing else
+    // references the collection.
     hours: HOURS_SEED,
     loads: LOADS_SEED,
     invoices: INVOICES_SEED,
@@ -2618,8 +2619,9 @@ function buildSeed() {
 // and logs a console.error if the cascade shrank any of them, which would
 // have caught the data-revert bug at first page load after deploy. See
 // outputs/data-revert-rca.md.
+// 2026-05-30 Series E: `drivers` retired from the shrink-guard list.
 const HYDRATE_LIVE_DATA_TABLES = [
-  'haulers', 'projects', 'drivers', 'trucks',
+  'haulers', 'projects', 'trucks',
   'loads', 'hours', 'invoices', 'haulRequests',
 ];
 
@@ -2702,7 +2704,8 @@ function hydrateDb(raw) {
     // won't have. Check only the keys present in every schema version so we
     // can migrate forward instead of dropping a populated db on the floor.
     // `haulers` (v4) was named `operators` in v1–v3, so we accept either.
-    const baselineKeys = ['projects', 'trucks', 'drivers', 'hours', 'loads', 'invoices', 'rates'];
+    // 2026-05-30 Series E: `drivers` retired from the baseline key list.
+    const baselineKeys = ['projects', 'trucks', 'hours', 'loads', 'invoices', 'rates'];
     const valid = baselineKeys.every(k => k in parsed) && ('haulers' in parsed || 'operators' in parsed);
     if (!valid) return seed;
     // Snapshot live-data row counts BEFORE the cascade runs so the
@@ -3573,8 +3576,8 @@ function assembleDbFromCloud(tableArrays, cloudMeta, localDb) {
     // existing null-fallbacks (project ? ... : req.projectLabel) kick in.
     projects: [],
     haulers: byKey.haulers,
-    // 2026-05-30 Phase 4 C2.1: empty stub. See initialState comment.
-    drivers: [],
+    // 2026-05-30 Series E: db.drivers fully retired (C2.1 stub no longer
+    // needed since C3.1 deleted the components that read it).
     trucks: byKey.trucks, loads: byKey.loads, hours: byKey.hours,
     invoices: byKey.invoices, haulRequests: byKey.haulRequests,
     activity: byKey.activity,
@@ -11910,7 +11913,9 @@ const BACKUP_TABLES = [
   { sb: 'rates',         pk: 'truck_type',  label: 'Rates',         jsKey: null },
   { sb: 'haulers',       pk: 'id',          label: 'Haulers',       jsKey: 'haulers' },
   { sb: 'projects',      pk: 'id',          label: 'Projects',      jsKey: 'projects' },
-  { sb: 'drivers',       pk: 'id',          label: 'Drivers',       jsKey: 'drivers' },
+  // 2026-05-30 Series E: `drivers` table retired (jsKey null + table
+  // removed from backup roster). Supabase `drivers` table can be DROPPED
+  // in Phase 7 alongside the `projects` table.
   { sb: 'trucks',        pk: 'id',          label: 'Trucks',        jsKey: 'trucks' },
   { sb: 'haul_requests', pk: 'id',          label: 'Haul requests', jsKey: 'haulRequests' },
   { sb: 'loads',         pk: 'id',          label: 'Loads',         jsKey: 'loads' },
