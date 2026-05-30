@@ -4975,6 +4975,50 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     // CartoCDN outage doesn't show "5 haulers · 3 pickups" while the canvas
     // sits blank with 0 pins. Flips to true inside map.on('load', ...).
     const [styleLoaded, setStyleLoaded] = useState(false);
+    // 2026-05-30 (Commit A): Hauls/Drivers segmented control. Default
+    // 'hauls' keeps the existing project / pickup / drop / hauler / route
+    // pins. 'drivers' swaps them for one marker per active driver_sessions
+    // row, coloured by elapsed-shift threshold (green ≤8h, red >8h). The
+    // existing marker effect bails when mapMode !== 'hauls' and tears
+    // down its pins; the driver-marker effect mirrors that for the
+    // inverse mode.
+    const [mapMode, setMapMode] = useState('hauls');
+    const live = useDriverSessionsLive();
+    // Driver markers — one per session with a geocoded last-known event.
+    // Walk the events back-to-front looking for the most recent point;
+    // sessions without any geocoded events are dropped (no marker).
+    const driverPoints = useMemo(() => {
+      if (mapMode !== 'drivers') return [];
+      const out = [];
+      for (const b of (live.buckets || [])) {
+        const sess = b.session;
+        if (sess.ended_at) continue;
+        let coord = null;
+        for (let i = b.events.length - 1; i >= 0; i--) {
+          const e = b.events[i];
+          if (e.latitude != null && e.longitude != null &&
+              isFinite(Number(e.latitude)) && isFinite(Number(e.longitude))) {
+            coord = { lng: Number(e.longitude), lat: Number(e.latitude) };
+            break;
+          }
+        }
+        if (!coord) continue;
+        const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
+        const isOver8h = shiftSec > 8 * 3600;
+        out.push({
+          id: 'drv-' + sess.id,
+          sessionId: sess.id,
+          coord,
+          label: (sess.driver_name || 'Driver') + ' · ' + formatShiftDuration(shiftSec),
+          isOver8h,
+        });
+      }
+      return out;
+    }, [mapMode, live.buckets]);
+    const driverSignature = driverPoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5) + ':' + (p.isOver8h ? '8' : 'g')).join('|');
+    const driverMarkersRef = useRef(new Map());
+    // Drawer state — opens when a driver marker is clicked.
+    const [drawerSessionId, setDrawerSessionId] = useState(null);
     // Map<id, { marker, coordKey, type, isHauler }> — diff-reconciled across
     // every endpointsSignature/haulersSignature change so markers don't all
     // tear down and re-mount when a single geocode resolves. Root cause of the
@@ -5272,13 +5316,19 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         const reconcile = () => {
           if (cancelled) return;
           try {
+            // 2026-05-30 (Commit A): in 'drivers' mode, drain all haul/
+            // hauler markers — driver markers are managed by a separate
+            // effect below. Restored once the user flips back to 'hauls'.
+            const inDriverMode = mapMode === 'drivers';
             const desired = new Map();
-            projectEndpoints.forEach(pt => {
-              desired.set(pt.id, { coord: pt.coord, type: pt.type, label: pt.label, isHauler: false });
-            });
-            haulerPoints.forEach(pt => {
-              desired.set(pt.id, { coord: pt.coord, type: 'hauler', label: pt.label, isHauler: true });
-            });
+            if (!inDriverMode) {
+              projectEndpoints.forEach(pt => {
+                desired.set(pt.id, { coord: pt.coord, type: pt.type, label: pt.label, isHauler: false });
+              });
+              haulerPoints.forEach(pt => {
+                desired.set(pt.id, { coord: pt.coord, type: 'hauler', label: pt.label, isHauler: true });
+              });
+            }
             const current = (markersRef.current instanceof Map) ? markersRef.current : new Map();
             const next = new Map();
             for (const [id, entry] of current.entries()) {
@@ -5304,11 +5354,15 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
             markersRef.current = next;
           } catch (e) { /* swallow — partial markers are better than no markers */ }
         };
-        if (map.loaded && map.loaded()) {
-          reconcile();
-        } else {
-          map.once && map.once('load', reconcile);
-        }
+        // 2026-05-30 (Commit A): the previous `if (map.loaded()) ...
+        // else map.once('load', reconcile)` branch was a footgun — once
+        // the map's 'load' event has fired, subsequent map.once('load',
+        // …) handlers never trigger, so any later effect re-run (e.g.,
+        // mapMode toggle, projectEndpoints update) silently failed to
+        // restore the haul markers. Marker addition is safe before/after
+        // load — MapLibre re-parents the DOM element when the style is
+        // ready — so just reconcile unconditionally.
+        reconcile();
       }, 0);
       // Cleanup: cancel the pending timeout only. DO NOT remove markers —
       // they're diff-reconciled across re-runs, not rebuilt. The map-init
@@ -5318,7 +5372,89 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         cancelled = true;
         clearTimeout(t);
       };
-    }, [endpointsSignature, haulersSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [endpointsSignature, haulersSignature, mlAvailable, mapMode]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // 2026-05-30 (Commit A): driver-mode marker effect. Builds a halo+dot
+    // pin (same recipe as haul markers) per geocoded session — green if
+    // ≤8h, red if >8h. Click opens the shared DriverSessionDrawer.
+    useEffect(() => {
+      if (!mlAvailable) return undefined;
+      let cancelled = false;
+      const t = setTimeout(() => {
+        if (cancelled) return;
+        const map = mapRef.current;
+        if (!map) return;
+        const GREEN_HALO = 'radial-gradient(circle, #22c55e8c, #22c55e2e 55%, #22c55e00 75%)';
+        const RED_HALO   = 'radial-gradient(circle, #ef44448c, #ef44442e 55%, #ef444400 75%)';
+        const GREEN_DOT = '#22c55e';
+        const RED_DOT   = '#ef4444';
+        const mkEl = (over8h) => {
+          const el = document.createElement('div');
+          el.className = 'jx-haul-pin';
+          el.style.cursor = 'pointer';
+          const halo = document.createElement('span');
+          halo.className = 'jx-haul-pin-halo';
+          halo.style.background = over8h ? RED_HALO : GREEN_HALO;
+          const dot = document.createElement('span');
+          dot.className = 'jx-haul-pin-dot';
+          dot.style.background = over8h ? RED_DOT : GREEN_DOT;
+          el.appendChild(halo);
+          el.appendChild(dot);
+          return el;
+        };
+        const mkMarker = (want) => {
+          const el = mkEl(want.isOver8h);
+          el.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            setDrawerSessionId(want.sessionId);
+          });
+          return new window.maplibregl.Marker({ element: el, anchor: 'center' })
+            .setLngLat([want.coord.lng, want.coord.lat])
+            .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false })
+              .setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' +
+                (want.label || '').replace(/</g, '&lt;') + '</div>'));
+        };
+        const reconcile = () => {
+          if (cancelled) return;
+          try {
+            const desired = new Map();
+            if (mapMode === 'drivers') {
+              for (const pt of driverPoints) {
+                desired.set(pt.id, { sessionId: pt.sessionId, coord: pt.coord, label: pt.label, isOver8h: pt.isOver8h });
+              }
+            }
+            const current = (driverMarkersRef.current instanceof Map) ? driverMarkersRef.current : new Map();
+            const next = new Map();
+            for (const [id, entry] of current.entries()) {
+              if (!desired.has(id)) { try { entry.marker.remove(); } catch (e) {} }
+            }
+            for (const [id, want] of desired.entries()) {
+              const coordKey = want.coord.lng.toFixed(5) + ',' + want.coord.lat.toFixed(5);
+              const sigKey = coordKey + ':' + (want.isOver8h ? '8' : 'g');
+              const cur = current.get(id);
+              if (cur && cur.sigKey === sigKey) {
+                next.set(id, cur);
+              } else {
+                if (cur) { try { cur.marker.remove(); } catch (e) {} }
+                try {
+                  const marker = mkMarker(want).addTo(map);
+                  next.set(id, { marker, sigKey });
+                } catch (e) {}
+              }
+            }
+            driverMarkersRef.current = next;
+          } catch (e) {}
+        };
+        // MapLibre's map.loaded() may return false even after 'load' has
+        // fired, and once 'load' has fired, map.once('load', …) will
+        // never trigger. Marker creation is safe before/after load, so
+        // just reconcile unconditionally — the manual smoke test in the
+        // preview confirmed marker.addTo(map) works even when
+        // map.loaded() returns false.
+        reconcile();
+      }, 0);
+      return () => { cancelled = true; clearTimeout(t); };
+    }, [mapMode, driverSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
       if (!mlAvailable || !containerRef.current) return;
@@ -5515,10 +5651,27 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     }, [mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     if (!mlAvailable) return <FallbackMap />;
+    // 2026-05-30 (Commit A): segmented control style. Selected pill takes
+    // the accent fill; unselected stays transparent with the rule border.
+    const segBtn = (active) => ({
+      ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
+      textTransform: 'uppercase',
+      padding: '6px 14px', borderRadius: R.pill, border: `1px solid ${active ? C.accent : C.ruleHi}`,
+      background: active ? C.accentSoft : 'transparent',
+      color: active ? C.accent : C.inkDim,
+      cursor: 'pointer', outline: 'none',
+    });
     return (
       <div style={{ position: 'relative', width: '100%', marginTop: S[4] }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
-          <Label color={C.accent}>Live operations map</Label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
+            <Label color={C.accent}>Live operations map</Label>
+            {/* Hauls / Drivers segmented toggle */}
+            <div style={{ display: 'inline-flex', gap: 4, padding: 2, background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
+              <button type="button" onClick={() => setMapMode('hauls')} style={segBtn(mapMode === 'hauls')}>Haul Requests</button>
+              <button type="button" onClick={() => setMapMode('drivers')} style={segBtn(mapMode === 'drivers')}>Active Drivers</button>
+            </div>
+          </div>
           <span style={{ ...T.caption, color: C.inkDim }}>
             {/* F6 (2026-05-24 audit): gate the counter row on map.styleLoaded
                 so a CartoCDN/WebGL failure shows an honest "tiles loading…"
@@ -5540,6 +5693,19 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
           </span>
         </div>
         <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
+
+        {/* 2026-05-30 (Commit A): driver-marker click opens the shared
+            dispatcher-style drawer. Passes 'live' through to avoid a
+            second Realtime subscription. */}
+        {drawerSessionId && (
+          <DriverSessionDrawer
+            sessionId={drawerSessionId}
+            onClose={() => setDrawerSessionId(null)}
+            db={db}
+            navigate={navigate}
+            live={live}
+          />
+        )}
       </div>
     );
 }
