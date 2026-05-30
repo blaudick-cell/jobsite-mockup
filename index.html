@@ -12626,14 +12626,10 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
     setAddingTruckFor(null);
   };
 
-  // Small helper used in section B for "X loads logged" per truck on a haul.
-  // Uses canonical loads filtered by haulRequestId+truckId. Per the stopgap
-  // (commit c102511) loads.haulRequestId is not yet on the Supabase write
-  // whitelist — for that hauler-loaded session, the in-memory state still
-  // tracks it. Cross-tab/cross-device persistence of that one field is
-  // degraded; the section still renders fine without it.
-  const loadsForReqTruck = (reqId, truckId) => (db.loads || [])
-    .filter(l => l && l.haulRequestId === reqId && l.truckId === truckId);
+  // 2026-05-30 Phase 4 C4.2: `loadsForReqTruck` retired. Per-haul-request
+  // load counting is gone — drivers don't tag sessions to hauls, and admin-
+  // entered loads tagged with haulRequestId are no longer summarised per
+  // truck-tile here. The truck tile renders without the count.
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
@@ -12732,11 +12728,11 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
             const matLabel = materialLabel(req.materialCode);
             const mineHere = (req.assignments || []).filter(a => a && a.haulerId === op.id);
             const myTruckIdsHere = new Set(mineHere.map(a => a.truckId));
-            // Completion % uses canonical loads delivered vs req.volumeCY.
-            const deliveredCY = (db.loads || [])
-              .filter(l => l && l.haulRequestId === req.id)
-              .reduce((s, l) => s + (Number(l.cy) || 0), 0);
-            const pct = req.volumeCY > 0 ? Math.min(100, Math.round((deliveredCY / req.volumeCY) * 100)) : 0;
+            // 2026-05-30 Phase 4 C4.2: `deliveredCY` + `pct` per-haul-
+            // request rollup retired. The "X / Y CY · Z% complete" card
+            // header now renders as "— / Y CY ordered" since per-haul
+            // delivery data isn't available anymore (driver_sessions don't
+            // tag haul requests).
             const canAddTruck = req.status === 'accepted';
             const availableTrucks = myTrucks.filter(t => !myTruckIdsHere.has(t.id));
             const expanded = addingTruckFor === req.id;
@@ -12752,9 +12748,9 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                     <div style={{ ...T.caption, marginTop: S[1] }}>{proj ? proj.gc : ''} · {req.volumeCY} CY requested</div>
                   </div>
                   <div style={{ textAlign: 'right', minWidth: 110 }}>
-                    <Label style={{ marginBottom: S[1] }}>Delivered</Label>
-                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1, fontFamily: F.mono }}>{deliveredCY.toLocaleString()}<span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> / {req.volumeCY}</span></div>
-                    <div style={{ ...T.caption, marginTop: 2, color: pct >= 100 ? C.ok : C.inkDim }}>{pct}% complete</div>
+                    <Label style={{ marginBottom: S[1] }}>Ordered</Label>
+                    <div style={{ ...T.h4, fontWeight: 700, color: C.ink, lineHeight: 1, fontFamily: F.mono }}>{(req.volumeCY || 0).toLocaleString()}<span style={{ color: C.inkDim, fontWeight: 400, fontSize: 13 }}> CY</span></div>
+                    <div style={{ ...T.caption, marginTop: 2, color: C.inkFaint }}>not per-haul</div>
                   </div>
                 </div>
                 <div style={{ paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
@@ -12764,7 +12760,6 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[2] }}>
                       {mineHere.map(a => {
                         const truck = db.trucks.find(t => t.id === a.truckId);
-                        const truckLoadCount = loadsForReqTruck(req.id, a.truckId).length;
                         return (
                           <button key={a.truckId} onClick={() => navigate(`/hauler/o/${op.id}/p/${req.projectId}/t/${a.truckId}`)} style={{
                             textAlign: 'left', background: C.surfaceHi, border: `1px solid ${C.rule}`, borderRadius: R.md,
@@ -12774,7 +12769,9 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
                               <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truck ? truck.plate : '?'}</span>
                               {truck && <Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{truck.type}</Pill>}
                             </div>
-                            <div style={{ ...T.micro, color: C.inkFaint, marginTop: S[1] }}>{truckLoadCount} load{truckLoadCount === 1 ? '' : 's'} logged</div>
+                            {/* 2026-05-30 Phase 4 C4.2: per-truck per-haul
+                                load count chip removed. Click to drill in to
+                                the truck's full per-day activity. */}
                           </button>
                         );
                       })}
