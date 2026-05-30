@@ -7037,12 +7037,20 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
       </div>
 
+      {/* 2026-05-30 (Active Drivers @ top): Robert wants live capacity
+          visible BEFORE the map / weather / haul-requests list so
+          dispatchers can match incoming demand to available trucks at
+          first glance. Each card shows driver + company + truck type +
+          CY/load + loads done / estimated remaining + CY hauled today;
+          summary row aggregates across the active fleet. Card click
+          opens the shared DriverSessionDrawer. */}
+      <ActiveDriversCapacityStrip db={db} navigate={navigate} />
+
       {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
           desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. Both
           mounts were orphaned when AdminProjects got deleted in 207a80f;
           re-mounted here so the landing matches Robert's reference screenshot
-          (map on the left, weather on the right, sitting just above the
-          operations KPI strip). */}
+          (map on the left, weather on the right). */}
       <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
         <div style={{ minWidth: 0 }}>
           <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} />
@@ -7055,12 +7063,11 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
       {/* 2026-05-30: 6-card "Operations KPI strip" deleted per Robert —
           numbers were derived from mock fields not tied to the canonical
           driver_sessions / truck_events store. The Hauling Overview now
-          flows directly from the map+weather row into the filter bar. */}
-
-      {/* 2026-05-30 (Commit C): Driver Activity table — newest-first
-          live session table embedded between Map+Weather and Haul
-          Requests. Row click opens the shared DriverSessionDrawer. */}
-      <DriverActivityTable db={db} navigate={navigate} />
+          leads with the Active Drivers capacity strip above and flows
+          directly from the map+weather row into the filter bar. The
+          DriverActivityTable that briefly sat here was superseded by
+          the capacity strip — full historical activity remains on
+          /admin/trucks/active. */}
 
       {/* Filter / sort bar */}
       <Card padding={S[3]} style={{ marginBottom: S[5] }}>
@@ -12948,6 +12955,198 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         />
       )}
     </div>
+  );
+}
+
+// =====================================================================
+// ActiveDriversCapacityStrip — top-of-Haul-Requests capacity grid
+// =====================================================================
+// 2026-05-30 (Active Drivers @ top): per Robert, the Haul Requests page
+// leads with this section so dispatchers can match incoming requests to
+// available capacity before anything else. Each card surfaces:
+//   • Driver name + company (hauler)
+//   • Truck type + CY per load (from DRIVER_LIVE_CY_PER_TRUCK)
+//   • Loads completed today vs estimated remaining in shift
+//   • Total CY today (loads × CY/load)
+// Summary header above the cards shows aggregate capacity:
+//   "X drivers active · Y CY/load combined · Z CY hauled today"
+// Card click → shared DriverSessionDrawer.
+//
+// Capacity-remaining estimate: target an 8h shift. If the driver has
+// completed N loads in M elapsed seconds, average cycle = M / N and
+// remaining_seconds = max(0, 8h - M). estimated_remaining =
+// floor(remaining_seconds / avg_cycle). With zero loads logged we fall
+// back to a 1-load-per-hour seed estimate so the card still surfaces
+// SOMETHING actionable. Treat the number as a forecast, not a contract.
+function ActiveDriversCapacityStrip({ db, navigate, live: liveProp }) {
+  const ownLive = useDriverSessionsLive();
+  const live = liveProp || ownLive;
+  const [drawerSessionId, setDrawerSessionId] = React.useState(null);
+
+  // Active = unended sessions, newest-first.
+  const active = React.useMemo(() => {
+    return (live.buckets || [])
+      .filter(b => !b.session.ended_at)
+      .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+  }, [live.buckets]);
+
+  const fmtClock = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+
+  // Per-driver capacity row. Returns the values rendered on each card.
+  function capacityRow(b) {
+    const sess = b.session;
+    const truckType = sess.truck_type;
+    const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+    const loadsDone = b.pickupCount;
+    const cyToday   = loadsDone * cyPerLoad;
+    const { currentShiftSeconds } = computeShiftHours(sess, b.events);
+    const TARGET_SHIFT = 8 * 3600;
+    const remainingSec = Math.max(0, TARGET_SHIFT - currentShiftSeconds);
+    let estimatedRemaining;
+    if (loadsDone > 0 && currentShiftSeconds > 0) {
+      const avgCycleSec = currentShiftSeconds / loadsDone;
+      estimatedRemaining = Math.max(0, Math.floor(remainingSec / avgCycleSec));
+    } else {
+      // No loads yet — seed at 1 load/hour so the dispatcher sees a
+      // non-zero forecast.
+      estimatedRemaining = Math.max(0, Math.floor(remainingSec / 3600));
+    }
+    return { cyPerLoad, loadsDone, cyToday, estimatedRemaining };
+  }
+
+  // Summary header aggregates.
+  const summary = React.useMemo(() => {
+    let cyPerLoadCombined = 0;
+    let cyHauledToday = 0;
+    for (const b of active) {
+      const r = capacityRow(b);
+      cyPerLoadCombined += r.cyPerLoad;
+      cyHauledToday += r.cyToday;
+    }
+    return { count: active.length, cyPerLoadCombined, cyHauledToday };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+
+  const truckTypeShort = (tt) => {
+    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                  SIDE: 'Side Dump', HISIDE: 'High Side',
+                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+    return map[tt] || tt || '—';
+  };
+
+  if (live.loading && active.length === 0) {
+    return null; // Don't render a stale "0 drivers" while initial fetch is in flight.
+  }
+  if (live.error) {
+    return (
+      <Card padding={S[4]} style={{ marginBottom: S[5] }}>
+        <div style={{ ...T.bodySm, color: C.warn }}>
+          Live driver data unavailable — {live.error}
+        </div>
+      </Card>
+    );
+  }
+  if (active.length === 0) {
+    return (
+      <Card padding={S[4]} style={{ marginBottom: S[5] }}>
+        <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center' }}>
+          No drivers on shift right now. Capacity will surface here as drivers clock in.
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      {/* Summary header — aggregate capacity across the active fleet. */}
+      <Card padding={S[4]} style={{ marginBottom: S[3] }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+          <Label color={C.accent}>Active drivers — capacity now</Label>
+          <div style={{ display: 'flex', gap: S[5], flexWrap: 'wrap', ...T.bodySm, color: C.inkDim }}>
+            <span><span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{summary.count}</span> driver{summary.count === 1 ? '' : 's'} active</span>
+            <span><span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{summary.cyPerLoadCombined}</span> CY/load combined</span>
+            <span><span style={{ color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>{summary.cyHauledToday}</span> CY hauled today</span>
+          </div>
+        </div>
+      </Card>
+
+      {/* Capacity card per active driver. */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: S[3],
+        marginBottom: S[5],
+      }}>
+        {active.map(b => {
+          const sess = b.session;
+          const r = capacityRow(b);
+          const company = sess.company || '— unassigned';
+          return (
+            <Card key={sess.id} padding={S[3]} style={{ cursor: 'pointer' }}
+              onClick={() => setDrawerSessionId(sess.id)}>
+              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
+                    {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
+                  </div>
+                  <div style={{ ...T.caption, color: sess.company ? C.accent : C.inkFaint, marginTop: 2, fontFamily: F.mono, letterSpacing: 0.3, textTransform: 'uppercase' }}>
+                    {company}
+                  </div>
+                </div>
+                <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: S[2], marginTop: S[2], paddingTop: S[2], borderTop: `1px solid ${C.rule}` }}>
+                <div>
+                  <div style={{ ...T.micro, color: C.inkFaint }}>TRUCK</div>
+                  <div style={{ ...T.bodySm, color: C.ink, marginTop: 2 }}>
+                    {truckTypeShort(sess.truck_type)} <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{r.cyPerLoad}</span><span style={{ ...T.caption, color: C.inkDim }}> CY/load</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
+                  <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
+                </div>
+                <div>
+                  <div style={{ ...T.micro, color: C.inkFaint }}>LOADS TODAY</div>
+                  <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>
+                    <span style={{ fontWeight: 700 }}>{r.loadsDone}</span>
+                    <span style={{ color: C.inkDim }}> / ~{r.loadsDone + r.estimatedRemaining}</span>
+                  </div>
+                  <div style={{ ...T.micro, color: C.inkFaint, marginTop: 2 }}>
+                    +{r.estimatedRemaining} est. remaining
+                  </div>
+                </div>
+                <div>
+                  <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
+                  <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>
+                    <span style={{ fontWeight: 700 }}>{r.cyToday}</span>
+                    <span style={{ color: C.inkDim }}> CY</span>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          );
+        })}
+      </div>
+
+      {/* Drawer mounts when a card is clicked. */}
+      {drawerSessionId && (
+        <DriverSessionDrawer
+          sessionId={drawerSessionId}
+          onClose={() => setDrawerSessionId(null)}
+          db={db}
+          navigate={navigate}
+          live={live}
+        />
+      )}
+    </>
   );
 }
 
