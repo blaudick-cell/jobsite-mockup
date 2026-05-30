@@ -5656,104 +5656,6 @@ function AdminNewHauler({ db, setDb, navigate }) {
 }
 
 // =====================================================================
-// AdminNewDriver — single-step wizard. /admin/drivers/new
-// Restored 2026-05-25.
-// Fields: name (required), licenseNumber (optional), phone (required),
-// default truck (optional — assigns this driver to a currently-unassigned
-// truck on submit).
-// =====================================================================
-function AdminNewDriver({ db, setDb, navigate }) {
-  const [name, setName] = useState('');
-  const [licenseNumber, setLicenseNumber] = useState('');
-  const [phone, setPhone] = useState('');
-  const [defaultTruckId, setDefaultTruckId] = useState('');
-
-  const inputStyle = WIZARD_INPUT_STYLE;
-  const detailsValid = !!name.trim() && !!phone.trim();
-  // 2026-05-24 sweep: also drop orphan trucks (haulerId missing / points at a
-  // deleted hauler). The new-driver "default truck" picker shouldn't surface
-  // ghost trucks from retired haulers.
-  const _haulerByIdAND = new Map((db.haulers || []).map(o => [o.id, o]));
-  const unassignedTrucks = db.trucks.filter(t => !t.driverId && t.haulerId && _haulerByIdAND.has(t.haulerId));
-
-  const cancel = () => navigate('/admin/haulers');
-  const submit = () => {
-    // 2026-05-30 Phase 4 C2.1: `db.drivers` collection went away. Driver name
-    // is now written directly onto `truck.driverId` as free text. Phone +
-    // licenseNumber are not persisted (Phase 4 scope: drivers are field-
-    // widget-authored; admin only pre-assigns the name). Component is also
-    // slated for deletion in C3, this is just a not-crash holdover.
-    const driverName = name.trim();
-    setDb(prev => appendActivity(
-      {
-        ...prev,
-        trucks: defaultTruckId
-          ? prev.trucks.map(t => t.id === defaultTruckId ? { ...t, driverId: driverName } : t)
-          : prev.trucks,
-      },
-      {
-        type: 'driver.created',
-        actorRole: 'admin',
-        actorId: null,
-        summary: `Admin added driver ${driverName}`,
-        refId: driverName,
-      }
-    ));
-    if (defaultTruckId) {
-      const t = db.trucks.find(x => x.id === defaultTruckId);
-      if (t && t.haulerId) { navigate('/admin/haulers/' + t.haulerId); return; }
-    }
-    navigate('/admin/haulers');
-  };
-
-  return (
-    <WizardShell
-      navigate={navigate}
-      steps={['Details']}
-      currentStep={1}
-      onCancel={cancel}
-      onSubmit={submit}
-      submitDisabled={!detailsValid}
-      submitLabel="Create driver"
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New driver' }]}
-      eyebrow="New driver"
-      title="Add a driver to your network"
-    >
-      <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-        <Label>Driver details</Label>
-        <div>
-          <div style={{ ...T.caption, marginBottom: 4 }}>Name</div>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g., Jane Smith" style={inputStyle} autoFocus />
-        </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Phone</div>
-            <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="e.g., (303) 555-0150" style={inputStyle} />
-          </div>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>License number (optional)</div>
-            <input value={licenseNumber} onChange={e => setLicenseNumber(e.target.value)} placeholder="e.g., CDL-A 12345678" style={{ ...inputStyle, fontFamily: F.mono }} />
-          </div>
-        </div>
-        <div>
-          <div style={{ ...T.caption, marginBottom: 4 }}>Default truck (optional)</div>
-          <select value={defaultTruckId} onChange={e => setDefaultTruckId(e.target.value)} style={inputStyle}>
-            <option value="">— Leave unassigned —</option>
-            {unassignedTrucks.map(t => {
-              const typeLabel = (TRUCK_TYPES.find(x => x.code === t.type) || {}).label || t.type;
-              return <option key={t.id} value={t.id}>#{t.plate} · {typeLabel} · {t.hauler || 'Bench'}</option>;
-            })}
-          </select>
-          {unassignedTrucks.length === 0 && (
-            <div style={{ ...T.caption, color: C.inkDim, marginTop: 6 }}>No trucks are currently unassigned. You can assign this driver to a truck later.</div>
-          )}
-        </div>
-      </div>
-    </WizardShell>
-  );
-}
-
-// =====================================================================
 // AdminNewTruck — 3-step wizard. /admin/trucks/new
 //   1. Details (plate, type, hauler-company text, optional make/model/cap)
 //   2. Assignments (optional project + hauler from existing records)
@@ -12503,7 +12405,6 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 3 && parts[1] === 'drivers' && parts[2] === 'new' && <AdminNewDriver db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
