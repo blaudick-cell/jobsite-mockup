@@ -11270,6 +11270,696 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
 }
 
 // =====================================================================
+// DriverSessionDrawer — shared dispatcher-style drawer
+// =====================================================================
+// 2026-05-30 (Commit D): the same drawer the dispatch-live.html page
+// already shipped, now ported into React and reused everywhere a truck
+// or driver is clickable in the mockup. Replaces the bespoke timeline
+// drawer that used to live inside AdminActiveTrucks.
+//
+// Accepts EITHER `sessionId` OR `truckId`:
+//   sessionId → finds that specific session bucket directly.
+//   truckId   → resolves to the most-recently-started ACTIVE session
+//               whose matched_truck_id matches; falls back to the most
+//               recent ENDED session; finally renders a "no session"
+//               placeholder with the static truck/hauler info.
+//
+// Optional `live` prop lets a parent that already runs
+// useDriverSessionsLive() (eg. AdminActiveTrucks) pass its hook output
+// through, so the drawer doesn't open a second Realtime channel. When
+// omitted, the drawer fetches its own.
+//
+// Includes — verbatim from dispatch-live + the f853fa4 admin
+// End-Shift handler:
+//   • header (driver name + truck-type chip + close button)
+//   • End Shift warning card + confirmation modal (active sessions only)
+//   • mini-map (MapLibre, green/orange/red event markers, auto-fit
+//     bounds, destroyed on close so we don't leak WebGL contexts)
+//   • meta block (Driver / Company / Truck Type / Plate / Start / Shift
+//     Time / Pickups / Drop-offs / CY Today / Last Event / End / Session
+//     ID)
+//   • event timeline (asc chronological) with elapsed pills, photo
+//     thumbs (data-event-id for scroll-to-event from card thumbnails),
+//     GPS links, and +N CY pills on pickup_load rows
+//   • Issues / Notes from driver (issue_reports filtered by session_id)
+//   • dispatcher_notes textarea — saves via PATCH on blur, with a
+//     "Saved · HH:MM MT" status under the field
+function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, navigate, live: liveProp }) {
+  const ownLive = useDriverSessionsLive();
+  const live = liveProp || ownLive;
+
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
+
+  // ── Resolve the bucket we're displaying ─────────────────────────
+  const drawerBucket = React.useMemo(() => {
+    const buckets = live.buckets || [];
+    if (sessionId) {
+      return buckets.find(b => b.session.id === sessionId) || null;
+    }
+    if (truckId) {
+      const matches = buckets.filter(b => b.session.matched_truck_id === truckId);
+      // Most recent unended session wins; fall back to most recent ended.
+      const active = matches.filter(b => !b.session.ended_at)
+        .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+      if (active.length) return active[0];
+      const ended = matches.slice()
+        .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+      return ended[0] || null;
+    }
+    return null;
+  }, [live.buckets, sessionId, truckId]);
+
+  // ── No-session placeholder data (truck info only) ───────────────
+  const placeholderTruck = (!drawerBucket && truckId) ? trucksById.get(truckId) : null;
+  const placeholderHauler = placeholderTruck && db.haulers
+    ? db.haulers.find(h => h.id === placeholderTruck.haulerId)
+    : null;
+
+  // ── Format helpers ──────────────────────────────────────────────
+  const fmtClock = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+  const fmtElapsed = (startedIso, endedIso) => {
+    if (!startedIso) return '—';
+    const { currentShiftSeconds } = computeShiftHours(
+      { started_at: startedIso, ended_at: endedIso }, []
+    );
+    return formatShiftDuration(currentShiftSeconds);
+  };
+  const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
+                          : et === 'dropoff_load' ? 'Drop-off'
+                          : et === 'end_shift' ? 'End shift'
+                          : et || '—';
+  const eventColor = (et) => et === 'pickup_load' ? C.ok
+                          : et === 'dropoff_load' ? C.warn
+                          : et === 'end_shift' ? C.warnSoft
+                          : C.inkDim;
+  const truckTypeLabel = (tt) => {
+    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                  SIDE: 'Side Dump', HISIDE: 'High Side',
+                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+    return map[tt] || tt || '—';
+  };
+
+  // ── Scroll-to-event when invoked with `scrollEventId` ───────────
+  React.useEffect(() => {
+    if (!drawerBucket || !scrollEventId) return;
+    const tries = [16, 80, 240];
+    const timers = tries.map(ms => setTimeout(() => {
+      const el = document.querySelector(`[data-event-id="${scrollEventId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const prev = el.style.boxShadow;
+        el.style.boxShadow = `0 0 0 2px ${C.accent}`;
+        setTimeout(() => { el.style.boxShadow = prev; }, 1200);
+      }
+    }, ms));
+    return () => { for (const t of timers) clearTimeout(t); };
+  }, [drawerBucket && drawerBucket.session.id, scrollEventId]);
+
+  // ── Mini-map ── ported from dispatch-live.html renderDrawerMiniMap.
+  // The map is rebuilt every time `points` changes and torn down on
+  // close so we don't leak GL contexts when the dispatcher tabs through
+  // several drivers in a row (browsers cap at ~16 WebGL contexts).
+  const mapContainerRef = React.useRef(null);
+  const mapRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+  React.useEffect(() => {
+    if (!drawerBucket) return;
+    const events = drawerBucket.events || [];
+    const points = events.filter(e =>
+      e.latitude != null && e.longitude != null &&
+      isFinite(Number(e.latitude)) && isFinite(Number(e.longitude))
+    );
+    const container = mapContainerRef.current;
+    if (!container) return;
+    // Tear down any previous instance first.
+    for (const m of markersRef.current) {
+      try { m.remove(); } catch (_) {}
+    }
+    markersRef.current = [];
+    if (mapRef.current) {
+      try { mapRef.current.remove(); } catch (_) {}
+      mapRef.current = null;
+    }
+    container.innerHTML = '';
+    if (!points.length) {
+      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#888;font-size:11px;letter-spacing:0.5px;text-transform:uppercase;">📍 No location data</div>';
+      return;
+    }
+    if (typeof maplibregl === 'undefined') {
+      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#888;font-size:11px;letter-spacing:0.5px;text-transform:uppercase;">Map unavailable</div>';
+      return;
+    }
+    try {
+      const first = points[0];
+      const map = new maplibregl.Map({
+        container,
+        style: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+        center: [Number(first.longitude), Number(first.latitude)],
+        zoom: 12,
+        attributionControl: false,
+        interactive: true,
+      });
+      map.dragRotate.disable();
+      map.touchZoomRotate.disableRotation();
+      mapRef.current = map;
+      const bounds = new maplibregl.LngLatBounds();
+      for (const e of points) {
+        const color = e.event_type === 'pickup_load' ? '#22c55e'
+                    : e.event_type === 'dropoff_load' ? '#f59e0b'
+                    : '#ef4444';
+        const el = document.createElement('div');
+        el.style.cssText = `width:10px;height:10px;border-radius:50%;background:${color};border:2px solid #0b0b0b;box-shadow:0 0 0 1px ${color};`;
+        const lng = Number(e.longitude), lat = Number(e.latitude);
+        const marker = new maplibregl.Marker({ element: el })
+          .setLngLat([lng, lat]).addTo(map);
+        markersRef.current.push(marker);
+        bounds.extend([lng, lat]);
+      }
+      map.once('load', () => {
+        try { map.fitBounds(bounds, { padding: 20, maxZoom: 16, duration: 0 }); }
+        catch (_) {}
+      });
+    } catch (e) {
+      console.warn('[DriverSessionDrawer] mini-map init failed', e);
+      container.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;width:100%;height:100%;color:#888;font-size:11px;letter-spacing:0.5px;text-transform:uppercase;">Map unavailable</div>';
+    }
+    return () => {
+      for (const m of markersRef.current) {
+        try { m.remove(); } catch (_) {}
+      }
+      markersRef.current = [];
+      if (mapRef.current) {
+        try { mapRef.current.remove(); } catch (_) {}
+        mapRef.current = null;
+      }
+    };
+  }, [drawerBucket && drawerBucket.session.id, drawerBucket && drawerBucket.events.length]);
+
+  // ── dispatcher_notes textarea ── PATCH on blur.
+  const [noteDraft, setNoteDraft] = React.useState('');
+  const [noteStatus, setNoteStatus] = React.useState('');
+  React.useEffect(() => {
+    if (drawerBucket) {
+      setNoteDraft(drawerBucket.session.dispatcher_notes || '');
+      setNoteStatus('');
+    }
+  }, [drawerBucket && drawerBucket.session.id]);
+  async function saveNotes() {
+    if (!drawerBucket) return;
+    const txt = noteDraft;
+    setNoteStatus('Saving…');
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase client not ready');
+      const { error } = await _sb.client.from('driver_sessions')
+        .update({ dispatcher_notes: txt }).eq('id', drawerBucket.session.id);
+      if (error) throw error;
+      const stamp = new Date().toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+      setNoteStatus(`Saved · ${stamp} MT`);
+    } catch (e) {
+      console.warn('[DriverSessionDrawer] saveNotes', e);
+      setNoteStatus('Save failed — will retry on next blur');
+    }
+  }
+
+  // ── End-shift handler (preserved from f853fa4) ──────────────────
+  const [endShiftConfirmFor, setEndShiftConfirmFor] = React.useState(null);
+  const [endShiftInFlight, setEndShiftInFlight] = React.useState(false);
+  const [adminFlash, setAdminFlash] = React.useState(null);
+  async function endShiftFromAdmin(session) {
+    if (!session || !session.id) return;
+    if (!_sb.ready || !_sb.client) {
+      setAdminFlash({ text: 'Supabase client not ready — can\'t end shift', kind: 'error' });
+      setTimeout(() => setAdminFlash(null), 6000);
+      return;
+    }
+    setEndShiftInFlight(true);
+    const nowIso = new Date().toISOString();
+    const auditLine = 'Ended by admin at ' + fmtClock(nowIso) + ' MT — driver did not end shift themselves';
+    const appendedNotes = session.dispatcher_notes
+      ? (session.dispatcher_notes + '\n\n' + auditLine)
+      : auditLine;
+    try {
+      const evRes = await _sb.client.from('truck_events').insert({
+        session_id: session.id,
+        event_type: 'end_shift',
+        event_at: nowIso,
+        latitude: null, longitude: null, photo_url: null,
+      });
+      if (evRes.error) throw new Error('truck_events insert: ' + (evRes.error.message || evRes.error));
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ ended_at: nowIso, dispatcher_notes: appendedNotes })
+        .eq('id', session.id);
+      if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
+      setAdminFlash({
+        text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
+        kind: 'ok',
+      });
+      setEndShiftConfirmFor(null);
+      setTimeout(() => { setAdminFlash(null); onClose && onClose(); }, 1200);
+    } catch (e) {
+      setAdminFlash({
+        text: 'End shift failed — ' + String((e && e.message) || e),
+        kind: 'error',
+      });
+      setTimeout(() => setAdminFlash(null), 6000);
+    } finally {
+      setEndShiftInFlight(false);
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────
+  // Nothing requested → render nothing (parent controls open/close
+  // via sessionId/truckId being set or null).
+  if (!sessionId && !truckId) return null;
+
+  const sess = drawerBucket ? drawerBucket.session : null;
+  const truck = sess && sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : placeholderTruck;
+  const hauler = truck && db.haulers ? db.haulers.find(h => h.id === truck.haulerId) : placeholderHauler;
+  const truckPlate = truck ? truck.plate : null;
+  const truckType  = truck ? truck.type : (sess ? sess.truck_type : null);
+
+  const cyToday = drawerBucket
+    ? driverLiveCyForLoadCount(truckType || (sess && sess.truck_type), drawerBucket.pickupCount)
+    : 0;
+  const lastEv = drawerBucket ? drawerBucket.lastEvent : null;
+  const lastEvStr = lastEv
+    ? (eventLabel(lastEv.event_type) + ' · ' + fmtClock(lastEv.event_at) + ' MT')
+    : '—';
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Session detail for ${sess ? (sess.driver_name || '—') : (truckPlate ? '#' + truckPlate : 'truck')}`}
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
+        display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          width: '100%', maxWidth: 520, background: C.bg,
+          borderLeft: `1px solid ${C.ruleHi}`,
+          boxShadow: '-24px 0 64px rgba(0,0,0,0.45)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3] }}>
+          <div style={{ minWidth: 0 }}>
+            <Label color={C.accent}>Session detail</Label>
+            <div style={{ ...T.body, fontFamily: F.display, fontWeight: 700, color: C.ink, marginTop: 2 }}>
+              {sess ? (sess.driver_name || '—') : (truckPlate ? `#${truckPlate}` : '—')}
+            </div>
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+              {truckType && <span style={{
+                display: 'inline-block', padding: '2px 8px', borderRadius: R.pill,
+                background: C.surface, border: `1px solid ${C.ruleHi}`,
+                fontFamily: F.mono, fontSize: 10.5, letterSpacing: 0.4,
+                color: C.inkDim, marginRight: S[2],
+              }}>{truckType}</span>}
+              {sess
+                ? <>Started {fmtClock(sess.started_at)} · Elapsed {fmtElapsed(sess.started_at, sess.ended_at)}{sess.ended_at && <> · <span style={{ color: C.inkFaint }}>Ended {fmtClock(sess.ended_at)}</span></>}</>
+                : <span style={{ color: C.inkFaint }}>No active driver session for this truck</span>}
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" style={{
+            background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
+            padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
+            fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
+          }}>Close</button>
+        </div>
+
+        {/* Body (scrolls) */}
+        <div style={{ flex: 1, overflow: 'auto', padding: `${S[3]}px ${S[4]}px` }}>
+          {/* Flash banner — appears during end-shift result feedback. */}
+          {adminFlash && (
+            <div style={{
+              ...T.caption, fontWeight: 700, letterSpacing: 0.3,
+              padding: '8px 14px', borderRadius: R.sm,
+              marginBottom: S[3],
+              background: adminFlash.kind === 'error' ? C.warnSoft : C.accentSoft,
+              color: adminFlash.kind === 'error' ? C.warn : C.accent,
+              border: '1px solid ' + (adminFlash.kind === 'error' ? C.warn : C.accent),
+            }}>{adminFlash.text}</div>
+          )}
+
+          {/* No-session placeholder */}
+          {!sess && (
+            <div style={{
+              padding: S[4],
+              background: C.surface,
+              border: `1px solid ${C.rule}`,
+              borderRadius: R.md,
+              ...T.bodySm, color: C.inkDim, marginBottom: S[3],
+            }}>
+              {placeholderTruck
+                ? <>This truck has no active driver session right now.{hauler && <><br />Owned by <span style={{ color: C.ink, fontWeight: 600 }}>{hauler.name}</span>.</>}</>
+                : 'No matching session or truck found.'}
+            </div>
+          )}
+
+          {/* End Shift warning card (active sessions only). */}
+          {sess && !sess.ended_at && (
+            <div style={{
+              marginBottom: S[3], padding: S[3],
+              background: C.warnSoft,
+              border: `1px solid ${C.warn}`,
+              borderRadius: R.md,
+            }}>
+              <div style={{ ...T.bodySm, fontWeight: 700, color: C.warn, marginBottom: 2 }}>
+                ⚠ End shift for this driver
+              </div>
+              <div style={{ ...T.caption, color: C.inkDim, marginBottom: S[2] }}>
+                Use only when the driver can't end it themselves.
+              </div>
+              <button
+                type="button"
+                onClick={() => setEndShiftConfirmFor(drawerBucket)}
+                style={{
+                  background: C.warn, color: C.bg, border: 'none', borderRadius: R.sm,
+                  padding: '6px 14px', fontFamily: F.mono, fontSize: 11,
+                  fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >End Shift Now</button>
+            </div>
+          )}
+
+          {/* Mini-map (top-right block in dispatch-live; here we put it
+              full-width before the meta grid so it stays readable at
+              the narrower 460-520px drawer width). */}
+          {sess && (
+            <div ref={mapContainerRef} style={{
+              width: '100%', height: 180,
+              border: `1px solid ${C.rule}`, borderRadius: R.md,
+              overflow: 'hidden', background: C.surface,
+              marginBottom: S[3],
+            }} />
+          )}
+
+          {/* Meta grid */}
+          {sess && (() => {
+            const startedDt = new Date(sess.started_at);
+            const endedDt = sess.ended_at ? new Date(sess.ended_at) : null;
+            return (
+              <div style={{
+                display: 'grid', gridTemplateColumns: '130px 1fr',
+                gap: '6px 12px', marginBottom: S[4], fontSize: 12.5,
+              }}>
+                <span style={{ color: C.inkDim }}>Driver</span>
+                <span style={{ color: C.ink, fontWeight: 600 }}>{sess.driver_name || '—'}</span>
+                <span style={{ color: C.inkDim }}>Company</span>
+                <span style={{ color: C.ink }}>{sess.company || (hauler ? hauler.name : '—')}</span>
+                <span style={{ color: C.inkDim }}>Truck Type</span>
+                <span style={{ color: C.ink }}>{truckTypeLabel(truckType || sess.truck_type)}</span>
+                <span style={{ color: C.inkDim }}>Plate</span>
+                <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>
+                  {truckPlate ? '#' + truckPlate : (sess.plate_input ? '#' + sess.plate_input : '—')}
+                </span>
+                <span style={{ color: C.inkDim }}>Start Time</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{fmtClock(sess.started_at)} MT</span>
+                <span style={{ color: C.inkDim }}>Shift Time</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+                <span style={{ color: C.inkDim }}>Pickups</span>
+                <span style={{ color: C.ink }}>{drawerBucket.pickupCount}</span>
+                <span style={{ color: C.inkDim }}>Drop-offs</span>
+                <span style={{ color: C.ink }}>{drawerBucket.dropCount}</span>
+                <span style={{ color: C.inkDim }}>Total CY today</span>
+                <span style={{ color: C.ink, fontWeight: 700 }}>{cyToday}<span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}> CY</span></span>
+                <span style={{ color: C.inkDim }}>Last Event</span>
+                <span style={{ color: C.ink }}>{lastEvStr}</span>
+                <span style={{ color: C.inkDim }}>End Time</span>
+                <span style={{ color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
+                  {endedDt ? fmtClock(sess.ended_at) + ' MT' : 'Still active'}
+                </span>
+                <span style={{ color: C.inkDim }}>Session ID</span>
+                <span style={{ color: C.inkFaint, fontFamily: F.mono, fontSize: 11 }}>{sess.id}</span>
+              </div>
+            );
+          })()}
+
+          {/* Event timeline (asc chronological) */}
+          {sess && (() => {
+            const evts = drawerBucket.events;
+            if (evts.length === 0) {
+              return (
+                <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[4] }}>
+                  No events logged on this session yet.
+                </div>
+              );
+            }
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                {evts.map(e => {
+                  const elapsedFmt = formatShiftDuration(
+                    eventElapsedSeconds(sess, e), { padded: true }
+                  );
+                  const hasGps = e.latitude != null && e.longitude != null;
+                  const isPickup = e.event_type === 'pickup_load';
+                  const cyForLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType || sess.truck_type] || 0;
+                  return (
+                    <div key={e.id} data-event-id={e.id} style={{
+                      display: 'flex', gap: S[2], alignItems: 'center',
+                      padding: `${S[2]}px ${S[3]}px`,
+                      background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
+                      fontSize: 12.5, transition: 'box-shadow 200ms ease-out',
+                    }}>
+                      <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64 }}>{fmtClock(e.event_at)}</span>
+                      <span style={{ fontWeight: 700, color: eventColor(e.event_type), flexShrink: 0, width: 70, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        {eventLabel(e.event_type)}
+                        {isPickup && cyForLoad > 0 && (
+                          <span title="One full load at this truck type"
+                                style={{
+                                  background: C.okSoft, color: C.ok,
+                                  borderRadius: R.pill, padding: '1px 6px',
+                                  fontFamily: F.mono, fontSize: 10, fontWeight: 700,
+                                  marginLeft: 4,
+                                }}>
+                            +{cyForLoad}
+                          </span>
+                        )}
+                      </span>
+                      <span style={{ fontFamily: F.mono, color: C.inkFaint, flexShrink: 0, width: 64, fontSize: 11.5 }} title="Elapsed shift time at this event">{elapsedFmt}</span>
+                      {e.photo_url && (
+                        <a href={e.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
+                           onClick={ev => ev.stopPropagation()}
+                           style={{ flexShrink: 0, lineHeight: 0 }}>
+                          <img src={e.photo_url} alt=""
+                            style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, display: 'block' }} />
+                        </a>
+                      )}
+                      <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11, textAlign: 'right' }}>
+                        {hasGps ? (
+                          <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noopener"
+                             onClick={ev => ev.stopPropagation()}
+                             style={{ color: C.info, textDecoration: 'none' }}>
+                            {Number(e.latitude).toFixed(4)},{Number(e.longitude).toFixed(4)} ↗
+                          </a>
+                        ) : <span style={{ color: C.inkFaint }}>—</span>}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Issues / Notes from driver */}
+          {sess && (() => {
+            const sessIssues = (live.issues || [])
+              .filter(i => i.session_id === sess.id)
+              .sort((x, y) => String(y.event_at || y.created_at || '').localeCompare(String(x.event_at || x.created_at || '')));
+            if (sessIssues.length === 0) return null;
+            return (
+              <div style={{ marginTop: S[4] }}>
+                <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2] }}>
+                  Issues / notes from driver
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
+                  {sessIssues.map(iss => {
+                    const issElapsedFmt = formatShiftDuration(
+                      eventElapsedSeconds(sess, { event_at: iss.event_at || iss.created_at }),
+                      { padded: true }
+                    );
+                    const issHasGps = iss.latitude != null && iss.longitude != null;
+                    return (
+                      <div key={iss.id} style={{
+                        display: 'flex', gap: S[2], alignItems: 'flex-start',
+                        padding: `${S[2]}px ${S[3]}px`,
+                        background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.md,
+                        fontSize: 12.5,
+                      }}>
+                        {iss.photo_url && (
+                          <a href={iss.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
+                             onClick={ev => ev.stopPropagation()}
+                             style={{ flexShrink: 0, lineHeight: 0 }}>
+                            <img src={iss.photo_url} alt=""
+                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.warn}`, display: 'block' }} />
+                          </a>
+                        )}
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.ink, marginBottom: 4 }}>
+                            <span style={{ fontFamily: F.mono, color: C.inkDim, fontSize: 11 }}>{fmtClock(iss.event_at || iss.created_at)}</span>
+                            <span style={{ fontFamily: F.mono, color: C.inkFaint, fontSize: 11 }} title="Elapsed shift time when reported">{issElapsedFmt}</span>
+                            {issHasGps && (
+                              <a href={`https://www.google.com/maps?q=${iss.latitude},${iss.longitude}`} target="_blank" rel="noopener"
+                                 onClick={ev => ev.stopPropagation()}
+                                 style={{ color: C.info, textDecoration: 'none', fontSize: 11, marginLeft: 'auto' }}>
+                                map ↗
+                              </a>
+                            )}
+                          </div>
+                          <div style={{ color: C.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                            {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* Dispatcher notes textarea — PATCH on blur. */}
+          {sess && (
+            <div style={{ marginTop: S[5] }}>
+              <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2] }}>
+                Dispatcher notes
+              </div>
+              <textarea
+                value={noteDraft}
+                onChange={(e) => setNoteDraft(e.target.value)}
+                onBlur={saveNotes}
+                placeholder="Internal notes for this session (saves on blur)…"
+                style={{
+                  width: '100%', minHeight: 96, resize: 'vertical',
+                  background: C.surface, color: C.ink,
+                  border: `1px solid ${C.rule}`, borderRadius: R.sm,
+                  padding: S[2], fontFamily: F.body, fontSize: 13, lineHeight: 1.4,
+                  outline: 'none',
+                }}
+              />
+              <div style={{ ...T.micro, color: C.inkFaint, marginTop: 4, minHeight: 14 }}>
+                {noteStatus || ' '}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* End-shift confirmation modal (z-index 500, sits on top of drawer). */}
+      {endShiftConfirmFor && (() => {
+        const cs = endShiftConfirmFor.session;
+        const cLastEv = endShiftConfirmFor.lastEvent;
+        const startedFmt = fmtClock(cs.started_at);
+        const startedAgo = formatShiftDuration(
+          computeShiftHours(cs, endShiftConfirmFor.events).currentShiftSeconds
+        );
+        const lastEvFmt = cLastEv ? fmtClock(cLastEv.event_at) : '—';
+        const lastEvAgo = cLastEv
+          ? formatShiftDuration(Math.max(0, Math.floor((Date.now() - new Date(cLastEv.event_at).getTime()) / 1000)))
+          : '—';
+        const nowFmt = fmtClock(new Date().toISOString());
+        const cTruck = cs.matched_truck_id ? trucksById.get(cs.matched_truck_id) : null;
+        const cTruckPlate = cTruck ? cTruck.plate : null;
+        return (
+          <div
+            role="dialog" aria-modal="true"
+            aria-label={`Confirm ending shift for ${cs.driver_name || 'driver'}`}
+            onClick={(e) => { if (!endShiftInFlight && e.target === e.currentTarget) setEndShiftConfirmFor(null); }}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
+            }}
+          >
+            <div onClick={e => e.stopPropagation()} tabIndex={-1}
+              style={{
+                background: C.bg, borderRadius: R.lg,
+                width: 'min(520px, 100%)', maxHeight: '90vh', overflow: 'auto',
+                border: `1px solid ${C.warn}`,
+                boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+                padding: `${S[4]}px ${S[5]}px ${S[4]}px`,
+              }}
+            >
+              <div style={{ ...T.h4, fontWeight: 700, color: C.warn, marginBottom: S[2] }}>
+                End shift for {cs.driver_name || 'driver'}?
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '6px 12px', marginTop: S[3], fontSize: 13 }}>
+                <span style={{ color: C.inkDim }}>Driver</span>
+                <span style={{ color: C.ink, fontWeight: 600 }}>{cs.driver_name || '—'}</span>
+                <span style={{ color: C.inkDim }}>Company</span>
+                <span style={{ color: C.ink }}>{cs.company || '—'}</span>
+                <span style={{ color: C.inkDim }}>Truck</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{cTruckPlate ? '#' + cTruckPlate : '—'}</span>
+                <span style={{ color: C.inkDim }}>Started</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{startedFmt} MT <span style={{ color: C.inkDim }}>({startedAgo} ago)</span></span>
+                <span style={{ color: C.inkDim }}>Last activity</span>
+                <span style={{ color: C.ink, fontFamily: F.mono }}>{lastEvFmt}{cLastEv && ' MT'} <span style={{ color: C.inkDim }}>{cLastEv ? '(' + lastEvAgo + ' ago)' : '— no events yet'}</span></span>
+                <span style={{ color: C.inkDim }}>Ended_at →</span>
+                <span style={{ color: C.warn, fontFamily: F.mono, fontWeight: 700 }}>{nowFmt} MT <span style={{ color: C.inkDim, fontWeight: 400 }}>(now)</span></span>
+              </div>
+              <div style={{
+                marginTop: S[4], padding: S[3],
+                background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.sm,
+                ...T.bodySm, color: C.inkDim, lineHeight: 1.5,
+              }}>
+                <span style={{ color: C.warn, fontWeight: 700 }}>⚠ </span>
+                This adds an end_shift event to their timeline and marks
+                the session ended. The driver's widget will continue to
+                work if they're still in the field — they just won't show
+                as Active anymore on dispatch. A note will be appended to
+                this session's <em style={{ color: C.ink, fontStyle: 'normal' }}>dispatcher_notes</em> for the audit trail.
+              </div>
+              <div style={{ display: 'flex', gap: S[2], marginTop: S[4], justifyContent: 'flex-end' }}>
+                <button type="button"
+                  onClick={() => { if (!endShiftInFlight) setEndShiftConfirmFor(null); }}
+                  disabled={endShiftInFlight}
+                  style={{
+                    background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                    color: C.ink, padding: '8px 16px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                    cursor: endShiftInFlight ? 'not-allowed' : 'pointer',
+                    opacity: endShiftInFlight ? 0.5 : 1,
+                  }}
+                >Cancel</button>
+                <button type="button"
+                  onClick={() => endShiftFromAdmin(cs)}
+                  disabled={endShiftInFlight}
+                  style={{
+                    background: C.warn, color: C.bg, border: 'none',
+                    padding: '8px 18px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.4,
+                    cursor: endShiftInFlight ? 'wait' : 'pointer',
+                    opacity: endShiftInFlight ? 0.7 : 1,
+                  }}
+                >{endShiftInFlight ? 'Ending…' : 'Yes, End Shift'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+// =====================================================================
 // AdminActiveTrucks — live session grid at /admin/trucks/active.
 // Reads driver_sessions + truck_events via useDriverSessionsLive() and
 // renders one card per active session. Click a card to open a read-only
@@ -11327,106 +12017,16 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   const activeCount = activeBuckets.length;
   const idleCount   = idleTrucks.length;
 
-  // Drawer state: selected bucket key, or null when closed.
+  // Drawer state: which session is open + which event to scroll to (when
+  // a card thumbnail is clicked). The shared DriverSessionDrawer owns
+  // every other concern (mini-map, meta block, end-shift confirm modal,
+  // dispatcher-notes textarea) — see its definition above.
   const [drawerSessionId, setDrawerSessionId] = React.useState(null);
-  // 2026-05-30 (Series C-mockup): when a photo thumbnail on a session
-  // card is clicked, drawerScrollEventId is set to that event's id.
-  // The useEffect below scrolls the matching `[data-event-id]` row into
-  // view once the drawer mounts. Reset on drawer close.
   const [drawerScrollEventId, setDrawerScrollEventId] = React.useState(null);
-  React.useEffect(() => {
-    if (!drawerSessionId || !drawerScrollEventId) return;
-    // RAF gives React one frame to mount the drawer + events list before
-    // we query the DOM. setTimeout is the long-tail safety net.
-    const tries = [16, 80, 240];
-    const timers = tries.map(ms => setTimeout(() => {
-      const el = document.querySelector(`[data-event-id="${drawerScrollEventId}"]`);
-      if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        // Brief highlight so the scrolled-to row stands out.
-        const prev = el.style.boxShadow;
-        el.style.boxShadow = `0 0 0 2px ${C.accent}`;
-        setTimeout(() => { el.style.boxShadow = prev; }, 1200);
-      }
-    }, ms));
-    return () => { for (const t of timers) clearTimeout(t); };
-  }, [drawerSessionId, drawerScrollEventId]);
-
-  // 2026-05-30 (Admin End-Shift): two coupled bits of state.
-  //   endShiftConfirmFor — null OR the bucket whose drawer is currently
-  //     mid-confirmation. Truthy → the confirmation modal renders on top
-  //     of the drawer.
-  //   endShiftInFlight  — true while the two Supabase writes (truck_events
-  //     INSERT + driver_sessions PATCH) are pending. Disables the modal's
-  //     "Yes" button and surfaces a spinner so the dispatcher can't
-  //     double-fire.
-  //   adminFlash       — { text, kind } ephemeral status pill shown in
-  //     the page header. Auto-clears in 4s on success, 6s on error.
-  const [endShiftConfirmFor, setEndShiftConfirmFor] = React.useState(null);
-  const [endShiftInFlight, setEndShiftInFlight] = React.useState(false);
-  const [adminFlash, setAdminFlash] = React.useState(null);
-
-  async function endShiftFromAdmin(session) {
-    if (!session || !session.id) return;
-    if (!_sb.ready || !_sb.client) {
-      setAdminFlash({ text: 'Supabase client not ready — can\'t end shift', kind: 'error' });
-      setTimeout(() => setAdminFlash(null), 6000);
-      return;
-    }
-    setEndShiftInFlight(true);
-    const nowIso = new Date().toISOString();
-    // Audit-trail line. Format matches Robert's spec: clock time +
-    // "Ended by admin at" + clarifying tail. fmtClock() handles the MT
-    // timezone conversion.
-    const auditLine = 'Ended by admin at ' + fmtClock(nowIso) + ' MT — driver did not end shift themselves';
-    const appendedNotes = session.dispatcher_notes
-      ? (session.dispatcher_notes + '\n\n' + auditLine)
-      : auditLine;
-    try {
-      // Step 1: INSERT the end_shift event into truck_events. Same shape
-      // the field widget writes — no admin_entered flag per Robert's Q3
-      // override. latitude/longitude/photo_url default to NULL (admin
-      // has no device GPS or camera for a remote shift-close).
-      const evRes = await _sb.client.from('truck_events').insert({
-        session_id: session.id,
-        event_type: 'end_shift',
-        event_at: nowIso,
-        latitude: null,
-        longitude: null,
-        photo_url: null,
-      });
-      if (evRes.error) throw new Error('truck_events insert: ' + (evRes.error.message || evRes.error));
-      // Step 2: PATCH driver_sessions with ended_at + appended notes.
-      const upd = await _sb.client.from('driver_sessions')
-        .update({ ended_at: nowIso, dispatcher_notes: appendedNotes })
-        .eq('id', session.id);
-      if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
-      // Success — close modal + drawer. The live subscription's
-      // postgres_changes channel will refetch within ~1s and the row
-      // will disappear from the active grid on its own.
-      setAdminFlash({
-        text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
-        kind: 'ok',
-      });
-      setEndShiftConfirmFor(null);
-      setDrawerSessionId(null);
-      setDrawerScrollEventId(null);
-      setTimeout(() => setAdminFlash(null), 4000);
-    } catch (e) {
-      setAdminFlash({
-        text: 'End shift failed — ' + String((e && e.message) || e),
-        kind: 'error',
-      });
-      setTimeout(() => setAdminFlash(null), 6000);
-    } finally {
-      setEndShiftInFlight(false);
-    }
-  }
-
-  const drawerBucket = drawerSessionId
-    ? activeBuckets.find(b => b.session.id === drawerSessionId)
-        || (live.buckets || []).find(b => b.session.id === drawerSessionId)
-    : null;
+  const closeDrawer = React.useCallback(() => {
+    setDrawerSessionId(null);
+    setDrawerScrollEventId(null);
+  }, []);
 
   // Format helpers — local to keep the component self-contained.
   // 2026-05-30 (Series D): thin wrapper around computeShiftHours +
@@ -11470,19 +12070,9 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
               : 'Live session data from the field widget. Click any session for the event timeline.'}
           </div>
         </div>
-        {/* 2026-05-30 (Admin End-Shift): transient status pill. Auto-
-            clears 4s on success, 6s on error. Slots into the existing
-            header's flex-row so it doesn't shift the layout. */}
-        {adminFlash && (
-          <div style={{
-            ...T.caption, fontWeight: 700, letterSpacing: 0.3,
-            padding: '8px 14px', borderRadius: R.pill,
-            background: adminFlash.kind === 'error' ? C.warnSoft : C.accentSoft,
-            color: adminFlash.kind === 'error' ? C.warn : C.accent,
-            border: '1px solid ' + (adminFlash.kind === 'error' ? C.warn : C.accent),
-            maxWidth: 420,
-          }}>{adminFlash.text}</div>
-        )}
+        {/* 2026-05-30 (Commit D): End-Shift flash banner moved INTO the
+            shared DriverSessionDrawer so the success/error feedback
+            renders inside the drawer where the action originates. */}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
@@ -11624,295 +12214,19 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         </div>
       )}
 
-      {drawerBucket && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Session detail for ${drawerBucket.session.driver_name || '—'}`}
-          onClick={() => { setDrawerSessionId(null); setDrawerScrollEventId(null); }}
-          style={{
-            position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
-            display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
-          }}
-        >
-          <div
-            onClick={e => e.stopPropagation()}
-            style={{
-              width: '100%', maxWidth: 460, background: C.bg,
-              borderLeft: `1px solid ${C.ruleHi}`,
-              boxShadow: '-24px 0 64px rgba(0,0,0,0.45)',
-              display: 'flex', flexDirection: 'column', overflow: 'hidden',
-            }}
-          >
-            <div style={{ padding: `${S[3]}px ${S[4]}px`, borderBottom: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3] }}>
-              <div style={{ minWidth: 0 }}>
-                <Label color={C.accent}>Session detail</Label>
-                <div style={{ ...T.body, fontFamily: F.display, fontWeight: 700, color: C.ink, marginTop: 2 }}>
-                  {drawerBucket.session.driver_name || '—'}
-                </div>
-                <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-                  Started {fmtClock(drawerBucket.session.started_at)} · Elapsed {fmtElapsed(drawerBucket.session.started_at, drawerBucket.session.ended_at)}
-                  {drawerBucket.session.ended_at && <> · <span style={{ color: C.inkFaint }}>Ended {fmtClock(drawerBucket.session.ended_at)}</span></>}
-                </div>
-              </div>
-              <button onClick={() => { setDrawerSessionId(null); setDrawerScrollEventId(null); }} aria-label="Close" style={{
-                background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
-                padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
-                fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
-              }}>Close</button>
-            </div>
-            <div style={{ flex: 1, overflow: 'auto', padding: `${S[3]}px ${S[4]}px` }}>
-              {/* 2026-05-30 (Admin End-Shift): only shows on still-active
-                  sessions. Drawer-only entry — never on the row — so an
-                  accidental row-click can't trigger anything destructive.
-                  Click opens the confirmation modal; modal handles the
-                  actual write so the warning card itself is just a fuse. */}
-              {!drawerBucket.session.ended_at && (
-                <div style={{
-                  marginBottom: S[3],
-                  padding: S[3],
-                  background: C.warnSoft,
-                  border: `1px solid ${C.warn}`,
-                  borderRadius: R.md,
-                }}>
-                  <div style={{ ...T.bodySm, fontWeight: 700, color: C.warn, marginBottom: 2 }}>
-                    ⚠ End shift for this driver
-                  </div>
-                  <div style={{ ...T.caption, color: C.inkDim, marginBottom: S[2] }}>
-                    Use only when the driver can't end it themselves.
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setEndShiftConfirmFor(drawerBucket)}
-                    style={{
-                      background: C.warn, color: C.bg,
-                      border: 'none', borderRadius: R.sm,
-                      padding: '6px 14px', fontFamily: F.mono,
-                      fontSize: 11, fontWeight: 700, letterSpacing: 0.5,
-                      textTransform: 'uppercase', cursor: 'pointer',
-                    }}
-                  >End Shift Now</button>
-                </div>
-              )}
-              {drawerBucket.events.length === 0 ? (
-                <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
-                  No events logged on this session yet.
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-                  {drawerBucket.events.map(e => {
-                    // 2026-05-30 (Series D): elapsed via consolidated helper.
-                    const elapsedFmt = formatShiftDuration(
-                      eventElapsedSeconds(drawerBucket.session, e), { padded: true }
-                    );
-                    const hasGps = e.latitude != null && e.longitude != null;
-                    // 2026-05-30 (Series C-mockup): data-event-id powers
-                    // the scroll-to-event behaviour when a thumbnail on a
-                    // session card is clicked. Inline 40x40 photo thumb
-                    // surfaces when truck_events.photo_url is set.
-                    return (
-                      <div key={e.id} data-event-id={e.id} style={{
-                        display: 'flex', gap: S[2], alignItems: 'center',
-                        padding: `${S[2]}px ${S[3]}px`,
-                        background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
-                        fontSize: 12.5, transition: 'box-shadow 200ms ease-out',
-                      }}>
-                        <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64 }}>{fmtClock(e.event_at)}</span>
-                        <span style={{ fontWeight: 700, color: eventColor(e.event_type), flexShrink: 0, width: 70 }}>{eventLabel(e.event_type)}</span>
-                        <span style={{ fontFamily: F.mono, color: C.inkFaint, flexShrink: 0, width: 64, fontSize: 11.5 }} title="Elapsed shift time at this event">{elapsedFmt}</span>
-                        {e.photo_url && (
-                          <a href={e.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
-                             onClick={ev => ev.stopPropagation()}
-                             style={{ flexShrink: 0, lineHeight: 0 }}>
-                            <img src={e.photo_url} alt=""
-                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, display: 'block' }} />
-                          </a>
-                        )}
-                        <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11 }}>
-                          {hasGps ? (
-                            <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noopener"
-                               onClick={ev => ev.stopPropagation()}
-                               style={{ color: C.info, textDecoration: 'none' }}>
-                              {Number(e.latitude).toFixed(4)},{Number(e.longitude).toFixed(4)} ↗
-                            </a>
-                          ) : <span style={{ color: C.inkFaint }}>—</span>}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-              {/* 2026-05-30 (Series C-mockup): Issues / Notes from the
-                  driver — filters live.issues to this session. Each row
-                  surfaces issue_text + optional photo thumbnail. Photo
-                  click opens full-size in a new tab. Section hidden
-                  entirely when the driver hasn't reported anything. */}
-              {(() => {
-                const sessIssues = (live.issues || [])
-                  .filter(i => i.session_id === drawerBucket.session.id)
-                  .sort((x, y) => String(y.event_at || y.created_at || '').localeCompare(String(x.event_at || x.created_at || '')));
-                if (sessIssues.length === 0) return null;
-                return (
-                  <div style={{ marginTop: S[4] }}>
-                    <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2] }}>
-                      Issues / notes from driver
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-                      {sessIssues.map(iss => {
-                        // 2026-05-30 (Series D): elapsed via consolidated helper.
-                        // Issue rows don't have a uniform `event_at` field —
-                        // some live data carries it, some falls back to created_at —
-                        // so we synthesize a minimal {event_at} shape for the helper.
-                        const issElapsedFmt = formatShiftDuration(
-                          eventElapsedSeconds(drawerBucket.session, {
-                            event_at: iss.event_at || iss.created_at,
-                          }),
-                          { padded: true }
-                        );
-                        const issHasGps = iss.latitude != null && iss.longitude != null;
-                        return (
-                          <div key={iss.id} style={{
-                            display: 'flex', gap: S[2], alignItems: 'flex-start',
-                            padding: `${S[2]}px ${S[3]}px`,
-                            background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.md,
-                            fontSize: 12.5,
-                          }}>
-                            {iss.photo_url && (
-                              <a href={iss.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
-                                 onClick={ev => ev.stopPropagation()}
-                                 style={{ flexShrink: 0, lineHeight: 0 }}>
-                                <img src={iss.photo_url} alt=""
-                                  style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.warn}`, display: 'block' }} />
-                              </a>
-                            )}
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.ink, marginBottom: 4 }}>
-                                <span style={{ fontFamily: F.mono, color: C.inkDim, fontSize: 11 }}>{fmtClock(iss.event_at || iss.created_at)}</span>
-                                <span style={{ fontFamily: F.mono, color: C.inkFaint, fontSize: 11 }} title="Elapsed shift time when reported">{issElapsedFmt}</span>
-                                {issHasGps && (
-                                  <a href={`https://www.google.com/maps?q=${iss.latitude},${iss.longitude}`} target="_blank" rel="noopener"
-                                     onClick={ev => ev.stopPropagation()}
-                                     style={{ color: C.info, textDecoration: 'none', fontSize: 11, marginLeft: 'auto' }}>
-                                    map ↗
-                                  </a>
-                                )}
-                              </div>
-                              <div style={{ color: C.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                                {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
-            </div>
-          </div>
-        </div>
+      {/* 2026-05-30 (Commit D): shared dispatcher-style drawer.
+          Reuses the live hook above so we don't open a second
+          Realtime channel. Closes via setDrawerSessionId(null). */}
+      {drawerSessionId && (
+        <DriverSessionDrawer
+          sessionId={drawerSessionId}
+          scrollEventId={drawerScrollEventId}
+          onClose={closeDrawer}
+          db={db}
+          navigate={navigate}
+          live={live}
+        />
       )}
-
-      {/* 2026-05-30 (Admin End-Shift): confirmation modal. Sits ON TOP of
-          the open drawer (z-index 500 vs drawer's 400). Per the spec the
-          "Yes, End Shift" button is NOT autofocused — Enter must NOT
-          submit accidentally; only an explicit click. tabIndex={-1} on
-          the modal backdrop prevents focus from drifting onto it via
-          shift-tab cycling. */}
-      {endShiftConfirmFor && (() => {
-        const cs = endShiftConfirmFor.session;
-        const cLastEv = endShiftConfirmFor.lastEvent;
-        const startedFmt = fmtClock(cs.started_at);
-        const startedAgo = formatShiftDuration(
-          computeShiftHours(cs, endShiftConfirmFor.events).currentShiftSeconds
-        );
-        const lastEvFmt = cLastEv ? fmtClock(cLastEv.event_at) : '—';
-        const lastEvAgo = cLastEv
-          ? formatShiftDuration(Math.max(0, Math.floor((Date.now() - new Date(cLastEv.event_at).getTime()) / 1000)))
-          : '—';
-        const nowFmt = fmtClock(new Date().toISOString());
-        const cTruck = cs.matched_truck_id ? trucksById.get(cs.matched_truck_id) : null;
-        const cTruckPlate = cTruck ? cTruck.plate : null;
-        return (
-          <div
-            role="dialog" aria-modal="true"
-            aria-label={`Confirm ending shift for ${cs.driver_name || 'driver'}`}
-            onClick={(e) => { if (!endShiftInFlight && e.target === e.currentTarget) setEndShiftConfirmFor(null); }}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500,
-              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
-            }}
-          >
-            <div
-              onClick={e => e.stopPropagation()}
-              tabIndex={-1}
-              style={{
-                background: C.bg, borderRadius: R.lg,
-                width: 'min(520px, 100%)', maxHeight: '90vh', overflow: 'auto',
-                border: `1px solid ${C.warn}`,
-                boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-                padding: `${S[4]}px ${S[5]}px ${S[4]}px`,
-              }}
-            >
-              <div style={{ ...T.h4, fontWeight: 700, color: C.warn, marginBottom: S[2] }}>
-                End shift for {cs.driver_name || 'driver'}?
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '130px 1fr', gap: '6px 12px', marginTop: S[3], fontSize: 13 }}>
-                <span style={{ color: C.inkDim }}>Driver</span>
-                <span style={{ color: C.ink, fontWeight: 600 }}>{cs.driver_name || '—'}</span>
-                <span style={{ color: C.inkDim }}>Company</span>
-                <span style={{ color: C.ink }}>{cs.company || '—'}</span>
-                <span style={{ color: C.inkDim }}>Truck</span>
-                <span style={{ color: C.ink, fontFamily: F.mono }}>{cTruckPlate ? '#' + cTruckPlate : '—'}</span>
-                <span style={{ color: C.inkDim }}>Started</span>
-                <span style={{ color: C.ink, fontFamily: F.mono }}>{startedFmt} MT <span style={{ color: C.inkDim }}>({startedAgo} ago)</span></span>
-                <span style={{ color: C.inkDim }}>Last activity</span>
-                <span style={{ color: C.ink, fontFamily: F.mono }}>{lastEvFmt}{cLastEv && ' MT'} <span style={{ color: C.inkDim }}>{cLastEv ? '(' + lastEvAgo + ' ago)' : '— no events yet'}</span></span>
-                <span style={{ color: C.inkDim }}>Ended_at →</span>
-                <span style={{ color: C.warn, fontFamily: F.mono, fontWeight: 700 }}>{nowFmt} MT <span style={{ color: C.inkDim, fontWeight: 400 }}>(now)</span></span>
-              </div>
-              <div style={{
-                marginTop: S[4], padding: S[3],
-                background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.sm,
-                ...T.bodySm, color: C.inkDim, lineHeight: 1.5,
-              }}>
-                <span style={{ color: C.warn, fontWeight: 700 }}>⚠ </span>
-                This adds an end_shift event to their timeline and marks
-                the session ended. The driver's widget will continue to
-                work if they're still in the field — they just won't show
-                as Active anymore on dispatch. A note will be appended to
-                this session's <em style={{ color: C.ink, fontStyle: 'normal' }}>dispatcher_notes</em> for the audit trail.
-              </div>
-              <div style={{ display: 'flex', gap: S[2], marginTop: S[4], justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  onClick={() => { if (!endShiftInFlight) setEndShiftConfirmFor(null); }}
-                  disabled={endShiftInFlight}
-                  style={{
-                    background: 'transparent', border: `1px solid ${C.ruleHi}`,
-                    color: C.ink, padding: '8px 16px', borderRadius: R.sm,
-                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
-                    cursor: endShiftInFlight ? 'not-allowed' : 'pointer',
-                    opacity: endShiftInFlight ? 0.5 : 1,
-                  }}
-                >Cancel</button>
-                <button
-                  type="button"
-                  onClick={() => endShiftFromAdmin(cs)}
-                  disabled={endShiftInFlight}
-                  style={{
-                    background: C.warn, color: C.bg,
-                    border: 'none', padding: '8px 18px', borderRadius: R.sm,
-                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.4,
-                    cursor: endShiftInFlight ? 'wait' : 'pointer',
-                    opacity: endShiftInFlight ? 0.7 : 1,
-                  }}
-                >{endShiftInFlight ? 'Ending…' : 'Yes, End Shift'}</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
