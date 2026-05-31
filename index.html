@@ -4156,6 +4156,52 @@ function driverLiveCyForLoadCount(truckType, pickupCount) {
 }
 
 // =====================================================================
+// Hourly rate + $ today helpers (2026-05-31)
+// =====================================================================
+// Per-session billing rate lookup. Chain:
+//   1. session.hourly_rate (new nullable override on driver_sessions)
+//   2. matched_truck.ratePerHour (truck-level override)
+//   3. DEFAULT_RATES[truck_type] (JS floor, see line ~703)
+//   4. Industry-standard fallback (90) for truck types not in
+//      DEFAULT_RATES (SIDE, HISIDE, OTHER all fall through here).
+function sessionHourlyRate(session, trucksById) {
+  if (!session) return 0;
+  if (session.hourly_rate != null && Number.isFinite(Number(session.hourly_rate))) {
+    return Number(session.hourly_rate);
+  }
+  const truck = session.matched_truck_id && trucksById ? trucksById.get(session.matched_truck_id) : null;
+  if (truck && truck.ratePerHour != null && Number.isFinite(Number(truck.ratePerHour))) {
+    return Number(truck.ratePerHour);
+  }
+  const tt = session.truck_type || (truck && truck.type);
+  if (tt && DEFAULT_RATES[tt] != null) return DEFAULT_RATES[tt];
+  return 90;
+}
+
+// Today's gross billable dollars for a session. Uses WALL-CLOCK hours
+// (started_at → ended_at OR now) — matches what every card displays
+// via fmtElapsed(startedIso, endedIso) which intentionally ignores
+// event timing. computeShiftHours otherwise capped at last-event for
+// active sessions, which produced confusingly small $ figures (e.g.
+// 14h displayed shift → $109 instead of $1,260). 'events' param is
+// retained for call-site stability but not consulted.
+function sessionDollarsToday(session, _events, trucksById) {
+  if (!session || !session.started_at) return 0;
+  const startMs = new Date(session.started_at).getTime();
+  if (!isFinite(startMs)) return 0;
+  const endMs = session.ended_at && isFinite(new Date(session.ended_at).getTime())
+    ? new Date(session.ended_at).getTime()
+    : Date.now();
+  const hours = Math.max(0, (endMs - startMs) / 3600000);
+  return Math.round(hours * sessionHourlyRate(session, trucksById));
+}
+
+function fmtUsd0(n) {
+  if (n == null || !Number.isFinite(n)) return '$0';
+  return '$' + Math.round(n).toLocaleString('en-US');
+}
+
+// =====================================================================
 // computeDriverStatus — colored-strip + status-pill derivation
 // =====================================================================
 // 2026-05-31 (Mobile dispatch redesign): each active driver card on
@@ -11966,6 +12012,19 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
   }
   async function saveSessionField(fieldKey, newValue, prevValue, fieldLabel) {
     if (!drawerBucket) return;
+    // 2026-05-31: hourly_rate input — strip dollar signs / "/hr" /
+    // commas so users can type either '85' or '$85/hr' and get the
+    // same numeric save. Empty string clears the override → falls
+    // back to default rate.
+    if (fieldKey === 'hourly_rate') {
+      if (newValue == null || String(newValue).trim() === '') {
+        newValue = null;
+      } else {
+        const clean = String(newValue).replace(/[^0-9.]/g, '');
+        const n = parseFloat(clean);
+        newValue = Number.isFinite(n) && n > 0 ? n : null;
+      }
+    }
     if (newValue === prevValue) { setEditingField(null); return; }
     const sess = drawerBucket.session;
     setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saving' }));
@@ -12487,13 +12546,32 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
                   <span style={labelStyle}>Shift</span>
                   <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
                 </div>
-                <div style={{ ...rowStyle, borderBottom: 'none' }}>
+                <div style={rowStyle}>
                   <span style={labelStyle}>End</span>
                   <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
                     <MetaField fieldKey="ended_at" fieldLabel="end time"
                       value={sess.ended_at}
                       displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
                       type="datetime" />
+                  </span>
+                </div>
+                {/* 2026-05-31: hourly rate + computed $ today. Rate is
+                    editable; $ today is read-only (hours × rate). */}
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Rate</span>
+                  <span style={{ ...valueStyle, fontFamily: F.mono }}>
+                    <MetaField fieldKey="hourly_rate" fieldLabel="hourly rate"
+                      value={sess.hourly_rate}
+                      displayValue={sess.hourly_rate != null
+                        ? `$${Number(sess.hourly_rate)}/hr`
+                        : <span style={{ color: C.inkFaint }}>${sessionHourlyRate(sess, trucksById)}/hr <em style={{ color: C.inkFaint, fontStyle: 'normal', fontSize: 10 }}>(default)</em></span>}
+                      type="text" />
+                  </span>
+                </div>
+                <div style={{ ...rowStyle, borderBottom: 'none' }}>
+                  <span style={labelStyle}>$ today</span>
+                  <span style={{ ...valueStyle, fontFamily: F.mono, color: C.accent, fontWeight: 700 }}>
+                    {fmtUsd0(sessionDollarsToday(sess, drawerBucket.events, trucksById))}
                   </span>
                 </div>
               </div>
@@ -12846,7 +12924,11 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                       : C.ok;
     const statusSoft = isOver8h ? C.warnSoft : (isEnded ? 'rgba(255,255,255,0.04)' : C.okSoft);
     const statusLabel = isEnded ? 'Ended' : isOver8h ? 'Over 8h' : 'On shift';
-    return { b, sess, truckType, cyPerLoad, isEnded, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel };
+    // 2026-05-31: hourly rate + $ today derived via the shared helper
+    // (session.hourly_rate override → truck.ratePerHour → DEFAULT_RATES).
+    const hourlyRate = sessionHourlyRate(sess, trucksById);
+    const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
+    return { b, sess, truckType, cyPerLoad, isEnded, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel, hourlyRate, dollarsToday };
   });
 
   // 2026-05-31 (Mobile dispatch redesign): truck-type → short label.
@@ -12937,7 +13019,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
            · truck · CY/load), 3-col metrics row (shift / CY today /
            loads X/Y), one-line footer ("Last: …"). Tap → drawer. */
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: S[5] }}>
-          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, cyToday }) => {
+          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, cyToday, hourlyRate, dollarsToday }) => {
             const status = computeDriverStatus(b, issuesArr);
             const companyMetaLine = [
               sess.company || '— unassigned',
@@ -12987,16 +13069,26 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                   fontSize: 11.5,
                 }}>{companyMetaLine}</div>
 
-                {/* 3-col metrics row: shift / CY today / loads */}
+                {/* 2026-05-31: 3-col primary metric row. Hours + $ today
+                    are the two BIG tiles (matching weight). CY + loads
+                    demoted to a smaller right-column row. Rate sits
+                    muted under the $ today figure. */}
                 <div style={{
                   display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
                   gap: 8, marginTop: 8,
                   fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
-                  fontSize: 14, fontWeight: 700, color: C.ink,
+                  color: C.ink,
                 }}>
-                  <span>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-                  <span style={{ textAlign: 'center' }}>{cyToday} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>CY</span></span>
-                  <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>Loads</span></span>
+                  <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+                  <span style={{ textAlign: 'center' }}>
+                    <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
+                    <span style={{ display: 'block', color: C.inkFaint, fontWeight: 400, fontSize: 10, marginTop: 1 }}>${hourlyRate}/hr</span>
+                  </span>
+                  <span style={{ textAlign: 'right', fontSize: 11.5, color: C.inkDim, alignSelf: 'center', lineHeight: 1.4 }}>
+                    <span style={{ color: C.ink, fontWeight: 700 }}>{cyToday}</span> CY
+                    <span style={{ color: C.inkFaint }}>{' · '}</span>
+                    <span style={{ color: C.ink, fontWeight: 700 }}>{b.pickupCount}/{b.dropCount}</span> loads
+                  </span>
                 </div>
 
                 {/* Last event footer */}
@@ -13016,9 +13108,11 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                 <Th>Driver</Th>
                 <Th>Company</Th>
                 <Th>Truck Type</Th>
+                <Th align="right">$/hr</Th>
                 <Th align="right">CY/Load</Th>
                 <Th>Start (MT)</Th>
-                <Th>Shift Time</Th>
+                <Th align="right">Shift</Th>
+                <Th align="right">$ Today</Th>
                 <Th align="right">Pickups</Th>
                 <Th align="right">Drop-offs</Th>
                 <Th align="right">CY (Today)</Th>
@@ -13026,7 +13120,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
               </tr>
             </thead>
             <tbody>
-              {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel }) => (
+              {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel, hourlyRate, dollarsToday }) => (
                 <Tr key={sess.id}
                     onClick={() => setDrawerSessionId(sess.id)}
                     style={isOver8h ? { background: 'rgba(239,68,68,0.06)' } : null}>
@@ -13036,9 +13130,11 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                   <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
+                  <Td align="right" mono>${hourlyRate}</Td>
                   <Td align="right" mono>{cyPerLoad || <span style={{ color: C.inkFaint }}>—</span>}</Td>
                   <Td mono>{fmtClock(sess.started_at)}</Td>
-                  <Td mono>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
+                  <Td align="right" mono style={{ fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
+                  <Td align="right" mono style={{ fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</Td>
                   <Td align="right" mono>{b.pickupCount}</Td>
                   <Td align="right" mono>{b.dropCount}</Td>
                   <Td align="right" mono>{cyToday}</Td>
@@ -13081,6 +13177,9 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
   const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType || sess.truck_type] || 0;
   const cyToday = driverLiveCyForLoadCount(truckType || sess.truck_type, b.pickupCount);
   const status = computeDriverStatus(b, live.issues || []);
+  // 2026-05-31: hourly rate + $ today via the shared helper.
+  const hourlyRate = sessionHourlyRate(sess, trucksById);
+  const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
   const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
     + b.events.filter(e => e.photo_url).length;
   const allPhotosForSess = [
@@ -13292,16 +13391,25 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{metaLine}</div>
 
-        {/* 3-col metrics: shift / CY today / loads X/Y */}
+        {/* 2026-05-31: 3-col metric row. Hours + $ today are the two
+            big primary tiles. Rate sits muted under $. CY + loads
+            demoted to a tighter right column. */}
         <div style={{
           display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
           gap: 8, marginTop: 8,
           fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
-          fontSize: 14, fontWeight: 700, color: C.ink,
+          color: C.ink,
         }}>
-          <span>{fmtElapsed(sess.started_at, null)}</span>
-          <span style={{ textAlign: 'center' }}>{cyToday} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>CY</span></span>
-          <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>Loads</span></span>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, null)}</span>
+          <span style={{ textAlign: 'center' }}>
+            <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
+            <span style={{ display: 'block', color: C.inkFaint, fontWeight: 400, fontSize: 10, marginTop: 1 }}>${hourlyRate}/hr</span>
+          </span>
+          <span style={{ textAlign: 'right', fontSize: 11.5, color: C.inkDim, alignSelf: 'center', lineHeight: 1.4 }}>
+            <span style={{ color: C.ink, fontWeight: 700 }}>{cyToday}</span> CY
+            <span style={{ color: C.inkFaint }}>{' · '}</span>
+            <span style={{ color: C.ink, fontWeight: 700 }}>{b.pickupCount}/{b.dropCount}</span> loads
+          </span>
         </div>
 
         <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontSize: 11 }}>
@@ -13435,18 +13543,24 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           )}
         </div>
 
+        {/* 2026-05-31: hours + $ today now the two BIG primary tiles
+            (left + middle), each in their own bordered cell. CY today
+            stays in the third cell but secondary. Rate sits muted
+            under $ today. STARTED moves into the right cell. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
-          <div>
-            <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
-            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
+          <div style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '8px 10px' }}>
+            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>HOURS</div>
+            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtElapsed(sess.started_at, null)}</div>
           </div>
-          <div>
-            <div style={{ ...T.micro, color: C.inkFaint }}>ELAPSED</div>
-            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{fmtElapsed(sess.started_at, null)}</div>
+          <div style={{ background: C.accentSoft, border: `1px solid ${C.accent}`, borderRadius: R.sm, padding: '8px 10px' }}>
+            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>$ TODAY</div>
+            <div style={{ fontFamily: F.mono, color: C.accent, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtUsd0(dollarsToday)}</div>
+            <div style={{ ...T.micro, color: C.inkDim, fontSize: 10, marginTop: 3 }}>${hourlyRate}/hr</div>
           </div>
-          <div>
-            <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
-            <div style={{ ...T.bodySm, fontFamily: F.mono, color: C.ink, marginTop: 2 }}>{cyToday}</div>
+          <div style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '8px 10px' }}>
+            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>CY TODAY</div>
+            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 16, fontWeight: 700 }}>{cyToday}</div>
+            <div style={{ ...T.micro, color: C.inkDim, fontSize: 10, marginTop: 3 }}>Started {fmtClock(sess.started_at)}</div>
           </div>
         </div>
         <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
@@ -13552,6 +13666,9 @@ function dispatchExportRows(buckets, trucksById) {
     const lastEvStr = b.lastEvent
       ? `${eventLabel(b.lastEvent.event_type)} ${fmtClockShort(b.lastEvent.event_at)}`
       : '—';
+    // 2026-05-31: rate + dollars today via shared helper.
+    const hourlyRate = sessionHourlyRate(sess, trucksById);
+    const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
     return {
       // Hidden helper for PDF section breaks:
       __haulerKey: normalizeHauler(sess.company),
@@ -13565,6 +13682,8 @@ function dispatchExportRows(buckets, trucksById) {
       start: fmtClock(sess.started_at),
       end: sess.ended_at ? fmtClock(sess.ended_at) : '—',
       shiftHours,
+      hourlyRate: '$' + hourlyRate + '/hr',
+      dollarsToday: '$' + dollarsToday.toLocaleString('en-US'),
       pickups: String(b.pickupCount),
       dropoffs: String(b.dropCount),
       cyToday: String(cyToday),
@@ -13592,13 +13711,14 @@ function dispatchFilenameBase(filter) {
 
 function exportDispatchCSV(rows, filter) {
   const headers = ['Driver', 'Company', 'Truck Type', 'Plate', 'Status',
-    'Start Time', 'End Time', 'Shift Hours', 'Pickups', 'Drop-offs',
-    'Total CY Today', 'Last Event', 'Notes'];
+    'Start Time', 'End Time', 'Shift Hours', 'Hourly Rate', '$ Today',
+    'Pickups', 'Drop-offs', 'Total CY Today', 'Last Event', 'Notes'];
   const lines = [headers.map(dispatchCsvEscape).join(',')];
   for (const r of rows) {
     lines.push([
       r.driver, r.company, r.truckType, r.plate, r.status,
-      r.start, r.end, r.shiftHours, r.pickups, r.dropoffs,
+      r.start, r.end, r.shiftHours, r.hourlyRate, r.dollarsToday,
+      r.pickups, r.dropoffs,
       r.cyToday, r.lastEvent, r.notes,
     ].map(dispatchCsvEscape).join(','));
   }
@@ -13723,7 +13843,9 @@ async function exportDispatchPDF(rows, filter) {
   // AutoTable renders these as full-width "header" rows by using a
   // colSpan + custom styling via didParseCell.
   const head = [['Driver', 'Company', 'Truck', 'Plate', 'Status',
-    'Start', 'End', 'Hrs', 'Pickups', 'Drops', 'CY', 'Last Event', 'Notes']];
+    'Start', 'End', 'Hrs', '$/hr', '$ Today', 'Pickups', 'Drops', 'CY',
+    'Last Event', 'Notes']];
+  const COL_COUNT = 15;
   const body = [];
   let lastHaulerKey = null;
   for (const r of rows) {
@@ -13736,7 +13858,7 @@ async function exportDispatchPDF(rows, filter) {
         ) + ' session' + (
           rows.filter(x => x.__haulerKey === r.__haulerKey).length === 1 ? '' : 's'
         ),
-        colSpan: 13,
+        colSpan: COL_COUNT,
         styles: {
           fillColor: JE_GREEN,
           textColor: JE_DARK,
@@ -13750,7 +13872,8 @@ async function exportDispatchPDF(rows, filter) {
     }
     body.push([
       r.driver, r.company, r.truckType, r.plate, r.status,
-      r.start, r.end, r.shiftHours, r.pickups, r.dropoffs,
+      r.start, r.end, r.shiftHours, r.hourlyRate, r.dollarsToday,
+      r.pickups, r.dropoffs,
       r.cyToday, r.lastEvent,
       // Truncate notes for the PDF cell — full text remains in CSV.
       r.notes.length > 80 ? r.notes.slice(0, 77) + '…' : r.notes,
@@ -13779,11 +13902,13 @@ async function exportDispatchPDF(rows, filter) {
       fillColor: STRIPE,
     },
     columnStyles: {
-      4: { halign: 'center' },                          // Status
-      7: { halign: 'right', fontStyle: 'bold' },        // Hours
-      8: { halign: 'right' },                            // Pickups
-      9: { halign: 'right' },                            // Drops
-      10: { halign: 'right', fontStyle: 'bold' },        // CY
+      4: { halign: 'center' },                           // Status
+      7: { halign: 'right', fontStyle: 'bold' },         // Hours
+      8: { halign: 'right' },                             // $/hr
+      9: { halign: 'right', fontStyle: 'bold', textColor: [22, 130, 60] }, // $ Today (green)
+      10: { halign: 'right' },                            // Pickups
+      11: { halign: 'right' },                            // Drops
+      12: { halign: 'right', fontStyle: 'bold' },         // CY
     },
     didDrawPage: (data) => {
       drawHeader(data);
