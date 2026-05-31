@@ -4044,11 +4044,35 @@ function useDriverSessionsLive() {
   // miss in-flight transactions. Self-trigger covers both gaps.
   const fetchAllRef = React.useRef(null);
 
+  // 2026-05-31 (Supabase-ready race fix): the hook used to one-shot
+  // bail when _sb.ready was false at first mount — visible to users
+  // as "Live driver data unavailable — Supabase client not ready"
+  // until they hard-refreshed. Now we POLL the global flag in a
+  // separate effect and flip `sbReady` once the client comes online,
+  // which triggers the main subscribe-and-fetch effect via its dep.
+  // 30s safety timeout still surfaces an error so a permanently
+  // broken client doesn't spin forever.
+  const [sbReady, setSbReady] = React.useState(() => !!(_sb && _sb.ready && _sb.client));
   React.useEffect(() => {
-    if (!_sb.ready || !_sb.client) {
-      setState(s => ({ ...s, loading: false, error: 'Supabase client not ready' }));
-      return () => {};
-    }
+    if (sbReady) return undefined;
+    if (_sb && _sb.ready && _sb.client) { setSbReady(true); return undefined; }
+    const poll = setInterval(() => {
+      if (_sb && _sb.ready && _sb.client) {
+        setSbReady(true);
+        clearInterval(poll);
+      }
+    }, 200);
+    const giveUp = setTimeout(() => {
+      clearInterval(poll);
+      if (!(_sb && _sb.ready && _sb.client)) {
+        setState(s => ({ ...s, loading: false, error: 'Supabase client not ready after 30s' }));
+      }
+    }, 30000);
+    return () => { clearInterval(poll); clearTimeout(giveUp); };
+  }, [sbReady]);
+
+  React.useEffect(() => {
+    if (!sbReady) return () => {};
 
     let cancelled = false;
     const fetchAll = async () => {
@@ -4102,7 +4126,7 @@ function useDriverSessionsLive() {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       try { _sb.client.removeChannel(channel); } catch (e) {}
     };
-  }, []);
+  }, [sbReady]); // re-runs when _sb.ready flips true after first mount
 
   // Force-refetch handle for components that just wrote to the DB and
   // don't want to wait for Realtime to broadcast back. Safe to call any
