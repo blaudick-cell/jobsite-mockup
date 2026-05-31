@@ -4199,42 +4199,44 @@ function driverLiveCyForLoadCount(truckType, pickupCount) {
 // =====================================================================
 // Hourly rate + $ today helpers (2026-05-31)
 // =====================================================================
-// Per-session billing rate lookup. Chain:
-//   1. session.hourly_rate (new nullable override on driver_sessions)
+// Per-session billing rate lookup ("resolveRate"). Chain:
+//   1. session.hourly_rate (nullable override on driver_sessions)
 //   2. matched_truck.ratePerHour (truck-level override)
 //   3. DEFAULT_RATES[truck_type] (JS floor, see line ~703)
 //   4. Industry-standard fallback (90) for truck types not in
 //      DEFAULT_RATES (SIDE, HISIDE, OTHER all fall through here).
+//
+// Every step requires a finite POSITIVE value to count — a 0 or NaN
+// override drops to the next tier instead of leaking through. Without
+// this guard, a session with hourly_rate=0 would display $0 today
+// despite a real shift duration. The floor of 90 is the last-resort
+// industry-standard rate; never returns 0 / null / NaN.
 function sessionHourlyRate(session, trucksById) {
-  if (!session) return 0;
-  if (session.hourly_rate != null && Number.isFinite(Number(session.hourly_rate))) {
-    return Number(session.hourly_rate);
-  }
+  if (!session) return 90;
+  const direct = Number(session.hourly_rate);
+  if (Number.isFinite(direct) && direct > 0) return direct;
   const truck = session.matched_truck_id && trucksById ? trucksById.get(session.matched_truck_id) : null;
-  if (truck && truck.ratePerHour != null && Number.isFinite(Number(truck.ratePerHour))) {
-    return Number(truck.ratePerHour);
+  if (truck) {
+    const truckRate = Number(truck.ratePerHour);
+    if (Number.isFinite(truckRate) && truckRate > 0) return truckRate;
   }
   const tt = session.truck_type || (truck && truck.type);
-  if (tt && DEFAULT_RATES[tt] != null) return DEFAULT_RATES[tt];
+  if (tt && Number.isFinite(DEFAULT_RATES[tt]) && DEFAULT_RATES[tt] > 0) return DEFAULT_RATES[tt];
   return 90;
 }
+// Spec-named alias — both names point at the same function.
+const resolveRate = sessionHourlyRate;
 
-// Today's gross billable dollars for a session. Uses WALL-CLOCK hours
-// (started_at → ended_at OR now) — matches what every card displays
-// via fmtElapsed(startedIso, endedIso) which intentionally ignores
-// event timing. computeShiftHours otherwise capped at last-event for
-// active sessions, which produced confusingly small $ figures (e.g.
-// 14h displayed shift → $109 instead of $1,260). 'events' param is
-// retained for call-site stability but not consulted.
-function sessionDollarsToday(session, _events, trucksById) {
-  if (!session || !session.started_at) return 0;
-  const startMs = new Date(session.started_at).getTime();
-  if (!isFinite(startMs)) return 0;
-  const endMs = session.ended_at && isFinite(new Date(session.ended_at).getTime())
-    ? new Date(session.ended_at).getTime()
-    : Date.now();
-  const hours = Math.max(0, (endMs - startMs) / 3600000);
-  return Math.round(hours * sessionHourlyRate(session, trucksById));
+// Today's gross billable dollars for a session. Defined as
+// computeShiftHours(session).totalHours × sessionHourlyRate(...),
+// rounded. computeShiftHours is the single source of truth for hours
+// across the entire UI (cards, drawer, CSV, PDF, BILLED TODAY tile);
+// any place that wants $ MUST go through this helper so the figures
+// agree byte-for-byte with the displayed shift duration. No events
+// parameter — wall-clock from started_at to (ended_at || now), period.
+function sessionDollarsToday(session, trucksById) {
+  const { totalHours } = computeShiftHours(session);
+  return Math.round(totalHours * sessionHourlyRate(session, trucksById));
 }
 
 function fmtUsd0(n) {
@@ -4306,48 +4308,35 @@ function computeDriverStatus(b, issuesForSession) {
 // =====================================================================
 // computeShiftHours / eventElapsedSeconds / formatShiftDuration
 // =====================================================================
-// 2026-05-30 (Series D): consolidated shift-hours helpers. Every place
-// that displays an elapsed shift time, a per-event elapsed time, or a
-// total session duration MUST route through these so the numbers agree
-// across the AdminActiveTrucks tile, the session drawer header, the
-// drawer event-timeline rows, and the issues-feed rows.
+// 2026-05-31 (single-source rewrite): wall-clock-only shift duration.
+// Defined as (ended_at || now()) - started_at. Every shift-hours
+// display + every $ calculation in the UI funnels through this
+// function — there is no second formula. Previous implementations
+// capped active sessions at "last truck_event.event_at" which made
+// dollars and displayed hours disagree (dollars used wall-clock, the
+// HOURS tile used last-event cap), and worse, two ActiveTruckCard
+// call sites passed null for endedIso so ended sessions kept
+// ticking past their close time (e.g. a 14h ended shift displayed
+// as 30h). Wall-clock is THE definition; idle-detection is handled
+// separately by computeDriverStatus.
 //
-// The driver-side world (driver_sessions + truck_events) is separate from
-// the legacy mockup `db.hours` table — these helpers do NOT replace
-// `calcHours(clockIn, breakMin, clockOut)`, which still scans HH:MM strings
-// on legacy rows. See [[jse-data-model]] for the split.
-//
-// End-anchor precedence inside computeShiftHours:
-//   1. session.ended_at  — shift's been closed
-//   2. last truck_event's event_at — shift active, last activity wins
-//   3. Date.now() — live ticking until first event
-// `currentShiftSeconds` is an integer; `totalHours` is the decimal form.
-function computeShiftHours(session, events) {
+// Return shape kept as { totalHours, currentShiftSeconds } for
+// back-compat with the existing destructuring call sites. lastEventAt
+// was previously included but no caller consumed it, so it's gone.
+function computeShiftHours(session) {
   if (!session || !session.started_at) {
-    return { totalHours: 0, currentShiftSeconds: 0, lastEventAt: null };
+    return { totalHours: 0, currentShiftSeconds: 0 };
   }
   const startMs = new Date(session.started_at).getTime();
-  if (!isFinite(startMs)) {
-    return { totalHours: 0, currentShiftSeconds: 0, lastEventAt: null };
+  if (!Number.isFinite(startMs)) {
+    return { totalHours: 0, currentShiftSeconds: 0 };
   }
-  const endedMs = session.ended_at ? new Date(session.ended_at).getTime() : null;
-  const evList = Array.isArray(events) ? events : [];
-  let lastEv = null;
-  let lastEvMs = -Infinity;
-  for (const e of evList) {
-    if (!e || !e.event_at) continue;
-    const t = new Date(e.event_at).getTime();
-    if (isFinite(t) && t > lastEvMs) { lastEvMs = t; lastEv = e; }
-  }
-  const lastEventAt = lastEv ? lastEv.event_at : null;
-  const endMs = (endedMs != null && isFinite(endedMs))
-    ? endedMs
-    : (lastEv ? lastEvMs : Date.now());
-  const currentShiftSeconds = Math.max(0, Math.floor((endMs - startMs) / 1000));
+  const endedMs = session.ended_at ? new Date(session.ended_at).getTime() : NaN;
+  const endMs = Number.isFinite(endedMs) ? endedMs : Date.now();
+  const ms = Math.max(0, endMs - startMs);
   return {
-    totalHours: currentShiftSeconds / 3600,
-    currentShiftSeconds,
-    lastEventAt,
+    totalHours: ms / 3_600_000,
+    currentShiftSeconds: Math.floor(ms / 1000),
   };
 }
 
@@ -5323,7 +5312,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         }
         if (!coord) continue;
         const status = computeDriverStatus(b, issuesArr);
-        const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
+        const shiftSec = computeShiftHours(sess).currentShiftSeconds;
         out.push({
           id: 'drv-' + sess.id,
           sessionId: sess.id,
@@ -12114,7 +12103,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
   const fmtElapsed = (startedIso, endedIso) => {
     if (!startedIso) return '—';
     const { currentShiftSeconds } = computeShiftHours(
-      { started_at: startedIso, ended_at: endedIso }, []
+      { started_at: startedIso, ended_at: endedIso }
     );
     return formatShiftDuration(currentShiftSeconds);
   };
@@ -12783,7 +12772,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                 <div style={{ ...rowStyle, borderBottom: 'none' }}>
                   <span style={labelStyle}>$ today</span>
                   <span style={{ ...valueStyle, fontFamily: F.mono, color: C.accent, fontWeight: 700 }}>
-                    {fmtUsd0(sessionDollarsToday(sess, drawerBucket.events, trucksById))}
+                    {fmtUsd0(sessionDollarsToday(sess, trucksById))}
                   </span>
                 </div>
               </div>
@@ -12946,7 +12935,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         const cLastEv = endShiftConfirmFor.lastEvent;
         const startedFmt = fmtClock(cs.started_at);
         const startedAgo = formatShiftDuration(
-          computeShiftHours(cs, endShiftConfirmFor.events).currentShiftSeconds
+          computeShiftHours(cs).currentShiftSeconds
         );
         const lastEvFmt = cLastEv ? fmtClock(cLastEv.event_at) : '—';
         const lastEvAgo = cLastEv
@@ -13121,7 +13110,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
         if (!sess || !sess.started_at) continue;
         const startMs = new Date(sess.started_at).getTime();
         if (!isFinite(startMs) || startMs < startOfDayUtcMs) continue;
-        billedToday += sessionDollarsToday(sess, b.events, trucksById);
+        billedToday += sessionDollarsToday(sess, trucksById);
       }
     } catch (e) { /* fall through with 0 */ }
     return { count: rows.length, cyPerLoadCombined, cyHauledToday, billedToday };
@@ -13138,7 +13127,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   const fmtElapsed = (startedIso, endedIso) => {
     if (!startedIso) return '—';
     const { currentShiftSeconds } = computeShiftHours(
-      { started_at: startedIso, ended_at: endedIso }, []
+      { started_at: startedIso, ended_at: endedIso }
     );
     return formatShiftDuration(currentShiftSeconds);
   };
@@ -13160,7 +13149,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     const truckType = truck ? truck.type : sess.truck_type;
     const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
     const isEnded = !!sess.ended_at;
-    const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
+    const shiftSec = computeShiftHours(sess).currentShiftSeconds;
     const isOver8h = !isEnded && shiftSec > 8 * 3600;
     const cyToday = cyPerLoad * b.pickupCount;
     const lastEvStr = b.lastEvent
@@ -13174,7 +13163,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     // 2026-05-31: hourly rate + $ today derived via the shared helper
     // (session.hourly_rate override → truck.ratePerHour → DEFAULT_RATES).
     const hourlyRate = sessionHourlyRate(sess, trucksById);
-    const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
+    const dollarsToday = sessionDollarsToday(sess, trucksById);
     return { b, sess, truckType, cyPerLoad, isEnded, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel, hourlyRate, dollarsToday };
   });
 
@@ -13488,7 +13477,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
   const status = computeDriverStatus(b, live.issues || []);
   // 2026-05-31: hourly rate + $ today via the shared helper.
   const hourlyRate = sessionHourlyRate(sess, trucksById);
-  const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
+  const dollarsToday = sessionDollarsToday(sess, trucksById);
   const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
     + b.events.filter(e => e.photo_url).length;
   const allPhotosForSess = [
@@ -13709,7 +13698,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
           color: C.ink,
         }}>
-          <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, null)}</span>
+          <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
           <span style={{ textAlign: 'center' }}>
             <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
             <span style={{ display: 'block', color: C.inkFaint, fontWeight: 400, fontSize: 10, marginTop: 1 }}>${hourlyRate}/hr</span>
@@ -13859,7 +13848,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
           <div style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '8px 10px' }}>
             <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>HOURS</div>
-            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtElapsed(sess.started_at, null)}</div>
+            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</div>
           </div>
           <div style={{ background: C.accentSoft, border: `1px solid ${C.accent}`, borderRadius: R.sm, padding: '8px 10px' }}>
             <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>$ TODAY</div>
@@ -13968,7 +13957,7 @@ function dispatchExportRows(buckets, trucksById) {
       || '—';
     const company = (sess.company && sess.company.trim()) || 'Unassigned';
     const isOnShift = !sess.ended_at;
-    const { currentShiftSeconds } = computeShiftHours(sess, b.events);
+    const { currentShiftSeconds } = computeShiftHours(sess);
     const shiftHours = (currentShiftSeconds / 3600).toFixed(2);
     const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
     const cyToday = cyPerLoad * b.pickupCount;
@@ -13977,7 +13966,7 @@ function dispatchExportRows(buckets, trucksById) {
       : '—';
     // 2026-05-31: rate + dollars today via shared helper.
     const hourlyRate = sessionHourlyRate(sess, trucksById);
-    const dollarsToday = sessionDollarsToday(sess, b.events, trucksById);
+    const dollarsToday = sessionDollarsToday(sess, trucksById);
     return {
       // Hidden helper for PDF section breaks:
       __haulerKey: normalizeHauler(sess.company),
@@ -14437,7 +14426,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   const fmtElapsed = (startedIso, endedIso) => {
     if (!startedIso) return '—';
     const { currentShiftSeconds } = computeShiftHours(
-      { started_at: startedIso, ended_at: endedIso }, []
+      { started_at: startedIso, ended_at: endedIso }
     );
     return formatShiftDuration(currentShiftSeconds);
   };
@@ -14836,7 +14825,7 @@ function ActiveDriversCapacityStrip({ db, navigate, live: liveProp }) {
     const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
     const loadsDone = b.pickupCount;
     const cyToday   = loadsDone * cyPerLoad;
-    const { currentShiftSeconds } = computeShiftHours(sess, b.events);
+    const { currentShiftSeconds } = computeShiftHours(sess);
     const TARGET_SHIFT = 8 * 3600;
     const remainingSec = Math.max(0, TARGET_SHIFT - currentShiftSeconds);
     let estimatedRemaining;
