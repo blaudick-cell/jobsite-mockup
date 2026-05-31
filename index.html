@@ -4156,6 +4156,62 @@ function driverLiveCyForLoadCount(truckType, pickupCount) {
 }
 
 // =====================================================================
+// computeDriverStatus — colored-strip + status-pill derivation
+// =====================================================================
+// 2026-05-31 (Mobile dispatch redesign): each active driver card on
+// mobile gets a 4px left strip + a status pill. Status is derived
+// from session state + most recent truck_event + open issue_reports.
+//
+// Priority order (highest first):
+//   RED    ISSUE     — an issue_reports row exists for this session,
+//                      OR shift has been open > 12h (stale-shift alarm).
+//   YELLOW IDLE      — shift active but most recent activity is > 30 min
+//                      ago (no events in the last 30 min). Watch this
+//                      driver.
+//   BLUE   EN ROUTE  — shift active AND last event is pickup_load —
+//                      driver is mid-trip between pickup and dropoff.
+//   GREEN  ON SHIFT  — default for any active session (post-dropoff,
+//                      pre-pickup, or just clocked in).
+//   GRAY   ENDED     — session.ended_at is set; not active.
+//
+// Thresholds (documented for tuning later):
+//   IDLE_AFTER_MIN = 30   — minutes since last event before flipping to IDLE
+//   STALE_SHIFT_H  = 12   — hours of open shift before flipping to ISSUE
+function computeDriverStatus(b, issuesForSession) {
+  const sess = b.session;
+  if (sess.ended_at) {
+    return { kind: 'ended', color: '#9A9A9A', soft: 'rgba(255,255,255,0.04)', strip: '#5A5A5A', label: 'Ended' };
+  }
+  const IDLE_AFTER_MIN = 30;
+  const STALE_SHIFT_H = 12;
+  // Open-issue check — any issue_reports row for this session.
+  const hasOpenIssue = Array.isArray(issuesForSession) && issuesForSession.some(i => i.session_id === sess.id);
+  // Stale-shift alarm.
+  const shiftSec = (() => {
+    try {
+      return Math.max(0, Math.floor((Date.now() - new Date(sess.started_at).getTime()) / 1000));
+    } catch (_) { return 0; }
+  })();
+  const isStale = shiftSec > STALE_SHIFT_H * 3600;
+  if (hasOpenIssue || isStale) {
+    return { kind: 'issue', color: '#ef4444', soft: 'rgba(239,68,68,0.12)', strip: '#ef4444', label: 'Issue' };
+  }
+  // Idle: last event > 30 min ago.
+  const lastEv = b.lastEvent;
+  const lastEvMs = lastEv ? (new Date(lastEv.event_at).getTime()) : (new Date(sess.started_at).getTime());
+  const minsSinceLast = (Date.now() - lastEvMs) / 60000;
+  if (minsSinceLast > IDLE_AFTER_MIN) {
+    return { kind: 'idle', color: '#f59e0b', soft: 'rgba(245,158,11,0.12)', strip: '#f59e0b', label: 'Idle' };
+  }
+  // En route: last event is pickup_load.
+  if (lastEv && lastEv.event_type === 'pickup_load') {
+    return { kind: 'enroute', color: '#3b82f6', soft: 'rgba(59,130,246,0.14)', strip: '#3b82f6', label: 'En route' };
+  }
+  // Default — green on shift.
+  return { kind: 'onshift', color: '#22c55e', soft: 'rgba(34,197,94,0.14)', strip: '#22c55e', label: 'On shift' };
+}
+
+// =====================================================================
 // computeShiftHours / eventElapsedSeconds / formatShiftDuration
 // =====================================================================
 // 2026-05-30 (Series D): consolidated shift-hours helpers. Every place
@@ -12651,21 +12707,64 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     return { b, sess, truckType, cyPerLoad, isEnded, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel };
   });
 
+  // 2026-05-31 (Mobile dispatch redesign): truck-type → short label.
+  const truckTypeShortLabel = (tt) => {
+    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                  SIDE: 'Side Dump', HISIDE: 'High Side',
+                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+    return map[tt] || tt || '—';
+  };
+  // Compact last-event blurb for the card footer ("Last: Drop-off 9:57 AM").
+  const compactLastEv = (lastEv) => {
+    if (!lastEv) return 'Just clocked in';
+    const lbl = lastEv.event_type === 'pickup_load' ? 'Pickup'
+              : lastEv.event_type === 'dropoff_load' ? 'Drop-off'
+              : lastEv.event_type === 'end_shift' ? 'End shift'
+              : lastEv.event_type;
+    return `Last: ${lbl} ${fmtClock(lastEv.event_at)}`;
+  };
+  const issuesArr = live.issues || [];
+
   return (
     <>
+      {/* 2026-05-31 (Mobile dispatch redesign):
+            • Desktop: existing "Active drivers · 3 active · 56 CY/load
+              combined · 68 CY hauled today" inline row (one-liner).
+            • Mobile: stacked sticky 3-card stat row with big numerals,
+              renders just below the screen header and stays visible
+              while scrolling the card list. */}
+      {showCapacitySummary && rows.length > 0 && isMobile && (
+        <div className="jse-stat-cards-sticky" style={{
+          position: 'sticky', top: 0, zIndex: 30,
+          background: C.bg,
+          paddingTop: 4, paddingBottom: 8, marginBottom: 8,
+          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+        }}>
+          {[
+            { n: capacitySummary.count, label: 'Active drivers', color: C.ok },
+            { n: capacitySummary.cyPerLoadCombined, label: 'Capacity CY', color: C.accent },
+            { n: capacitySummary.cyHauledToday, label: 'Hauled today', color: C.ink },
+          ].map(s => (
+            <div key={s.label} style={{
+              background: C.surface, border: `1px solid ${C.rule}`,
+              borderRadius: R.md, padding: '8px 6px', textAlign: 'center',
+            }}>
+              <div style={{ ...T.h2, fontWeight: 800, color: s.color, lineHeight: 1, fontFamily: F.mono, letterSpacing: -0.5 }}>{s.n}</div>
+              <div style={{ ...T.micro, color: C.inkFaint, marginTop: 4, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 9.5 }}>{s.label}</div>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="jse-capacity-summary-row" style={{
         marginBottom: S[3],
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
         gap: S[3], flexWrap: 'wrap',
       }}>
         <Label>{sectionLabel}</Label>
-        {/* 2026-05-30: capacity-summary header (originally on the
-            standalone Active Drivers capacity strip). Folded in so
-            "X drivers active · Y CY/load combined · Z CY hauled today"
-            sits right next to the table on Hauling Overview. On mobile
-            this row stacks via the .jse-capacity-summary-row CSS. */}
+        {/* Desktop inline capacity summary (hidden on mobile since the
+            sticky cards above replace it). */}
         {showCapacitySummary && rows.length > 0 && (
-          <div className="jse-capacity-summary-stats" style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
+          <div className="jse-capacity-summary-stats jse-hide-mobile" style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
             <span><span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.count}</span> driver{capacitySummary.count === 1 ? '' : 's'} active</span>
             <span><span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyPerLoadCombined}</span> CY/load combined</span>
             <span><span style={{ color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyHauledToday}</span> CY hauled today</span>
@@ -12691,70 +12790,80 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
           </div>
         </Card>
       ) : isMobile ? (
-        /* 2026-05-30 (Mobile pass): wide tables don't fit phone
-           viewports. On mobile we stack each row as a vertical card
-           with labeled fields. Same data, scannable shape, no
-           horizontal scroll. Card click still opens the drawer. */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: S[2], marginBottom: S[5] }}>
-          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel }) => (
-            <Card key={sess.id} padding={S[3]} style={{
-              cursor: 'pointer',
-              background: isOver8h ? 'rgba(239,68,68,0.06)' : undefined,
-            }}>
-              <div onClick={() => setDrawerSessionId(sess.id)}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
-                      {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
-                    </div>
-                    <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-                      {sess.company || <span style={{ color: C.inkFaint }}>— unassigned</span>}
-                    </div>
-                  </div>
-                  <Pill color={statusColor} soft={statusSoft}>{statusLabel}</Pill>
-                </div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: '8px 12px',
-                  marginTop: S[2], paddingTop: S[2],
-                  borderTop: `1px solid ${C.rule}`,
-                  fontSize: 12,
+        /* 2026-05-31 (Mobile dispatch redesign): tight card per row.
+           4px left status strip, large name, single-line meta (company
+           · truck · CY/load), 3-col metrics row (shift / CY today /
+           loads X/Y), one-line footer ("Last: …"). Tap → drawer. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: S[5] }}>
+          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, cyToday }) => {
+            const status = computeDriverStatus(b, issuesArr);
+            const companyMetaLine = [
+              sess.company || '— unassigned',
+              truckTypeShortLabel(truckType),
+              `${cyPerLoad} CY/load`,
+            ].join(' • ');
+            return (
+              <div
+                key={sess.id}
+                onClick={() => setDrawerSessionId(sess.id)}
+                style={{
+                  cursor: 'pointer',
+                  background: C.surface,
+                  border: `1px solid ${C.rule}`,
+                  borderLeft: `4px solid ${status.strip}`,
+                  borderRadius: R.md,
+                  padding: '10px 14px',
                 }}>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>TRUCK</div>
-                    <div style={{ ...T.bodySm, color: C.ink, marginTop: 2 }}>
-                      <span style={{ fontFamily: F.mono }}>{truckType || '—'}</span>
-                      <span style={{ color: C.accent, marginLeft: 6, fontFamily: F.mono, fontWeight: 700 }}>{cyPerLoad}</span>
-                      <span style={{ color: C.inkDim, fontSize: 11 }}> CY/load</span>
-                    </div>
+                {/* Top row: driver name (large, left) + status pill (right) */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{
+                    ...T.body,
+                    fontFamily: F.display,
+                    fontSize: 16, fontWeight: 700,
+                    color: C.ink, lineHeight: 1.15,
+                    letterSpacing: -0.2,
+                    minWidth: 0,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}
                   </div>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
-                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
-                  </div>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>SHIFT TIME</div>
-                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</div>
-                  </div>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
-                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700, marginTop: 2 }}>{cyToday}</div>
-                  </div>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>LOADS</div>
-                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>
-                      {b.pickupCount} pickup · {b.dropCount} drop
-                    </div>
-                  </div>
-                  <div>
-                    <div style={{ ...T.micro, color: C.inkFaint }}>LAST EVENT</div>
-                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, fontSize: 11.5 }}>{lastEvStr}</div>
-                  </div>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: R.pill,
+                    background: status.soft, color: status.color,
+                    border: `1px solid ${status.color}`,
+                    fontFamily: F.mono, fontSize: 9.5,
+                    fontWeight: 700, letterSpacing: 0.5,
+                    textTransform: 'uppercase', flexShrink: 0,
+                    lineHeight: 1.4,
+                  }}>{status.label}</span>
+                </div>
+
+                {/* Company • Truck • CY/load — single line meta */}
+                <div style={{
+                  ...T.caption, color: C.inkDim, marginTop: 3,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  fontSize: 11.5,
+                }}>{companyMetaLine}</div>
+
+                {/* 3-col metrics row: shift / CY today / loads */}
+                <div style={{
+                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+                  gap: 8, marginTop: 8,
+                  fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
+                  fontSize: 14, fontWeight: 700, color: C.ink,
+                }}>
+                  <span>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+                  <span style={{ textAlign: 'center' }}>{cyToday} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>CY</span></span>
+                  <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>Loads</span></span>
+                </div>
+
+                {/* Last event footer */}
+                <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontSize: 11 }}>
+                  {compactLastEv(b.lastEvent)}
                 </div>
               </div>
-            </Card>
-          ))}
+            );
+          })}
         </div>
       ) : (
         <Card padding={0} style={{ marginBottom: S[5] }}>
@@ -12823,10 +12932,13 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
 // an audit line to dispatcher_notes.
 function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElapsed, eventLabel, eventColor }) {
   const sess = b.session;
+  const isMobile = useIsMobile();
   const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
   const truckType = truck ? truck.type : null;
   const truckPlate = truck ? truck.plate : null;
+  const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType || sess.truck_type] || 0;
   const cyToday = driverLiveCyForLoadCount(truckType || sess.truck_type, b.pickupCount);
+  const status = computeDriverStatus(b, live.issues || []);
   const photoCount = (live.photos || []).filter(p => p.session_id === sess.id).length
     + b.events.filter(e => e.photo_url).length;
   const allPhotosForSess = [
@@ -12893,6 +13005,135 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElaps
                    : companyFlash === 'error' ? C.warn
                    : companyFlash === 'saving' ? C.inkDim : null;
   const flashLabel = companyFlash === 'saved' ? '✓' : companyFlash === 'error' ? '✗' : '…';
+
+  // 2026-05-31 (Mobile dispatch redesign): on mobile, render the
+  // compact dispatch-first card (4px left status strip, big name +
+  // status pill, single-line meta, 3-col metrics, last-event footer).
+  // Desktop keeps the existing expanded layout intact.
+  if (isMobile) {
+    const truckTypeShort = (tt) => {
+      const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                    SIDE: 'Side Dump', HISIDE: 'High Side',
+                    BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+      return map[tt] || tt || '—';
+    };
+    const lastEvBlurb = b.lastEvent
+      ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)}`
+      : 'Just clocked in';
+    const metaLine = [
+      truckPlate ? '#' + truckPlate : null,
+      truckTypeShort(truckType || sess.truck_type),
+      `${cyPerLoad} CY/load`,
+    ].filter(Boolean).join(' • ');
+    return (
+      <div
+        onClick={() => onOpenDrawer()}
+        style={{
+          cursor: 'pointer',
+          background: C.surface,
+          border: `1px solid ${C.rule}`,
+          borderLeft: `4px solid ${status.strip}`,
+          borderRadius: R.md,
+          padding: '10px 14px',
+        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+          <div style={{
+            ...T.body, fontFamily: F.display, fontSize: 16, fontWeight: 700,
+            color: C.ink, lineHeight: 1.15, letterSpacing: -0.2,
+            minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            {mostRecentPhoto && (
+              <img
+                src={mostRecentPhoto.photo_url}
+                alt="Latest event photo"
+                onClick={(e) => { e.stopPropagation(); onOpenDrawer(mostRecentPhoto.event_id); }}
+                style={{
+                  width: 28, height: 28, objectFit: 'cover',
+                  borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
+                  cursor: 'pointer',
+                }}
+              />
+            )}
+            <span style={{
+              padding: '2px 8px', borderRadius: R.pill,
+              background: status.soft, color: status.color,
+              border: `1px solid ${status.color}`,
+              fontFamily: F.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
+              textTransform: 'uppercase', lineHeight: 1.4,
+            }}>{status.label}</span>
+          </div>
+        </div>
+
+        {/* Hauler chip — tappable on its own, doesn't open drawer. */}
+        <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 4 }}>
+          {!companyEditing ? (
+            <button
+              type="button"
+              onClick={() => { setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '1px 8px', borderRadius: R.pill,
+                background: chipBg, color: chipColor, border: `1px solid ${chipBorder}`,
+                fontFamily: F.mono, fontSize: 10, fontWeight: 700,
+                letterSpacing: 0.4, textTransform: 'uppercase',
+                cursor: 'pointer', lineHeight: 1.5,
+              }}>
+              {sess.company || 'Unassigned'}
+              <span aria-hidden="true" style={{ opacity: 0.6 }}>✎</span>
+              {flashColor && <span style={{ color: flashColor }}>{flashLabel}</span>}
+            </button>
+          ) : (
+            <>
+              <input
+                autoFocus list={datalistId} value={companyDraft}
+                onChange={(e) => setCompanyDraft(e.target.value)}
+                onBlur={saveCompany}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
+                  else if (e.key === 'Enter') { e.currentTarget.blur(); }
+                }}
+                placeholder="Hauler / company"
+                style={{
+                  width: '100%', maxWidth: 240,
+                  background: C.surface, color: C.ink,
+                  border: `1px solid ${C.accent}`, borderRadius: R.pill,
+                  padding: '4px 12px', fontFamily: F.mono, fontSize: 11,
+                  letterSpacing: 0.3, outline: 'none',
+                }} />
+              <datalist id={datalistId}>
+                {knownCompanies.map(c => <option key={c} value={c} />)}
+              </datalist>
+            </>
+          )}
+        </div>
+
+        {/* Single-line meta: plate • truck type • CY/load */}
+        <div style={{
+          ...T.caption, color: C.inkDim, marginTop: 4, fontSize: 11.5,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>{metaLine}</div>
+
+        {/* 3-col metrics: shift / CY today / loads X/Y */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
+          gap: 8, marginTop: 8,
+          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
+          fontSize: 14, fontWeight: 700, color: C.ink,
+        }}>
+          <span>{fmtElapsed(sess.started_at, null)}</span>
+          <span style={{ textAlign: 'center' }}>{cyToday} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>CY</span></span>
+          <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} <span style={{ color: C.inkDim, fontWeight: 400, fontSize: 11 }}>Loads</span></span>
+        </div>
+
+        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontSize: 11 }}>
+          {lastEvBlurb}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card padding={S[4]} style={{ cursor: 'pointer' }}>
