@@ -13008,53 +13008,54 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                 </div>
 
                 {/* ── TIME ── */}
-                {/* 2026-05-31 (quick-select): "Set to first/last activity"
-                    one-tap buttons under Start + End. Robert"s common
-                    case: driver forgets to clock out, shift balloons to
-                    41h. Last real activity (8:27 AM Pickup) is the true
-                    end. Picker stays as a fallback for manual edits. */}
-                {(() => { /* compute candidates + render the time block */
+                {/* 2026-05-31 (quick-select): "Set to last activity" chip
+                    below the End time. Most common dispatcher correction:
+                    driver forgets to clock out, shift balloons to 41h;
+                    one tap snaps ended_at to the most recent truck_event.
+                    The matching "Set to first activity" link for Start
+                    was dropped — drivers" first pickup is usually right,
+                    so the affordance wasn"t earning its visual weight.
+                    Native datetime-local picker stays as the manual
+                    fallback for unusual edits. iOS sandboxes the native
+                    picker popup; the chip lives in the drawer chrome
+                    because Safari doesn"t let third parties inject
+                    buttons inside the OS sheet. */}
+                {(() => {
                   const evList = drawerBucket.events;
-                  const firstEv = evList.length > 0 ? evList[0] : null;
-                  const lastEv  = evList.length > 0 ? evList[evList.length - 1] : null;
-                  const quickSetStyle = {
-                    background: 'transparent',
-                    color: C.accent,
-                    border: 'none',
-                    padding: '2px 4px',
-                    fontFamily: F.body,
-                    fontSize: 11,
-                    cursor: 'pointer',
-                    outline: 'none',
-                    textAlign: 'right',
-                    whiteSpace: 'nowrap',
-                  };
+                  const lastEv = evList.length > 0 ? evList[evList.length - 1] : null;
                   const applyEventTimestamp = (fieldKey, fieldLabel, ev) => {
                     if (!ev || !ev.event_at) return;
                     const currentValue = sess[fieldKey];
                     if (currentValue === ev.event_at) return;
                     saveSessionField(fieldKey, ev.event_at, currentValue, fieldLabel);
                   };
-                  const showStartQuick = firstEv && firstEv.event_at && firstEv.event_at !== sess.started_at;
-                  const showEndQuick   = lastEv  && lastEv.event_at;
+                  const showEndQuick = lastEv && lastEv.event_at && lastEv.event_at !== sess.ended_at;
+                  // Chip styling — primary affordance, not a footnote.
+                  // Same accent-soft + accent border as the company chip
+                  // on driver cards so dispatchers recognize "this is the
+                  // one-tap fix" without thinking.
+                  const quickChipStyle = {
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: C.accentSoft, color: C.accent,
+                    border: `1px solid ${C.accent}`,
+                    borderRadius: R.pill,
+                    padding: '5px 12px',
+                    fontFamily: F.mono, fontSize: 11.5, fontWeight: 700,
+                    letterSpacing: 0.3,
+                    cursor: 'pointer', outline: 'none',
+                    whiteSpace: 'nowrap',
+                    marginTop: 4,
+                  };
                   return (
                     <>
                       <div style={sectionLabelStyle}>Time</div>
                       <div style={rowStyle}>
                         <span style={labelStyle}>Start</span>
-                        <span style={{ ...valueStyle, display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, fontFamily: F.mono }}>
+                        <span style={{ ...valueStyle, fontFamily: F.mono }}>
                           <MetaField fieldKey="started_at" fieldLabel="start time"
                             value={sess.started_at}
                             displayValue={`${fmtClock(sess.started_at)} MT`}
                             type="datetime" />
-                          {showStartQuick && (
-                            <button type="button"
-                              onClick={() => applyEventTimestamp('started_at', 'start time', firstEv)}
-                              title="Set start time to the first event"
-                              style={quickSetStyle}>
-                              Set to first activity → {fmtClock(firstEv.event_at)} {fmtMtDate(firstEv.event_at)} ({eventLabel(firstEv.event_type)})
-                            </button>
-                          )}
                         </span>
                       </div>
                       <div style={rowStyle}>
@@ -13063,21 +13064,24 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                       </div>
                       <div style={rowStyle}>
                         <span style={labelStyle}>End</span>
-                        <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic', display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                        <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
                           <MetaField fieldKey="ended_at" fieldLabel="end time"
                             value={sess.ended_at}
                             displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
                             type="datetime" />
-                          {showEndQuick && (
-                            <button type="button"
-                              onClick={() => applyEventTimestamp('ended_at', 'end time', lastEv)}
-                              title="Set end time to the most recent event"
-                              style={quickSetStyle}>
-                              Set to last activity → {fmtClock(lastEv.event_at)} {fmtMtDate(lastEv.event_at)} ({eventLabel(lastEv.event_type)})
-                            </button>
-                          )}
                         </span>
                       </div>
+                      {showEndQuick && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: S[2] }}>
+                          <button type="button"
+                            onClick={() => applyEventTimestamp('ended_at', 'end time', lastEv)}
+                            title="Snap end time to the most recent event"
+                            style={quickChipStyle}>
+                            <span aria-hidden="true">↻</span>
+                            <span>Set to last activity · {fmtClock(lastEv.event_at)} {fmtMtDate(lastEv.event_at)} ({eventLabel(lastEv.event_type)})</span>
+                          </button>
+                        </div>
+                      )}
                     </>
                   );
                 })()}
