@@ -10147,7 +10147,7 @@ function AdminHaulers({ db, setDb, navigate }) {
         </div>
         <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
           <Btn variant="secondary" size="sm" onClick={() => window.alert('TODO: invite-carrier modal')}>Invite carrier</Btn>
-          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/trucks/active')}>Dispatch board</Btn>
+          <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/dispatch')}>Dispatch board</Btn>
           <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ Add hauler</Btn>
         </div>
       </div>
@@ -13072,7 +13072,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
 // inline company-edit chip can hold local state without churning the
 // parent on every keystroke. PATCHes driver_sessions.company + appends
 // an audit line to dispatcher_notes.
-function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElapsed, eventLabel, eventColor }) {
+function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, fmtClock, fmtElapsed, eventLabel, eventColor }) {
   const sess = b.session;
   const isMobile = useIsMobile();
   const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
@@ -13206,6 +13206,40 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElaps
               fontFamily: F.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
               textTransform: 'uppercase', lineHeight: 1.4,
             }}>{status.label}</span>
+            {/* 2026-05-31: per-card Edit + Delete icon buttons. Both
+                stopPropagation so card-level drawer-open doesn't double
+                fire. Compact 24x24 to fit the mobile card. */}
+            {onEdit && (
+              <button
+                type="button"
+                aria-label="Edit session"
+                title="Edit session"
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                style={{
+                  width: 24, height: 24, borderRadius: R.sm,
+                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                  color: C.inkDim, cursor: 'pointer', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, lineHeight: 1,
+                }}>✎</button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                aria-label="Delete session"
+                title="Delete session"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                style={{
+                  width: 24, height: 24, borderRadius: R.sm,
+                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                  color: C.inkDim, cursor: 'pointer', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 12, lineHeight: 1,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+              >🗑</button>
+            )}
           </div>
         </div>
 
@@ -13304,7 +13338,51 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, fmtClock, fmtElaps
                 }}
               />
             )}
-            <Pill color={C.ok} soft={C.okSoft}>On shift</Pill>
+            {/* 2026-05-31: status pill now derives from
+                computeDriverStatus so 'Ended' / 'Idle' / 'En route' /
+                'Issue' all surface alongside 'On shift'. */}
+            <span style={{
+              padding: '2px 8px', borderRadius: R.pill,
+              background: status.soft, color: status.color,
+              border: `1px solid ${status.color}`,
+              fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
+              textTransform: 'uppercase', lineHeight: 1.4,
+            }}>{status.label}</span>
+            {/* 2026-05-31: per-card Edit + Delete icon buttons. */}
+            {onEdit && (
+              <button
+                type="button"
+                aria-label="Edit session"
+                title="Edit session"
+                onClick={(e) => { e.stopPropagation(); onEdit(); }}
+                style={{
+                  width: 28, height: 28, borderRadius: R.sm,
+                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                  color: C.inkDim, cursor: 'pointer', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, lineHeight: 1,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+              >✎</button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                aria-label="Delete session"
+                title="Delete session"
+                onClick={(e) => { e.stopPropagation(); onDelete(); }}
+                style={{
+                  width: 28, height: 28, borderRadius: R.sm,
+                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                  color: C.inkDim, cursor: 'pointer', padding: 0,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, lineHeight: 1,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+              >🗑</button>
+            )}
           </div>
         </div>
 
@@ -13420,12 +13498,50 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
     return m;
   }, [allTrucks]);
 
+  // 2026-05-31 (Dispatch rename + filters): three-way segmented filter
+  // above the hauler-grouped grid. Declared HERE — above filteredBuckets
+  // — so the JS Temporal Dead Zone doesn't bite the useMemo.
+  const [dispatchFilter, setDispatchFilter] = React.useState('on_shift');
+
   // Active sessions = ended_at IS NULL. Sort newest-started first.
+  // 2026-05-31: KPI strip + the idle-trucks calculation still use
+  // ACTIVE sessions only; the new filter pill governs the card-grid
+  // content below, but the at-a-glance KPI numbers stay scoped to
+  // "right now".
   const activeBuckets = React.useMemo(() => {
     return (live.buckets || [])
       .filter(b => b.session && !b.session.ended_at)
       .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
   }, [live.buckets]);
+
+  // 2026-05-31: filter-aware bucket list that feeds the hauler-grouped
+  // card grid. on_shift = ended_at NULL (current default); off_shift =
+  // ended_at NOT NULL (review / correct mis-clocked shifts); all =
+  // every session, on-shift first then off-shift, each section newest
+  // first.
+  const filteredBuckets = React.useMemo(() => {
+    const all = (live.buckets || []).slice();
+    if (dispatchFilter === 'on_shift') {
+      return all
+        .filter(b => b.session && !b.session.ended_at)
+        .sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+    }
+    if (dispatchFilter === 'off_shift') {
+      return all
+        .filter(b => b.session && b.session.ended_at)
+        .sort((a, b) => String(b.session.ended_at || '').localeCompare(String(a.session.ended_at || '')));
+    }
+    // 'all': on-shift first (newest), then off-shift (most-recently
+    // ended). Mixed sort by !ended_at then started_at desc.
+    return all
+      .filter(b => b.session)
+      .sort((a, b) => {
+        const aEnd = a.session.ended_at ? 1 : 0;
+        const bEnd = b.session.ended_at ? 1 : 0;
+        if (aEnd !== bEnd) return aEnd - bEnd;
+        return String(b.session.started_at || '').localeCompare(String(a.session.started_at || ''));
+      });
+  }, [live.buckets, dispatchFilter]);
 
   // "Idle" = a truck whose admin-assigned driverId exists but no active
   // session right now. Useful so dispatch can see "this truck is staffed
@@ -13453,6 +13569,71 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
     setDrawerSessionId(null);
     setDrawerScrollEventId(null);
   }, []);
+
+  // 2026-05-31 (Dispatch rename + filters):
+  // dispatchFilter state lives above filteredBuckets (declared earlier
+  // in this function so the useMemo can read it without TDZ errors).
+  // Delete-confirmation modal state. Holds the bucket whose session
+  // is being deleted; null when no modal is open.
+  const [deleteConfirmFor, setDeleteConfirmFor] = React.useState(null);
+  const [deleteInFlight, setDeleteInFlight] = React.useState(false);
+  const [dispatchFlash, setDispatchFlash] = React.useState(null);
+
+  async function deleteSession(bucket) {
+    if (!bucket || !bucket.session) return;
+    const sess = bucket.session;
+    if (!_sb.ready || !_sb.client) {
+      setDispatchFlash({ text: 'Supabase client not ready — can\'t delete', kind: 'error' });
+      setTimeout(() => setDispatchFlash(null), 6000);
+      return;
+    }
+    setDeleteInFlight(true);
+    try {
+      // FK cascades verified on 2026-05-31: truck_events, event_photos,
+      // and issue_reports all carry ON DELETE CASCADE on session_id,
+      // so a single DELETE on driver_sessions purges every child row.
+      const { error } = await _sb.client.from('driver_sessions').delete().eq('id', sess.id);
+      if (error) throw new Error('driver_sessions delete: ' + (error.message || error));
+      // Append to admin Activity Feed via the existing appendActivity
+      // composer. We log the driver name + the started_at clock + a
+      // human-readable date so the audit row is meaningful after the
+      // row itself is gone from driver_sessions.
+      const startedClock = (() => {
+        try {
+          return new Date(sess.started_at).toLocaleString('en-US', {
+            timeZone: 'America/Denver', month: 'short', day: 'numeric',
+            hour: 'numeric', minute: '2-digit',
+          });
+        } catch (e) { return sess.started_at || 'unknown'; }
+      })();
+      setDb(prev => appendActivity(prev, {
+        type: 'session.deleted',
+        actorRole: 'admin', actorId: null,
+        summary: `Admin deleted driver session for ${sess.driver_name || 'unknown driver'} (started ${startedClock} MT)`,
+        refId: null,
+      }));
+      // Force refresh of the live hook (Realtime DELETE will also fire,
+      // but the refetch is instant for the clicking user).
+      if (live && typeof live.refetch === 'function') live.refetch();
+      setDispatchFlash({
+        text: 'Session deleted for ' + (sess.driver_name || 'driver') + '.',
+        kind: 'ok',
+      });
+      setDeleteConfirmFor(null);
+      // Close the drawer too if it happened to be on this session.
+      if (drawerSessionId === sess.id) closeDrawer();
+      setTimeout(() => setDispatchFlash(null), 4000);
+    } catch (e) {
+      console.warn('[Dispatch] deleteSession', e);
+      setDispatchFlash({
+        text: 'Delete failed — ' + String((e && e.message) || e),
+        kind: 'error',
+      });
+      setTimeout(() => setDispatchFlash(null), 6000);
+    } finally {
+      setDeleteInFlight(false);
+    }
+  }
 
   // Format helpers — local to keep the component self-contained.
   // 2026-05-30 (Series D): thin wrapper around computeShiftHours +
@@ -13485,57 +13666,93 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Active Trucks' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch' }]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Active Trucks</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>What every driver sees, right now.</h1>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Dispatch</Label>
+          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Every driver, every shift.</h1>
           <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
             {live.loading ? 'Loading live driver data…'
               : live.error ? <span style={{ color: C.warn }}>Live data unavailable — {live.error}</span>
-              : 'Live session data from the field widget. Click any session for the event timeline.'}
+              : 'Live session data from the field widget. Filter to on-shift / off-shift / all, click a card for the event timeline, or use the row icons to edit or delete a session.'}
           </div>
         </div>
-        {/* 2026-05-30 (Commit D): End-Shift flash banner moved INTO the
-            shared DriverSessionDrawer so the success/error feedback
-            renders inside the drawer where the action originates. */}
+        {/* 2026-05-31: ephemeral flash for delete-action feedback. */}
+        {dispatchFlash && (
+          <div style={{
+            ...T.caption, fontWeight: 700, letterSpacing: 0.3,
+            padding: '8px 14px', borderRadius: R.pill,
+            background: dispatchFlash.kind === 'error' ? C.warnSoft : C.accentSoft,
+            color: dispatchFlash.kind === 'error' ? C.warn : C.accent,
+            border: '1px solid ' + (dispatchFlash.kind === 'error' ? C.warn : C.accent),
+            maxWidth: 420,
+          }}>{dispatchFlash.text}</div>
+        )}
       </div>
 
-      <div className="jse-active-trucks-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
+      <div className="jse-active-trucks-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[4] }}>
         <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="shift in progress" /></Card>
         <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not on shift" /></Card>
         <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
       </div>
 
-      {activeCount === 0 ? (
+      {/* 2026-05-31: filter pills. Default 'on_shift' preserves the
+          old Active-Trucks behaviour; flip to 'all' or 'off_shift' to
+          review history + correct mis-clocked sessions. Single-select. */}
+      {(() => {
+        const onShiftCount = (live.buckets || []).filter(b => b.session && !b.session.ended_at).length;
+        const offShiftCount = (live.buckets || []).filter(b => b.session && b.session.ended_at).length;
+        const totalCount = onShiftCount + offShiftCount;
+        const pill = (active) => ({
+          ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          padding: '6px 14px', borderRadius: R.pill,
+          border: `1px solid ${active ? C.accent : C.ruleHi}`,
+          background: active ? C.accentSoft : 'transparent',
+          color: active ? C.accent : C.inkDim,
+          cursor: 'pointer', outline: 'none',
+        });
+        return (
+          <div style={{
+            display: 'inline-flex', gap: 4, padding: 2,
+            background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+            marginBottom: S[4],
+          }}>
+            <button type="button" onClick={() => setDispatchFilter('on_shift')} style={pill(dispatchFilter === 'on_shift')}>
+              On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
+            </button>
+            <button type="button" onClick={() => setDispatchFilter('off_shift')} style={pill(dispatchFilter === 'off_shift')}>
+              Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
+            </button>
+            <button type="button" onClick={() => setDispatchFilter('all')} style={pill(dispatchFilter === 'all')}>
+              All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+            </button>
+          </div>
+        );
+      })()}
+
+      {filteredBuckets.length === 0 ? (
         <Card padding={S[5]} style={{ textAlign: 'center' }}>
           <div style={{ ...T.bodySm, color: C.inkDim }}>
-            {live.loading ? 'Loading…' : 'No drivers on shift right now. Once a driver clocks in via the field widget their session will appear here.'}
+            {live.loading ? 'Loading…'
+              : dispatchFilter === 'on_shift' ? 'No drivers on shift right now. Once a driver clocks in via the field widget their session will appear here.'
+              : dispatchFilter === 'off_shift' ? 'No off-shift sessions in the live store.'
+              : 'No driver sessions in the live store yet.'}
           </div>
         </Card>
       ) : (() => {
-        // 2026-05-30 (Hauler grouping): bucket activeBuckets by
+        // 2026-05-30 (Hauler grouping): bucket filteredBuckets by
         // session.company. Unassigned sinks to the bottom; the rest
-        // sort alphabetically. Each card carries an inline-edit chip
-        // to set/change the company. Editing PATCHes driver_sessions
-        // + appends an audit line to dispatcher_notes (same pattern
-        // as the drawer-level edits).
-        //
-        // 2026-05-30 (hauler grouping fix): the grouping key was the
-        // raw company string, so 'J&C' and 'j&c' (or 'Z&Z Hauling' and
-        // 'Z&Z  hauling' with a double space) rendered as two separate
-        // sections each with 1 driver instead of one merged section
-        // with 2. Normalize for the KEY only — trim + collapse runs of
-        // whitespace + uppercase. The displayed header uses the first
-        // non-empty original casing in the group so we still see
-        // 'J&C' rather than 'J&C' shouting in all-caps.
+        // sort alphabetically. The grouping key normalizes whitespace
+        // + case so 'J&C' and 'j&c' don't render as two sections.
+        // Display label preserves the first non-empty original casing.
         const normalizeHaulerKey = (s) => {
           if (s == null) return '__unassigned__';
           const cleaned = String(s).trim().replace(/\s+/g, ' ');
           return cleaned ? cleaned.toUpperCase() : '__unassigned__';
         };
         const grouped = new Map();
-        for (const b of activeBuckets) {
+        for (const b of filteredBuckets) {
           const key = normalizeHaulerKey(b.session.company);
           if (!grouped.has(key)) grouped.set(key, []);
           grouped.get(key).push(b);
@@ -13544,13 +13761,19 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           .filter(k => k !== '__unassigned__')
           .sort((a, b) => a.localeCompare(b));
         if (grouped.has('__unassigned__')) groupNames.push('__unassigned__');
+        // 2026-05-31: count label reflects the filter — "active" while
+        // on-shift, "completed" while off-shift, "session(s)" for the
+        // mixed 'all' view.
+        const countLabel = (n) => {
+          if (dispatchFilter === 'off_shift') return `${n} completed`;
+          if (dispatchFilter === 'on_shift')  return `${n} active`;
+          return `${n} session${n === 1 ? '' : 's'}`;
+        };
         return (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
             {groupNames.map(key => {
               const cards = grouped.get(key);
               const isUnassigned = key === '__unassigned__';
-              // Display label = first non-empty original casing in the
-              // group (preserves 'J&C' / 'Z&Z hauling' over shouting all-caps).
               const originalDisplay = !isUnassigned
                 ? (cards.find(b => b.session.company && b.session.company.trim()) || cards[0]).session.company.trim()
                 : 'Unassigned';
@@ -13567,7 +13790,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                       {headerLabel}
                     </div>
                     <div style={{ ...T.caption, color: C.inkDim }}>
-                      {cards.length} active
+                      {countLabel(cards.length)}
                     </div>
                   </div>
                   <div className="jse-active-trucks-grid" style={{
@@ -13585,6 +13808,11 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                           setDrawerScrollEventId(eventId || null);
                           setDrawerSessionId(b.session.id);
                         }}
+                        onEdit={() => {
+                          setDrawerScrollEventId(null);
+                          setDrawerSessionId(b.session.id);
+                        }}
+                        onDelete={() => setDeleteConfirmFor(b)}
                         fmtClock={fmtClock}
                         fmtElapsed={fmtElapsed}
                         eventLabel={eventLabel}
@@ -13641,6 +13869,81 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           live={live}
         />
       )}
+
+      {/* 2026-05-31: delete-session confirmation modal. Sits on its
+          own z-layer so it overlays drawer + page chrome. Cascade
+          rules on driver_sessions FKs purge truck_events,
+          event_photos, and issue_reports automatically. */}
+      {deleteConfirmFor && (() => {
+        const cs = deleteConfirmFor.session;
+        const startedFmt = (() => {
+          try { return new Date(cs.started_at).toLocaleString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+          catch (e) { return cs.started_at || '—'; }
+        })();
+        const evCount = deleteConfirmFor.events ? deleteConfirmFor.events.length : 0;
+        return (
+          <div
+            role="dialog" aria-modal="true"
+            aria-label={`Confirm deleting session for ${cs.driver_name || 'driver'}`}
+            onClick={(e) => { if (!deleteInFlight && e.target === e.currentTarget) setDeleteConfirmFor(null); }}
+            style={{
+              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 500,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4],
+            }}>
+            <div onClick={e => e.stopPropagation()} tabIndex={-1}
+              style={{
+                background: C.bg, borderRadius: R.lg,
+                width: 'min(480px, 100%)', maxHeight: '90vh', overflow: 'auto',
+                border: `1px solid ${C.warn}`,
+                boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
+                padding: `${S[4]}px ${S[5]}px`,
+              }}>
+              <div style={{ ...T.h4, fontWeight: 700, color: C.warn, marginBottom: S[2] }}>
+                Delete session for {cs.driver_name || 'driver'}?
+              </div>
+              <div style={{ ...T.bodySm, color: C.inkDim, lineHeight: 1.5 }}>
+                This removes the session row and all its <strong style={{ color: C.ink }}>{evCount}</strong> linked
+                truck_events, event_photos, and issue_reports
+                (cascade delete). The action will be logged to the
+                admin Activity Feed but the row data itself is gone.
+              </div>
+              <div style={{
+                marginTop: S[3], padding: S[2],
+                background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm,
+                ...T.caption, color: C.inkDim,
+                display: 'grid', gridTemplateColumns: '90px 1fr', gap: '4px 10px',
+              }}>
+                <span>Driver</span><span style={{ color: C.ink }}>{cs.driver_name || '—'}</span>
+                <span>Company</span><span style={{ color: C.ink }}>{cs.company || '—'}</span>
+                <span>Started</span><span style={{ color: C.ink, fontFamily: F.mono }}>{startedFmt} MT</span>
+                <span>Status</span><span style={{ color: cs.ended_at ? C.inkFaint : C.ok }}>{cs.ended_at ? 'Ended' : 'On shift'}</span>
+              </div>
+              <div style={{ display: 'flex', gap: S[2], marginTop: S[4], justifyContent: 'flex-end' }}>
+                <button type="button"
+                  onClick={() => { if (!deleteInFlight) setDeleteConfirmFor(null); }}
+                  disabled={deleteInFlight}
+                  style={{
+                    background: 'transparent', border: `1px solid ${C.ruleHi}`,
+                    color: C.ink, padding: '8px 16px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.3,
+                    cursor: deleteInFlight ? 'not-allowed' : 'pointer',
+                    opacity: deleteInFlight ? 0.5 : 1,
+                  }}>Cancel</button>
+                <button type="button"
+                  onClick={() => deleteSession(deleteConfirmFor)}
+                  disabled={deleteInFlight}
+                  style={{
+                    background: C.warn, color: C.bg, border: 'none',
+                    padding: '8px 18px', borderRadius: R.sm,
+                    fontFamily: F.mono, fontSize: 12, fontWeight: 700, letterSpacing: 0.4,
+                    cursor: deleteInFlight ? 'wait' : 'pointer',
+                    opacity: deleteInFlight ? 0.7 : 1,
+                  }}>{deleteInFlight ? 'Deleting…' : 'Yes, Delete'}</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -13976,7 +14279,7 @@ function AdminActivity({ db, setDb, navigate }) {
         <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Admin actions ledger.</h1>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
           {merged.length} admin event{merged.length === 1 ? '' : 's'}. Driver activity surfaces on{' '}
-          <a onClick={() => navigate('/admin/trucks/active')} style={{ color: C.accent, cursor: 'pointer' }}>Active Trucks</a>
+          <a onClick={() => navigate('/admin/dispatch')} style={{ color: C.accent, cursor: 'pointer' }}>Dispatch</a>
           {' '}and the Hauling Overview Active Drivers section.
         </div>
       </div>
@@ -14475,7 +14778,10 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onReporting = parts[1] === 'reporting';
   const onLiveStats = parts[1] === 'reports';
   const onPayments  = parts[1] === 'payments';
-  const onActiveTrucks = parts[1] === 'trucks' && parts[2] === 'active';
+  // 2026-05-31: "Active Trucks" tab renamed to "Dispatch". New slug is
+  // /admin/dispatch; legacy /admin/trucks/active still resolves so old
+  // bookmarks keep working.
+  const onActiveTrucks = parts[1] === 'dispatch' || (parts[1] === 'trucks' && parts[2] === 'active');
   // Reports section covers both /admin/reporting AND /admin/reports (live stats sublink)
   const onReportsAny = onReporting || onLiveStats;
   // "Haulers" section is active for the new /admin/haulers/* routes AND for the
@@ -14595,9 +14901,9 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       )}
       <Item
         icon={<ActiveTruckIcon size={20} />}
-        label="Active Trucks"
+        label="Dispatch"
         active={onActiveTrucks}
-        onClick={() => go('/admin/trucks/active')}
+        onClick={() => go('/admin/dispatch')}
       />
       <Item
         icon={<ReportingIcon size={20} />}
@@ -14684,6 +14990,10 @@ function AdminShell({ db, setDb, navigate, hash }) {
           {parts.length === 2 && parts[1] === 'payments' && <AdminPayments db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'payments' && parts[2] !== 'new' && <AdminInvoiceDetail invoiceId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 4 && parts[1] === 'invoices' && parts[3] === 'print' && <AdminInvoicePrint invoiceId={parts[2]} db={db} navigate={navigate} />}
+          {/* 2026-05-31: /admin/dispatch is the new canonical route;
+              /admin/trucks/active stays mounted as a legacy alias so
+              old bookmarks / external references keep working. */}
+          {parts.length === 2 && parts[1] === 'dispatch' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
           {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
@@ -16563,7 +16873,7 @@ function App() {
         title = proj ? `JSE — Admin — ${proj.name}` : 'JSE — Admin';
       }
     }
-    else if (h.startsWith('/admin/trucks/active')) title = 'JSE — Active Trucks';
+    else if (h.startsWith('/admin/dispatch') || h.startsWith('/admin/trucks/active')) title = 'JSE — Dispatch';
     else if (h.startsWith('/admin')) title = 'JSE — Admin';
     else if (parts[0] === 'hauler' && parts[1] === 'o' && parts[2]) {
       const op = db && db.haulers ? db.haulers.find(o => o.id === parts[2]) : null;
