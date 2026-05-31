@@ -4527,6 +4527,90 @@ function fmtMtDate(iso) {
   } catch (_) { return ''; }
 }
 
+// Display-only address compactor (2026-05-31). Storage stays full-form
+// (Nominatim returns "3480 South Poplar Street, Denver, Colorado"; we
+// keep that verbatim in truck_events.address). At render time:
+//   - strip country / state / ZIP from the comma-tail
+//   - abbreviate whole-word cardinal directions  (North -> N, etc.)
+//   - abbreviate whole-word street types         (Street -> St, etc.)
+//
+// "3480 South Poplar Street, Denver, Colorado" -> "3480 S Poplar St, Denver"
+//
+// Word-boundary regex protects city names that happen to START with a
+// direction or a street type: "Westminster", "Northglenn", "Southlake",
+// "Eastpointe" stay intact because the regex requires \b before and
+// after, and those cities have no word boundary mid-name.
+const _ADDRESS_STATE_NAMES = new Set([
+  'Alabama','Alaska','Arizona','Arkansas','California','Colorado','Connecticut',
+  'Delaware','Florida','Georgia','Hawaii','Idaho','Illinois','Indiana','Iowa',
+  'Kansas','Kentucky','Louisiana','Maine','Maryland','Massachusetts','Michigan',
+  'Minnesota','Mississippi','Missouri','Montana','Nebraska','Nevada',
+  'New Hampshire','New Jersey','New Mexico','New York','North Carolina',
+  'North Dakota','Ohio','Oklahoma','Oregon','Pennsylvania','Rhode Island',
+  'South Carolina','South Dakota','Tennessee','Texas','Utah','Vermont',
+  'Virginia','Washington','West Virginia','Wisconsin','Wyoming',
+  'District of Columbia',
+]);
+const _ADDRESS_STATE_CODES = new Set([
+  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA',
+  'KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+  'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT',
+  'VA','WA','WV','WI','WY','DC',
+]);
+const _ADDRESS_COUNTRIES = new Set([
+  'United States','United States of America','USA','US','U.S.','U.S.A.',
+]);
+const _ADDRESS_ABBREV = {
+  // Directions — long-first so Northeast wins before North in the regex.
+  'Northeast': 'NE', 'Northwest': 'NW',
+  'Southeast': 'SE', 'Southwest': 'SW',
+  'North': 'N', 'South': 'S', 'East': 'E', 'West': 'W',
+  // Street types.
+  'Street': 'St', 'Avenue': 'Ave', 'Boulevard': 'Blvd',
+  'Road': 'Rd', 'Drive': 'Dr', 'Lane': 'Ln',
+  'Court': 'Ct', 'Place': 'Pl', 'Highway': 'Hwy',
+  'Parkway': 'Pkwy', 'Trail': 'Trl', 'Circle': 'Cir',
+  'Terrace': 'Ter', 'Square': 'Sq',
+};
+const _ADDRESS_ABBREV_KEYS = Object.keys(_ADDRESS_ABBREV).sort((a, b) => b.length - a.length);
+const _ADDRESS_ABBREV_RE = new RegExp('\\b(' + _ADDRESS_ABBREV_KEYS.join('|') + ')\\b', 'gi');
+function formatAddressCompact(addr) {
+  if (!addr || typeof addr !== 'string') return addr;
+  let parts = addr.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return addr;
+  // Strip trailing country segment.
+  if (_ADDRESS_COUNTRIES.has(parts[parts.length - 1])) parts.pop();
+  // Strip standalone trailing ZIP segment ("80237" or "80237-1234").
+  while (parts.length > 0 && /^\d{5}(-\d{4})?$/.test(parts[parts.length - 1])) {
+    parts.pop();
+  }
+  // Strip trailing state — either bare ("Colorado" / "CO") or with
+  // an attached ZIP ("Colorado 80237" / "CO 80237").
+  if (parts.length > 0) {
+    const tail = parts[parts.length - 1];
+    const m = tail.match(/^(.+?)(\s+\d{5}(-\d{4})?)?$/);
+    if (m) {
+      const head = m[1].trim();
+      if (_ADDRESS_STATE_NAMES.has(head) || _ADDRESS_STATE_CODES.has(head)) {
+        parts.pop();
+      }
+    }
+  }
+  let out = parts.join(', ');
+  // Abbreviate directions + street types, preserving the input"s case
+  // (ALL CAPS -> ALL CAPS abbr; all lower -> lower abbr; otherwise the
+  // canonical TitleCase abbreviation from the map).
+  out = out.replace(_ADDRESS_ABBREV_RE, (match) => {
+    const canonical = _ADDRESS_ABBREV_KEYS.find(k => k.toLowerCase() === match.toLowerCase());
+    if (!canonical) return match;
+    const abbr = _ADDRESS_ABBREV[canonical];
+    if (match === match.toUpperCase()) return abbr.toUpperCase();
+    if (match === match.toLowerCase()) return abbr.toLowerCase();
+    return abbr;
+  });
+  return out;
+}
+
 // =====================================================================
 // adminBackfillToDriverTables — admin write path into the canonical store
 // =====================================================================
@@ -12537,7 +12621,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
             background: flash === 'saved' ? C.okSoft : flash === 'error' ? C.warnSoft : 'transparent',
             transition: 'background 200ms ease-out',
           }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{localAddress}</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{formatAddressCompact(localAddress)}</span>
           <span aria-hidden="true" style={{ ...T.micro, color: C.inkFaint, opacity: 0.6 }}>✎</span>
           {flash === 'saving' && <span style={{ ...T.micro, color: C.inkDim }}>…</span>}
         </span>
@@ -13638,7 +13722,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
             const firstDropoff = b.events.find(e => e.event_type === 'dropoff_load') || null;
             const fmtEventLocation = (ev) => {
               if (!ev) return null;
-              if (ev.address && String(ev.address).trim()) return ev.address;
+              if (ev.address && String(ev.address).trim()) return formatAddressCompact(ev.address);
               if (ev.latitude != null && ev.longitude != null) {
                 return Number(ev.latitude).toFixed(4) + ', ' + Number(ev.longitude).toFixed(4);
               }
@@ -13869,7 +13953,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
   const firstDropoff = b.events.find(e => e.event_type === 'dropoff_load') || null;
   const fmtEventLocation = (ev) => {
     if (!ev) return null;
-    if (ev.address && String(ev.address).trim()) return ev.address;
+    if (ev.address && String(ev.address).trim()) return formatAddressCompact(ev.address);
     if (ev.latitude != null && ev.longitude != null) {
       return Number(ev.latitude).toFixed(4) + ', ' + Number(ev.longitude).toFixed(4);
     }
