@@ -7436,7 +7436,18 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           a glance. The standalone <ActiveDriversCapacityStrip /> that
           briefly sat here was superseded by these two props on the
           shared table. */}
-      <DriverActivityTable db={db} navigate={navigate} activeOnly showCapacitySummary />
+      {/* 2026-05-31: Hauling Overview embed now carries the same
+          filter pills as Dispatch + caps visible cards at 5 (newest
+          first) + a "View all in Dispatch →" link that passes the
+          current filter through as a query string. */}
+      <DriverActivityTable
+        db={db}
+        navigate={navigate}
+        showCapacitySummary
+        showFilterPills
+        maxRows={5}
+        viewAllHref="/admin/dispatch"
+      />
 
       {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
           desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. */}
@@ -13021,7 +13032,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
 // Status uses the same 8h green/red threshold the dispatch-live table
 // uses — sessions over 8h pick up a soft-red tint on the row so dispatchers
 // can see at a glance who has been running too long.
-function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false }) {
+function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false, showFilterPills = false, viewAllHref = null }) {
   const ownLive = useDriverSessionsLive();
   const live = liveProp || ownLive;
   const isMobile = useIsMobile();
@@ -13036,17 +13047,27 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   // to thread props through.
   const [drawerSessionId, setDrawerSessionId] = React.useState(null);
 
+  // 2026-05-31: when `showFilterPills` is on (Hauling Overview embed),
+  // the component owns a local filter state matching the Dispatch tab
+  // (All / On Shift / Off Shift). Default 'on_shift' preserves the
+  // original activeOnly behaviour. The `activeOnly` prop is now a
+  // back-compat shortcut that auto-pins the local filter to 'on_shift'
+  // without exposing the pills.
+  const [localFilter, setLocalFilter] = React.useState('on_shift');
+  const effectiveFilter = showFilterPills ? localFilter : (activeOnly ? 'on_shift' : 'all');
+
   // Newest-first ordering: started_at desc. unstarted/no-started sessions
-  // sink to the bottom. 2026-05-30: `activeOnly` filters to !ended_at —
-  // used by the Hauling Overview embed so dispatchers see only drivers
-  // currently on shift. Default false preserves the full-history view
-  // for any standalone surface.
+  // sink to the bottom.
   const rows = React.useMemo(() => {
     let buckets = (live.buckets || []).slice();
-    if (activeOnly) buckets = buckets.filter(b => !b.session.ended_at);
+    if (effectiveFilter === 'on_shift') {
+      buckets = buckets.filter(b => !b.session.ended_at);
+    } else if (effectiveFilter === 'off_shift') {
+      buckets = buckets.filter(b => b.session.ended_at);
+    }
     buckets.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
     return maxRows ? buckets.slice(0, maxRows) : buckets;
-  }, [live.buckets, maxRows, activeOnly]);
+  }, [live.buckets, maxRows, effectiveFilter]);
 
   // Capacity summary aggregates — used when `showCapacitySummary` is on
   // (Hauling Overview embed). Mirrors the figures from the original
@@ -13201,10 +13222,45 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
       )}
       <div className="jse-capacity-summary-row" style={{
         marginBottom: S[3],
-        display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         gap: S[3], flexWrap: 'wrap',
       }}>
         <Label>{sectionLabel}</Label>
+        {/* 2026-05-31: Hauling Overview embed gets the same All /
+            On Shift / Off Shift pill row used on the Dispatch tab.
+            Single-select, compact, sits inline with the section
+            label. Default 'On Shift' preserves what the dispatcher
+            sees today. */}
+        {showFilterPills && (() => {
+          const onShiftCount = (live.buckets || []).filter(b => b.session && !b.session.ended_at).length;
+          const offShiftCount = (live.buckets || []).filter(b => b.session && b.session.ended_at).length;
+          const totalCount = onShiftCount + offShiftCount;
+          const pill = (active) => ({
+            ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.5,
+            textTransform: 'uppercase',
+            padding: '4px 10px', borderRadius: R.pill,
+            border: `1px solid ${active ? C.accent : C.ruleHi}`,
+            background: active ? C.accentSoft : 'transparent',
+            color: active ? C.accent : C.inkDim,
+            cursor: 'pointer', outline: 'none', fontSize: 10,
+          });
+          return (
+            <div style={{
+              display: 'inline-flex', gap: 4, padding: 2,
+              background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+            }}>
+              <button type="button" onClick={() => setLocalFilter('on_shift')} style={pill(localFilter === 'on_shift')}>
+                On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
+              </button>
+              <button type="button" onClick={() => setLocalFilter('off_shift')} style={pill(localFilter === 'off_shift')}>
+                Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
+              </button>
+              <button type="button" onClick={() => setLocalFilter('all')} style={pill(localFilter === 'all')}>
+                All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+              </button>
+            </div>
+          );
+        })()}
       </div>
       {live.loading && rows.length === 0 ? (
         <Card padding={0} style={{ marginBottom: S[5] }}>
@@ -13355,6 +13411,31 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
             </tbody>
           </table>
         </Card>
+      )}
+
+      {/* 2026-05-31: "View all in Dispatch →" footer link. Renders
+          only when caller passes viewAllHref (Hauling Overview
+          embed). Navigates to the Dispatch tab with the current
+          filter as a query string so the user lands on the same
+          slice they were looking at here. */}
+      {viewAllHref && (
+        <div style={{ textAlign: 'right', marginTop: -S[3], marginBottom: S[4] }}>
+          <a
+            href={'#' + viewAllHref + '?filter=' + effectiveFilter}
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(viewAllHref + '?filter=' + effectiveFilter);
+            }}
+            style={{
+              ...T.caption, color: C.inkDim,
+              textDecoration: 'none', cursor: 'pointer',
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              padding: '4px 8px', borderRadius: R.sm,
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; }}
+          >View all in Dispatch <span aria-hidden="true">→</span></a>
+        </div>
       )}
 
       {/* Drawer opens for the clicked row. Hoists out of the table so
@@ -14183,7 +14264,21 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   // 2026-05-31 (Dispatch rename + filters): three-way segmented filter
   // above the hauler-grouped grid. Declared HERE — above filteredBuckets
   // — so the JS Temporal Dead Zone doesn't bite the useMemo.
-  const [dispatchFilter, setDispatchFilter] = React.useState('on_shift');
+  // 2026-05-31: honour ?filter=<all|on_shift|off_shift> in the hash
+  // query string so the "View all in Dispatch →" link from the
+  // Hauling Overview embed lands on the same filter the user was
+  // viewing. Falls back to 'on_shift' for direct navigations.
+  const initialDispatchFilter = (() => {
+    try {
+      const h = (typeof window !== 'undefined' && window.location && window.location.hash) || '';
+      const q = h.split('?')[1] || '';
+      const params = new URLSearchParams(q);
+      const f = params.get('filter');
+      if (f === 'all' || f === 'on_shift' || f === 'off_shift') return f;
+    } catch (e) {}
+    return 'on_shift';
+  })();
+  const [dispatchFilter, setDispatchFilter] = React.useState(initialDispatchFilter);
 
   // Active sessions = ended_at IS NULL. Sort newest-started first.
   // 2026-05-31: KPI strip + the idle-trucks calculation still use
