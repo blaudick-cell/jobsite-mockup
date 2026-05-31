@@ -5200,7 +5200,11 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     // existing marker effect bails when mapMode !== 'hauls' and tears
     // down its pins; the driver-marker effect mirrors that for the
     // inverse mode.
-    const [mapMode, setMapMode] = useState('hauls');
+    // 2026-05-31 (Live Ops Map defaults): default to 'drivers' —
+    // dispatchers open the page asking "who's available right now",
+    // not "what's pending matching". Hauls view stays one tap away
+    // via the toggle.
+    const [mapMode, setMapMode] = useState('drivers');
     const live = useDriverSessionsLive();
     // Driver markers — one per session with a geocoded last-known event.
     // Walk the events back-to-front looking for the most recent point;
@@ -5881,34 +5885,58 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     });
     return (
       <div style={{ position: 'relative', width: '100%', marginTop: S[4] }}>
+        {/* 2026-05-31 (Live Ops Map header): toggle pill is now the
+            PRIMARY left-aligned control — that's the thing dispatchers
+            interact with. "Live ops" label demoted to small muted
+            text on the right, alongside the context-aware counter
+            (drivers / hauls subhead). */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[3] }}>
-            <Label color={C.accent}>Live operations map</Label>
-            {/* Hauls / Drivers segmented toggle */}
-            <div style={{ display: 'inline-flex', gap: 4, padding: 2, background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
-              <button type="button" onClick={() => setMapMode('hauls')} style={segBtn(mapMode === 'hauls')}>Haul Requests</button>
-              <button type="button" onClick={() => setMapMode('drivers')} style={segBtn(mapMode === 'drivers')}>Active Drivers</button>
-            </div>
+          {/* PRIMARY (left): Hauls / Drivers segmented toggle */}
+          <div style={{ display: 'inline-flex', gap: 4, padding: 2, background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
+            <button type="button" onClick={() => setMapMode('drivers')} style={segBtn(mapMode === 'drivers')}>Active Drivers</button>
+            <button type="button" onClick={() => setMapMode('hauls')} style={segBtn(mapMode === 'hauls')}>Haul Requests</button>
           </div>
-          <span style={{ ...T.caption, color: C.inkDim }}>
-            {/* F6 (2026-05-24 audit): gate the counter row on map.styleLoaded
-                so a CartoCDN/WebGL failure shows an honest "tiles loading…"
-                placeholder instead of claiming "5 haulers · 3 pickups" while
-                the canvas is empty. */}
-            {!styleLoaded ? (
-              <span style={{ color: C.inkFaint }}>tiles loading…</span>
-            ) : (
-              <>
-                {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {reqRoutes.length} haul{reqRoutes.length === 1 ? '' : 's'} ({reqRoutes.filter(r => r.isPending).length} pending) {(() => {
-                  const osrm = reqRoutes.filter(r => !r.isStraight).length;
-                  const totalMeters = reqRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
-                  const totalMinutes = reqRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
-                  if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
-                  return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
-                })()}
-              </>
-            )}
-          </span>
+          {/* SECONDARY (right): tiny "live ops" label + context-aware
+              counter. Counter switches its content based on mapMode —
+              drivers view shows on-map / on-shift counts; hauls view
+              keeps the original project / pickup / drop / hauler /
+              mileage breakdown. */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', minWidth: 0, justifyContent: 'flex-end' }}>
+            <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase' }}>Live ops</span>
+            <span style={{ ...T.caption, color: C.inkDim }}>
+              {!styleLoaded ? (
+                <span style={{ color: C.inkFaint }}>tiles loading…</span>
+              ) : mapMode === 'drivers' ? (() => {
+                // Drivers subhead: how many drivers are placed on the
+                // map vs how many active sessions exist overall (some
+                // active sessions don't have geocoded events yet and
+                // therefore can't get pinned).
+                const activeSessions = (live.sessions || []).filter(s => !s.ended_at).length;
+                const onMap = driverPoints.length;
+                if (activeSessions === 0) return <span style={{ color: C.inkFaint }}>No drivers on shift</span>;
+                return <>
+                  <span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{onMap}</span> on map
+                  <span style={{ color: C.inkFaint }}> · </span>
+                  <span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{activeSessions}</span> on shift
+                  {onMap < activeSessions && (
+                    <span style={{ color: C.inkFaint }}>
+                      {' · '}{activeSessions - onMap} awaiting GPS
+                    </span>
+                  )}
+                </>;
+              })() : (
+                <>
+                  {projectPoints.length} project{projectPoints.length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'pickup').length} pickup{projectEndpoints.filter(p => p.type === 'pickup').length === 1 ? '' : 's'} · {projectEndpoints.filter(p => p.type === 'dump').length} drop{projectEndpoints.filter(p => p.type === 'dump').length === 1 ? '' : 's'} · {haulerPoints.length} hauler{haulerPoints.length === 1 ? '' : 's'} · {reqRoutes.length} haul{reqRoutes.length === 1 ? '' : 's'} ({reqRoutes.filter(r => r.isPending).length} pending) {(() => {
+                    const osrm = reqRoutes.filter(r => !r.isStraight).length;
+                    const totalMeters = reqRoutes.filter(r => r.distanceMeters != null).reduce((s, r) => s + r.distanceMeters, 0);
+                    const totalMinutes = reqRoutes.filter(r => r.durationSeconds != null).reduce((s, r) => s + r.durationSeconds, 0) / 60;
+                    if (osrm === 0) return <span style={{ color: C.inkFaint }}> · fetching OSRM…</span>;
+                    return <span style={{ color: C.inkDim }}> · {(totalMeters / 1609.34).toFixed(1)} mi · {Math.round(totalMinutes)} min total</span>;
+                  })()}
+                </>
+              )}
+            </span>
+          </div>
         </div>
         <div ref={containerRef} className="lom-tile-map" style={{ width: '100%', borderRadius: R.lg, overflow: 'hidden', border: `1px solid ${C.ruleHi}`, background: C.surface }} />
 
