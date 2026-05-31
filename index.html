@@ -13628,6 +13628,26 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
               truckTypeShortLabel(truckType),
               `${cyPerLoad} CY/load`,
             ].join(' • ');
+            // 2026-05-31: first-pickup + first-dropoff addresses.
+            // Same shape as ActiveTruckCard so figures agree across views.
+            const firstPickup  = b.events.find(e => e.event_type === 'pickup_load')  || null;
+            const firstDropoff = b.events.find(e => e.event_type === 'dropoff_load') || null;
+            const fmtEventLocation = (ev) => {
+              if (!ev) return null;
+              if (ev.address && String(ev.address).trim()) return ev.address;
+              if (ev.latitude != null && ev.longitude != null) {
+                return Number(ev.latitude).toFixed(4) + ', ' + Number(ev.longitude).toFixed(4);
+              }
+              return '— no location';
+            };
+            const addressLineStyle = {
+              ...T.caption, color: C.inkDim, fontSize: 11, marginTop: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            };
+            const addressLabelStyle = {
+              fontFamily: F.mono, color: C.inkFaint, fontSize: 10.5,
+              letterSpacing: 0.3,
+            };
             return (
               <div
                 key={sess.id}
@@ -13670,6 +13690,20 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                   fontSize: 11.5,
                 }}>{companyMetaLine}</div>
+
+                {/* First pickup + first drop-off addresses. */}
+                {firstPickup && (
+                  <div style={addressLineStyle}>
+                    <span style={addressLabelStyle}>Pickup:</span>{' '}
+                    <span>{fmtEventLocation(firstPickup)}</span>
+                  </div>
+                )}
+                {firstDropoff && (
+                  <div style={addressLineStyle}>
+                    <span style={addressLabelStyle}>Drop-off:</span>{' '}
+                    <span>{fmtEventLocation(firstDropoff)}</span>
+                  </div>
+                )}
 
                 {/* 2026-05-31: 3-col primary metric row. Hours + $ today
                     are the two BIG tiles (matching weight). CY + loads
@@ -13821,6 +13855,30 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
     ? allPhotosForSess.sort((x, y) => String(y.photo_at || '').localeCompare(String(x.photo_at || '')))[0]
     : null;
   const lastEvType = b.lastEvent ? b.lastEvent.event_type : null;
+  // 2026-05-31: first-pickup + first-dropoff addresses on every card.
+  // b.events is already sorted ascending by event_at, so find() returns
+  // the chronologically first match. Falls back to coords if address
+  // hasn't been reverse-geocoded yet, then to a muted "no location"
+  // string. Address comes from the truck_events.address column written
+  // by the Nominatim queue + dispatcher manual edits.
+  const firstPickup  = b.events.find(e => e.event_type === 'pickup_load')  || null;
+  const firstDropoff = b.events.find(e => e.event_type === 'dropoff_load') || null;
+  const fmtEventLocation = (ev) => {
+    if (!ev) return null;
+    if (ev.address && String(ev.address).trim()) return ev.address;
+    if (ev.latitude != null && ev.longitude != null) {
+      return Number(ev.latitude).toFixed(4) + ', ' + Number(ev.longitude).toFixed(4);
+    }
+    return '— no location';
+  };
+  const addressLineStyle = {
+    ...T.caption, color: C.inkDim, fontSize: 11, marginTop: 2,
+    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+  };
+  const addressLabelStyle = {
+    fontFamily: F.mono, color: C.inkFaint, fontSize: 10.5,
+    letterSpacing: 0.3,
+  };
 
   // Inline company-edit chip. Click → input replaces chip. Blur saves.
   // Audit line lands in dispatcher_notes so admin actions are traceable.
@@ -14018,6 +14076,21 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>{metaLine}</div>
 
+        {/* First pickup + first drop-off addresses. Hidden when no
+            matching event has fired yet. */}
+        {firstPickup && (
+          <div style={addressLineStyle}>
+            <span style={addressLabelStyle}>Pickup:</span>{' '}
+            <span>{fmtEventLocation(firstPickup)}</span>
+          </div>
+        )}
+        {firstDropoff && (
+          <div style={addressLineStyle}>
+            <span style={addressLabelStyle}>Drop-off:</span>{' '}
+            <span>{fmtEventLocation(firstDropoff)}</span>
+          </div>
+        )}
+
         {/* 2026-05-31: 3-col metric row. Hours + $ today are the two
             big primary tiles. Rate sits muted under $. CY + loads
             demoted to a tighter right column. */}
@@ -14169,6 +14242,21 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
             </>
           )}
         </div>
+
+        {/* First pickup + first drop-off addresses. Hidden when no
+            matching event has fired yet. */}
+        {firstPickup && (
+          <div style={addressLineStyle}>
+            <span style={addressLabelStyle}>Pickup:</span>{' '}
+            <span>{fmtEventLocation(firstPickup)}</span>
+          </div>
+        )}
+        {firstDropoff && (
+          <div style={addressLineStyle}>
+            <span style={addressLabelStyle}>Drop-off:</span>{' '}
+            <span>{fmtEventLocation(firstDropoff)}</span>
+          </div>
+        )}
 
         {/* 2026-05-31: hours + $ today now the two BIG primary tiles
             (left + middle), each in their own bordered cell. CY today
