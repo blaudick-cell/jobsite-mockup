@@ -13028,6 +13028,15 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   // (Hauling Overview embed). Mirrors the figures from the original
   // capacity strip so the dispatcher gets "do I have headroom for this
   // incoming haul?" at a glance.
+  //
+  // 2026-05-31: added `billedToday` — Σ session_hours × hourly_rate
+  // for every session that STARTED today (local MT), including
+  // already-ended ones. Hourly rate uses the same lookup chain as the
+  // per-card $ today (session.hourly_rate override → DEFAULT_RATES →
+  // 90 floor) — so the headline financial number matches the per-row
+  // figures. Uses ALL live.buckets, not the activeOnly-filtered
+  // `rows`, because the dispatcher wants today's TOTAL revenue not
+  // just on-shift sessions.
   const capacitySummary = React.useMemo(() => {
     let cyPerLoadCombined = 0;
     let cyHauledToday = 0;
@@ -13037,8 +13046,24 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
       cyPerLoadCombined += cyPerLoad;
       cyHauledToday += cyPerLoad * b.pickupCount;
     }
-    return { count: rows.length, cyPerLoadCombined, cyHauledToday };
-  }, [rows]);
+    // BILLED TODAY — any session that started after local-MT midnight.
+    let billedToday = 0;
+    try {
+      const nowMt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+      const startOfDayMt = new Date(nowMt.getFullYear(), nowMt.getMonth(), nowMt.getDate());
+      // Compute MT offset and shift back to UTC for the comparator.
+      const offsetMin = (nowMt.getTime() - Date.now()) / 60000;
+      const startOfDayUtcMs = startOfDayMt.getTime() - offsetMin * 60000;
+      for (const b of (live.buckets || [])) {
+        const sess = b.session;
+        if (!sess || !sess.started_at) continue;
+        const startMs = new Date(sess.started_at).getTime();
+        if (!isFinite(startMs) || startMs < startOfDayUtcMs) continue;
+        billedToday += sessionDollarsToday(sess, b.events, trucksById);
+      }
+    } catch (e) { /* fall through with 0 */ }
+    return { count: rows.length, cyPerLoadCombined, cyHauledToday, billedToday };
+  }, [rows, live.buckets, trucksById]);
 
   const fmtClock = (iso) => {
     if (!iso) return '—';
@@ -13111,30 +13136,41 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
 
   return (
     <>
-      {/* 2026-05-31 (Mobile dispatch redesign):
-            • Desktop: existing "Active drivers · 3 active · 56 CY/load
-              combined · 68 CY hauled today" inline row (one-liner).
-            • Mobile: stacked sticky 3-card stat row with big numerals,
-              renders just below the screen header and stays visible
-              while scrolling the card list. */}
-      {showCapacitySummary && rows.length > 0 && isMobile && (
+      {/* 2026-05-31 (refine): single 4-tile horizontal row — both
+          mobile AND desktop. Previously the row was mobile-only and
+          desktop got a one-line inline summary; the inline form was
+          eaten by the page heading on narrower laptops. Sticky on
+          mobile so it stays visible while scrolling cards; not sticky
+          on desktop because the page is short enough already. New
+          BILLED TODAY tile carries the headline $ figure (gold accent
+          so it pops). Order: ACTIVE DRIVERS → CAPACITY CY → HAULED
+          TODAY → BILLED TODAY (who's working → what they can carry
+          → what they've carried → what we're billing). */}
+      {showCapacitySummary && rows.length > 0 && (
         <div className="jse-stat-cards-sticky" style={{
-          position: 'sticky', top: 0, zIndex: 30,
+          position: isMobile ? 'sticky' : 'relative', top: 0, zIndex: 30,
           background: C.bg,
           paddingTop: 4, paddingBottom: 8, marginBottom: 8,
-          display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8,
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8,
         }}>
           {[
             { n: capacitySummary.count, label: 'Active drivers', color: C.ok },
             { n: capacitySummary.cyPerLoadCombined, label: 'Capacity CY', color: C.accent },
-            { n: capacitySummary.cyHauledToday, label: 'Hauled today', color: C.ink },
+            { n: capacitySummary.cyHauledToday, label: 'CY today', color: C.ink },
+            { n: fmtUsd0(capacitySummary.billedToday), label: 'Billed today', color: '#F5C518', isMoney: true },
           ].map(s => (
             <div key={s.label} style={{
               background: C.surface, border: `1px solid ${C.rule}`,
               borderRadius: R.md, padding: '8px 6px', textAlign: 'center',
+              minWidth: 0,
             }}>
-              <div style={{ ...T.h2, fontWeight: 800, color: s.color, lineHeight: 1, fontFamily: F.mono, letterSpacing: -0.5 }}>{s.n}</div>
-              <div style={{ ...T.micro, color: C.inkFaint, marginTop: 4, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 9.5 }}>{s.label}</div>
+              <div style={{
+                fontWeight: 800, color: s.color, lineHeight: 1,
+                fontFamily: F.mono, letterSpacing: -0.5,
+                fontSize: s.isMoney ? (isMobile ? 16 : 22) : (isMobile ? 22 : 26),
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              }}>{s.n}</div>
+              <div style={{ ...T.micro, color: C.inkFaint, marginTop: 4, letterSpacing: 0.5, textTransform: 'uppercase', fontSize: isMobile ? 9 : 10 }}>{s.label}</div>
             </div>
           ))}
         </div>
@@ -13145,15 +13181,6 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
         gap: S[3], flexWrap: 'wrap',
       }}>
         <Label>{sectionLabel}</Label>
-        {/* Desktop inline capacity summary (hidden on mobile since the
-            sticky cards above replace it). */}
-        {showCapacitySummary && rows.length > 0 && (
-          <div className="jse-capacity-summary-stats jse-hide-mobile" style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
-            <span><span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.count}</span> driver{capacitySummary.count === 1 ? '' : 's'} active</span>
-            <span><span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyPerLoadCombined}</span> CY/load combined</span>
-            <span><span style={{ color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyHauledToday}</span> CY hauled today</span>
-          </div>
-        )}
       </div>
       {live.loading && rows.length === 0 ? (
         <Card padding={0} style={{ marginBottom: S[5] }}>
