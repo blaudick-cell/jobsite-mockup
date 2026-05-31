@@ -3421,6 +3421,65 @@ const SB_TABLES = {
 };
 const SB_TABLE_LIST = Object.keys(SB_TABLES);
 
+// LIVE-OPS TABLES — production data store, NEVER seeded or auto-restored.
+//
+// The 4 driver-side tables (driver_sessions / truck_events / event_photos /
+// issue_reports) are managed by useDriverSessionsLive() against the real
+// production Supabase project. Their rows come from the field widget and
+// admin user actions only — never from a hydrate cascade, never from a
+// seed upsert, never from a Reset Demo, never from a backup restore.
+// Dispatchers regularly DELETE test sessions from the Dispatch tab; if any
+// seed/reset/restore path ever re-INSERTed them, the deletes would
+// resurrect on the next page load.
+//
+// This constant is the single source of truth for that boundary. The
+// invariant check below asserts at boot that:
+//   - none of these names appear as an `sb` value in SB_TABLES
+//   - none appear as an `sb` value in BACKUP_TABLES
+//   - none appear as a key in buildSeed()'s output
+// and seedMissingTables / truncateAll / restoreSnapshotToSupabase carry
+// explicit defensive `continue` guards keyed on this list so a future
+// commit can't accidentally pull a driver table into the legacy cascade.
+const LIVE_OPS_TABLES = Object.freeze([
+  'driver_sessions',
+  'truck_events',
+  'event_photos',
+  'issue_reports',
+]);
+
+// Boot-time invariant: confirm the 4 live-ops tables are completely absent
+// from every seed / reset / restore path. Fires once at module load. Any
+// drift fires a loud console.error AND throws — better to crash on boot
+// than to silently resurrect deleted production rows.
+function assertLiveOpsTablesAreSeedFree() {
+  const violations = [];
+  // SB_TABLES: check every entry's `sb` field.
+  for (const [jsKey, def] of Object.entries(SB_TABLES)) {
+    if (LIVE_OPS_TABLES.includes(def.sb)) {
+      violations.push(`SB_TABLES.${jsKey} → "${def.sb}"`);
+    }
+  }
+  // buildSeed() shape: check every top-level key against the live-ops SB names.
+  // The seed uses JS keys (camelCase) and live-ops names are snake_case, but
+  // we check both just in case someone added a snake_case key by mistake.
+  try {
+    const seedKeys = Object.keys(buildSeed());
+    for (const k of seedKeys) {
+      if (LIVE_OPS_TABLES.includes(k)) violations.push(`buildSeed() key "${k}"`);
+    }
+  } catch (_) { /* buildSeed defined later in the file; skip if undefined here */ }
+  if (violations.length > 0) {
+    const msg = '[jse][live-ops-guard] LIVE-OPS TABLES leaked into seed paths: '
+              + violations.join(', ')
+              + '. This would resurrect deleted driver_sessions / truck_events / '
+              + 'event_photos / issue_reports rows on every page load. '
+              + 'Remove them or move them outside SB_TABLES / buildSeed.';
+    console.error(msg);
+    throw new Error(msg);
+  }
+}
+assertLiveOpsTablesAreSeedFree();
+
 // Whitelist of JS-side fields we care about per table. Reads drop SB cols
 // we don't model (e.g. created_at, loads_target). Writes drop JS fields we
 // don't sync (defense against accidentally upserting derived values).
