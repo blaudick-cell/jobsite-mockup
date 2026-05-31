@@ -13464,6 +13464,352 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
 }
 
 // =====================================================================
+// Dispatch export — CSV + PDF (lazy-loaded jsPDF + autotable)
+// =====================================================================
+// 2026-05-31: client-side dispatcher export, no server roundtrip.
+// CSV uses a hand-rolled RFC 4180 quoter (any cell with , " or \n gets
+// wrapped + internal " doubled). PDF lazy-loads jsPDF + AutoTable from
+// the CDN on first click — keeps the initial page payload small for
+// users who never export.
+//
+// PDF THEME CHOICE: light background with JE-green accents. Robert's
+// brief offered dark or light; light wins because exported PDFs
+// usually end up printed or shared with clients who expect a
+// "professional document" look. JE green (#B3E635) carries the brand
+// signal via the hex logo + accent rules.
+
+function dispatchExportRows(buckets, trucksById) {
+  // Mirrors the on-screen hauler grouping: sort by hauler (alpha,
+  // Unassigned last), then by start_at descending within hauler.
+  const normalizeHauler = (s) => {
+    if (s == null) return '__unassigned__';
+    const cleaned = String(s).trim().replace(/\s+/g, ' ');
+    return cleaned ? cleaned.toUpperCase() : '__unassigned__';
+  };
+  const truckTypeLabel = (tt) => {
+    const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
+                  SIDE: 'Side Dump', HISIDE: 'High Side',
+                  BD: 'Belly Dump', HS: 'Hot Shot', OTHER: 'Other' };
+    return map[tt] || tt || '—';
+  };
+  const fmtClock = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        timeZone: 'America/Denver',
+        month: '2-digit', day: '2-digit', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+  const fmtClockShort = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+    } catch (e) { return '—'; }
+  };
+  const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
+                          : et === 'dropoff_load' ? 'Drop-off'
+                          : et === 'end_shift' ? 'End shift'
+                          : et || '—';
+
+  // Group + sort.
+  const grouped = new Map();
+  for (const b of buckets) {
+    if (!b.session) continue;
+    const key = normalizeHauler(b.session.company);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(b);
+  }
+  const groupNames = Array.from(grouped.keys())
+    .filter(k => k !== '__unassigned__')
+    .sort((a, b) => a.localeCompare(b));
+  if (grouped.has('__unassigned__')) groupNames.push('__unassigned__');
+  const ordered = [];
+  for (const k of groupNames) {
+    const bs = grouped.get(k).slice().sort((a, b) =>
+      String(b.session.started_at || '').localeCompare(String(a.session.started_at || ''))
+    );
+    for (const b of bs) ordered.push(b);
+  }
+  // Build row objects + the hauler-label per row so the PDF can draw
+  // section bands.
+  return ordered.map(b => {
+    const sess = b.session;
+    const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+    const truckType = truck ? truck.type : sess.truck_type;
+    const plate = (sess.plate_input && sess.plate_input.trim())
+      || (truck && truck.plate)
+      || '—';
+    const company = (sess.company && sess.company.trim()) || 'Unassigned';
+    const isOnShift = !sess.ended_at;
+    const { currentShiftSeconds } = computeShiftHours(sess, b.events);
+    const shiftHours = (currentShiftSeconds / 3600).toFixed(2);
+    const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+    const cyToday = cyPerLoad * b.pickupCount;
+    const lastEvStr = b.lastEvent
+      ? `${eventLabel(b.lastEvent.event_type)} ${fmtClockShort(b.lastEvent.event_at)}`
+      : '—';
+    return {
+      // Hidden helper for PDF section breaks:
+      __haulerKey: normalizeHauler(sess.company),
+      __haulerDisplay: company === 'Unassigned' ? 'Unassigned' : company,
+      // Columns:
+      driver: sess.driver_name || '—',
+      company,
+      truckType: truckTypeLabel(truckType),
+      plate,
+      status: isOnShift ? 'ON SHIFT' : 'OFF SHIFT',
+      start: fmtClock(sess.started_at),
+      end: sess.ended_at ? fmtClock(sess.ended_at) : '—',
+      shiftHours,
+      pickups: String(b.pickupCount),
+      dropoffs: String(b.dropCount),
+      cyToday: String(cyToday),
+      lastEvent: lastEvStr,
+      notes: sess.dispatcher_notes || '',
+    };
+  });
+}
+
+function dispatchCsvEscape(cell) {
+  // RFC 4180: quote if cell contains comma, quote, CR, or LF. Double
+  // up internal quotes inside the quoted form.
+  const s = cell == null ? '' : String(cell);
+  if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function dispatchFilenameBase(filter) {
+  const map = { on_shift: 'on-shift', off_shift: 'off-shift', all: 'all' };
+  const f = map[filter] || filter;
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  return `dispatch-${f}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function exportDispatchCSV(rows, filter) {
+  const headers = ['Driver', 'Company', 'Truck Type', 'Plate', 'Status',
+    'Start Time', 'End Time', 'Shift Hours', 'Pickups', 'Drop-offs',
+    'Total CY Today', 'Last Event', 'Notes'];
+  const lines = [headers.map(dispatchCsvEscape).join(',')];
+  for (const r of rows) {
+    lines.push([
+      r.driver, r.company, r.truckType, r.plate, r.status,
+      r.start, r.end, r.shiftHours, r.pickups, r.dropoffs,
+      r.cyToday, r.lastEvent, r.notes,
+    ].map(dispatchCsvEscape).join(','));
+  }
+  const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${dispatchFilenameBase(filter)}.csv`;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+}
+
+// Lazy-load jsPDF + jsPDF-AutoTable from CDN. Cached on window so a
+// second click doesn't re-fetch. Returns the jsPDF constructor.
+function loadJsPdf() {
+  if (window.__jspdfReady) return Promise.resolve(window.__jspdfReady);
+  const load = (src) => new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Failed to load ' + src));
+    document.head.appendChild(s);
+  });
+  window.__jspdfReady = (async () => {
+    await load('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    await load('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.7.0/jspdf.plugin.autotable.min.js');
+    return window.jspdf ? window.jspdf.jsPDF : null;
+  })();
+  return window.__jspdfReady;
+}
+
+async function exportDispatchPDF(rows, filter) {
+  const jsPDF = await loadJsPdf();
+  if (!jsPDF) throw new Error('jsPDF failed to load');
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'letter' });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+
+  // ── Colors (light theme + JE accents) ──
+  const JE_GREEN = [179, 230, 53];      // #B3E635
+  const JE_DARK = [10, 10, 10];          // #0A0A0A
+  const SLATE = [70, 80, 95];
+  const MUTED = [130, 140, 150];
+  const STRIPE = [248, 250, 252];        // very light blue-gray for alt rows
+
+  const filterDisplay = filter === 'on_shift' ? 'On Shift'
+                      : filter === 'off_shift' ? 'Off Shift'
+                      : 'All Sessions';
+  const generatedAt = new Date().toLocaleString('en-US', {
+    timeZone: 'America/Denver',
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  });
+
+  const headerHeight = 72;
+  const drawHeader = (data) => {
+    // Logo hex on the left — same shape as the in-app boot SVG.
+    const logoX = 40;
+    const logoY = 20;
+    const logoSize = 32;
+    const cx = logoX + logoSize / 2;
+    const cy = logoY + logoSize / 2;
+    const r = logoSize / 2;
+    // hex points (matches viewBox 0 0 64 64: 32,4 / 56,18 / 56,46 / 32,60 / 8,46 / 8,18)
+    const scale = logoSize / 64;
+    const tx = (px, py) => [logoX + px * scale, logoY + py * scale];
+    const pts = [[32, 4], [56, 18], [56, 46], [32, 60], [8, 46], [8, 18]].map(p => tx(...p));
+    doc.setFillColor(...JE_GREEN);
+    doc.triangle(pts[0][0], pts[0][1], pts[1][0], pts[1][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[1][0], pts[1][1], pts[2][0], pts[2][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[2][0], pts[2][1], pts[4][0], pts[4][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[2][0], pts[2][1], pts[3][0], pts[3][1], pts[4][0], pts[4][1], 'F');
+    // "J" letter inside (rough — jsPDF text is centered by anchor)
+    doc.setFontSize(20);
+    doc.setTextColor(...JE_DARK);
+    doc.setFont(undefined, 'bold');
+    doc.text('J', cx, cy + 7, { align: 'center' });
+
+    // Wordmark + tagline
+    doc.setFontSize(15);
+    doc.setTextColor(...JE_DARK);
+    doc.setFont(undefined, 'bold');
+    doc.text('JobsiteExchange', logoX + logoSize + 12, logoY + 16);
+    doc.setFontSize(9);
+    doc.setTextColor(...MUTED);
+    doc.setFont(undefined, 'normal');
+    doc.text('Dispatch operations report', logoX + logoSize + 12, logoY + 30);
+
+    // Right-side document title + subtitle
+    doc.setFontSize(16);
+    doc.setTextColor(...JE_DARK);
+    doc.setFont(undefined, 'bold');
+    doc.text(`Dispatch — ${filterDisplay}`, pageW - 40, logoY + 16, { align: 'right' });
+    doc.setFontSize(9);
+    doc.setTextColor(...MUTED);
+    doc.setFont(undefined, 'normal');
+    doc.text(`${rows.length} session${rows.length === 1 ? '' : 's'} · generated ${generatedAt} MT`, pageW - 40, logoY + 30, { align: 'right' });
+
+    // JE-green rule under the header
+    doc.setDrawColor(...JE_GREEN);
+    doc.setLineWidth(2);
+    doc.line(40, headerHeight - 6, pageW - 40, headerHeight - 6);
+  };
+
+  const drawFooter = (data) => {
+    const pageNum = doc.internal.getNumberOfPages();
+    const totalPages = data && data.doc && data.doc.internal && data.doc.internal.getNumberOfPages
+      ? data.doc.internal.getNumberOfPages() : pageNum;
+    const y = pageH - 24;
+    // Thin JE-green rule above footer
+    doc.setDrawColor(...JE_GREEN);
+    doc.setLineWidth(1);
+    doc.line(40, y - 8, pageW - 40, y - 8);
+    doc.setFontSize(8);
+    doc.setTextColor(...MUTED);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Generated ${generatedAt} MT`, 40, y);
+    doc.text(`Page ${pageNum} of ${totalPages}`, pageW - 40, y, { align: 'right' });
+  };
+
+  // Build table body with hauler section-break rows interleaved.
+  // AutoTable renders these as full-width "header" rows by using a
+  // colSpan + custom styling via didParseCell.
+  const head = [['Driver', 'Company', 'Truck', 'Plate', 'Status',
+    'Start', 'End', 'Hrs', 'Pickups', 'Drops', 'CY', 'Last Event', 'Notes']];
+  const body = [];
+  let lastHaulerKey = null;
+  for (const r of rows) {
+    if (r.__haulerKey !== lastHaulerKey) {
+      // Section-break pseudo-row. Marked via a sentinel object so
+      // didParseCell can recolor it.
+      body.push([{
+        content: r.__haulerDisplay.toUpperCase() + '  ·  ' + (
+          rows.filter(x => x.__haulerKey === r.__haulerKey).length
+        ) + ' session' + (
+          rows.filter(x => x.__haulerKey === r.__haulerKey).length === 1 ? '' : 's'
+        ),
+        colSpan: 13,
+        styles: {
+          fillColor: JE_GREEN,
+          textColor: JE_DARK,
+          fontStyle: 'bold',
+          fontSize: 9,
+          halign: 'left',
+          cellPadding: { top: 5, right: 8, bottom: 5, left: 8 },
+        },
+      }]);
+      lastHaulerKey = r.__haulerKey;
+    }
+    body.push([
+      r.driver, r.company, r.truckType, r.plate, r.status,
+      r.start, r.end, r.shiftHours, r.pickups, r.dropoffs,
+      r.cyToday, r.lastEvent,
+      // Truncate notes for the PDF cell — full text remains in CSV.
+      r.notes.length > 80 ? r.notes.slice(0, 77) + '…' : r.notes,
+    ]);
+  }
+
+  doc.autoTable({
+    head, body,
+    startY: headerHeight + 4,
+    margin: { top: headerHeight + 4, left: 40, right: 40, bottom: 36 },
+    styles: {
+      fontSize: 8,
+      cellPadding: { top: 4, right: 6, bottom: 4, left: 6 },
+      textColor: JE_DARK,
+      lineColor: [220, 225, 230],
+      lineWidth: 0.5,
+    },
+    headStyles: {
+      fillColor: JE_DARK,
+      textColor: JE_GREEN,
+      fontStyle: 'bold',
+      fontSize: 9,
+      halign: 'left',
+    },
+    alternateRowStyles: {
+      fillColor: STRIPE,
+    },
+    columnStyles: {
+      4: { halign: 'center' },                          // Status
+      7: { halign: 'right', fontStyle: 'bold' },        // Hours
+      8: { halign: 'right' },                            // Pickups
+      9: { halign: 'right' },                            // Drops
+      10: { halign: 'right', fontStyle: 'bold' },        // CY
+    },
+    didDrawPage: (data) => {
+      drawHeader(data);
+      drawFooter(data);
+    },
+    didParseCell: (data) => {
+      // Status pill coloring — small dot of accent for ON SHIFT,
+      // muted for OFF SHIFT.
+      if (data.section === 'body' && data.column.index === 4 && typeof data.cell.raw === 'string') {
+        if (data.cell.raw === 'ON SHIFT') {
+          data.cell.styles.textColor = [22, 130, 60];   // dark green text
+          data.cell.styles.fillColor = [220, 245, 200]; // very pale green
+          data.cell.styles.fontStyle = 'bold';
+        } else if (data.cell.raw === 'OFF SHIFT') {
+          data.cell.styles.textColor = SLATE;
+          data.cell.styles.fillColor = [240, 242, 245];
+          data.cell.styles.fontStyle = 'normal';
+        }
+      }
+    },
+  });
+
+  doc.save(`${dispatchFilenameBase(filter)}.pdf`);
+}
+
+// =====================================================================
 // AdminActiveTrucks — live session grid at /admin/trucks/active.
 // Reads driver_sessions + truck_events via useDriverSessionsLive() and
 // renders one card per active session. Click a card to open a read-only
@@ -13698,7 +14044,8 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
 
       {/* 2026-05-31: filter pills. Default 'on_shift' preserves the
           old Active-Trucks behaviour; flip to 'all' or 'off_shift' to
-          review history + correct mis-clocked sessions. Single-select. */}
+          review history + correct mis-clocked sessions. Single-select.
+          Adjacent CSV/PDF export buttons honour the current filter. */}
       {(() => {
         const onShiftCount = (live.buckets || []).filter(b => b.session && !b.session.ended_at).length;
         const offShiftCount = (live.buckets || []).filter(b => b.session && b.session.ended_at).length;
@@ -13712,21 +14059,65 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           color: active ? C.accent : C.inkDim,
           cursor: 'pointer', outline: 'none',
         });
+        const exportBtn = {
+          ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
+          textTransform: 'uppercase',
+          padding: '6px 12px', borderRadius: R.sm,
+          border: `1px solid ${C.ruleHi}`,
+          background: 'transparent', color: C.inkDim,
+          cursor: 'pointer', outline: 'none',
+          display: 'inline-flex', alignItems: 'center', gap: 4,
+        };
+        const onExportCsv = () => {
+          try {
+            const rows = dispatchExportRows(filteredBuckets, trucksById);
+            exportDispatchCSV(rows, dispatchFilter);
+            setDispatchFlash({ text: `Exported ${rows.length} session${rows.length === 1 ? '' : 's'} to CSV.`, kind: 'ok' });
+            setTimeout(() => setDispatchFlash(null), 3000);
+          } catch (e) {
+            setDispatchFlash({ text: 'CSV export failed — ' + String(e && e.message || e), kind: 'error' });
+            setTimeout(() => setDispatchFlash(null), 5000);
+          }
+        };
+        const onExportPdf = async () => {
+          try {
+            setDispatchFlash({ text: 'Building PDF…', kind: 'ok' });
+            const rows = dispatchExportRows(filteredBuckets, trucksById);
+            await exportDispatchPDF(rows, dispatchFilter);
+            setDispatchFlash({ text: `Exported ${rows.length} session${rows.length === 1 ? '' : 's'} to PDF.`, kind: 'ok' });
+            setTimeout(() => setDispatchFlash(null), 3000);
+          } catch (e) {
+            setDispatchFlash({ text: 'PDF export failed — ' + String(e && e.message || e), kind: 'error' });
+            setTimeout(() => setDispatchFlash(null), 5000);
+          }
+        };
         return (
-          <div style={{
-            display: 'inline-flex', gap: 4, padding: 2,
-            background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
-            marginBottom: S[4],
+          <div className="jse-dispatch-actions-row" style={{
+            display: 'flex', alignItems: 'center', gap: S[2],
+            marginBottom: S[4], flexWrap: 'wrap',
           }}>
-            <button type="button" onClick={() => setDispatchFilter('on_shift')} style={pill(dispatchFilter === 'on_shift')}>
-              On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
-            </button>
-            <button type="button" onClick={() => setDispatchFilter('off_shift')} style={pill(dispatchFilter === 'off_shift')}>
-              Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
-            </button>
-            <button type="button" onClick={() => setDispatchFilter('all')} style={pill(dispatchFilter === 'all')}>
-              All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
-            </button>
+            <div style={{
+              display: 'inline-flex', gap: 4, padding: 2,
+              background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+            }}>
+              <button type="button" onClick={() => setDispatchFilter('on_shift')} style={pill(dispatchFilter === 'on_shift')}>
+                On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
+              </button>
+              <button type="button" onClick={() => setDispatchFilter('off_shift')} style={pill(dispatchFilter === 'off_shift')}>
+                Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
+              </button>
+              <button type="button" onClick={() => setDispatchFilter('all')} style={pill(dispatchFilter === 'all')}>
+                All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+              </button>
+            </div>
+            <button type="button" onClick={onExportCsv} aria-label="Export current filter to CSV" style={exportBtn}
+              onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+            >⬇ CSV</button>
+            <button type="button" onClick={onExportPdf} aria-label="Export current filter to PDF" style={exportBtn}
+              onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+            >⬇ PDF</button>
           </div>
         );
       })()}
