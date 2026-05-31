@@ -9891,38 +9891,91 @@ function AdminHaulers({ db, setDb, navigate }) {
   // 2026-05-30 (Commit D): truck-row click inside the expanded fleet
   // panel opens the shared DriverSessionDrawer for that truck.
   const [drawerTruckId, setDrawerTruckId] = useState(null);
-  // === Helpers — deterministic mock metrics so the UI feels operational.
-  //   Hash hauler id → stable response/reliability/on-time values across
-  //   renders. Real telemetry slots in here later.
-  const hash = (s) => {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) h = ((h << 5) - h) + s.charCodeAt(i);
-    return Math.abs(h);
-  };
-  const mockResponseMin = (id) => 4 + (hash(id) % 19);             // 4–22 min
-  const mockOnTimePct   = (id) => 78 + (hash(id) % 21);            // 78–98 %
-  const mockRating = (id) => {
-    const v = hash(id + ':r') % 10;
-    return v >= 9 ? 'A+' : v >= 7 ? 'A' : v >= 4 ? 'A-' : v >= 2 ? 'B+' : 'B';
-  };
+
+  // === Live driver-session aggregates ===
+  // 2026-05-31: hauler-card stats derive from the canonical driver tables
+  // (driver_sessions + truck_events) instead of the legacy db.hours/db.loads.
+  // The prior implementation read activeTrucks from db.hours.status==='open',
+  // which is no longer maintained by the field widget — it returned 0 for
+  // every hauler whose drivers used the live widget. The audit also removed
+  // three hash-based mock fields (RATING, RESPONSE, ON-TIME) and the
+  // single-dot FleetMiniViz that duplicated the Trucks N/M signal.
+  const live = useDriverSessionsLive();
+
+  // Per-hauler aggregates derived from live sessions + truck_events.
+  //   activeSessions — sessions with no ended_at, whose matched_truck is
+  //                    owned by this hauler. Drives the "Trucks N/M" tile
+  //                    and the OFFLINE/STANDBY/DEPLOYED ops status.
+  //   loadsToday     — pickup_load events fired today (MT) by this hauler's
+  //                    drivers.
+  //   cyToday        — Σ (DRIVER_LIVE_CY_PER_TRUCK[truck.type]) over those
+  //                    same pickup events. Matches what AdminActiveTrucks
+  //                    cards show, so figures agree across views.
+  const haulerLiveStats = useMemo(() => {
+    const trucksById = new Map((db.trucks || []).map(t => [t.id, t]));
+    let startOfDayUtcMs = 0;
+    try {
+      const nowMt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+      const sod = new Date(nowMt.getFullYear(), nowMt.getMonth(), nowMt.getDate());
+      const offsetMin = (nowMt.getTime() - Date.now()) / 60000;
+      startOfDayUtcMs = sod.getTime() - offsetMin * 60000;
+    } catch (_) { /* fall through with 0 — every event counts */ }
+    const stats = new Map();
+    const getH = (id) => {
+      let h = stats.get(id);
+      if (!h) { h = { activeSessions: 0, loadsToday: 0, cyToday: 0 }; stats.set(id, h); }
+      return h;
+    };
+    for (const s of (live.sessions || [])) {
+      if (!s || s.ended_at) continue;
+      const t = s.matched_truck_id ? trucksById.get(s.matched_truck_id) : null;
+      if (t && t.haulerId) getH(t.haulerId).activeSessions += 1;
+    }
+    const sessionById = new Map((live.sessions || []).map(s => [s.id, s]));
+    for (const e of (live.events || [])) {
+      if (!e || e.event_type !== 'pickup_load' || !e.event_at) continue;
+      const evMs = new Date(e.event_at).getTime();
+      if (!Number.isFinite(evMs) || evMs < startOfDayUtcMs) continue;
+      const sess = sessionById.get(e.session_id);
+      if (!sess) continue;
+      const t = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+      if (!t || !t.haulerId) continue;
+      const cy = DRIVER_LIVE_CY_PER_TRUCK[t.type] || 0;
+      const h = getH(t.haulerId);
+      h.loadsToday += 1;
+      h.cyToday += cy;
+    }
+    return stats;
+  }, [live.sessions, live.events, db.trucks]);
+
+  // Active hauls per hauler = haul_requests where status is matched|accepted
+  // and the hauler appears as matchedHaulerId or in assignments[].haulerId.
+  // Contractor-side intent counted, not driver activity.
+  const activeHaulsByHauler = useMemo(() => {
+    const map = new Map();
+    for (const r of (db.haulRequests || [])) {
+      if (!r) continue;
+      if (r.status !== 'matched' && r.status !== 'accepted') continue;
+      const ids = new Set();
+      if (r.matchedHaulerId) ids.add(r.matchedHaulerId);
+      for (const a of (r.assignments || [])) {
+        if (a && a.haulerId) ids.add(a.haulerId);
+      }
+      for (const id of ids) map.set(id, (map.get(id) || 0) + 1);
+    }
+    return map;
+  }, [db.haulRequests]);
 
   // === Enrich every hauler with the operational signals the cards expose. ===
-  // 2026-05-30 Phase 4 C2.1: dropped `l.status === 'approved'` filter.
-  // Driver-logged events have no status — every event is real by definition.
-  const todayLoads = (db.loads || []).filter(l => l.date === TODAY_ISO);
   const enriched = db.haulers.map(op => {
     const trucks = db.trucks.filter(t => t.haulerId === op.id);
-    const truckIds = new Set(trucks.map(t => t.id));
-    const openShifts = db.hours.filter(h => truckIds.has(h.truckId) && h.status === 'open');
-    const activeTruckIds = new Set(openShifts.map(h => h.truckId));
-    const activeTrucks = activeTruckIds.size;
     const assignedTrucks = trucks.filter(t => t.driverId).length;
     const offlineTrucks = trucks.length - assignedTrucks;
-    // "Active hauls" = unique projects this hauler has a clocked-in truck on.
-    const activeHaulProjectIds = new Set(openShifts.map(h => h.projectId));
-    const activeHauls = activeHaulProjectIds.size;
-    const completedToday = todayLoads.filter(l => truckIds.has(l.truckId)).length;
-    const cyToday = todayLoads.filter(l => truckIds.has(l.truckId)).reduce((s, l) => s + (l.cy || 0), 0);
+    const liveStats = haulerLiveStats.get(op.id) || { activeSessions: 0, loadsToday: 0, cyToday: 0 };
+    const activeTrucks   = liveStats.activeSessions;
+    const completedToday = liveStats.loadsToday;
+    const cyToday        = liveStats.cyToday;
+    const activeHauls    = activeHaulsByHauler.get(op.id) || 0;
     // Insurance / verification surface.
     const insuranceAtt = (op.attachments || []).find(a => a.type === 'insurance');
     const w9Att        = (op.attachments || []).find(a => a.type === 'w9');
@@ -9935,12 +9988,6 @@ function AdminHaulers({ db, setDb, navigate }) {
       return days <= 180; // 6-month window
     })();
     const verified = insuranceFresh && !!w9Att;
-    // Health flags — does any active project this hauler is on look at risk?
-    // 2026-05-30 Phase 4 C2.1: "delayed project" detection used to fire on
-    // ≥3 pending loads. Driver-logged events have no status — there's no
-    // pending state anymore. Flag stays as `false` until C3 decides whether
-    // to derive a delay signal from event timing (e.g., last event >Xh ago).
-    const isOnDelayedProject = false;
     // Operational status — drives the status pill on the card.
     let opsStatus = 'available';
     if (trucks.length === 0)                   opsStatus = 'offline';
@@ -9948,7 +9995,6 @@ function AdminHaulers({ db, setDb, navigate }) {
     else if (activeTrucks === 0)               opsStatus = 'standby';
     else if (activeTrucks >= trucks.length)    opsStatus = 'deployed';
     else if (activeTrucks > trucks.length / 2) opsStatus = 'partial';
-    if (isOnDelayedProject)                    opsStatus = 'delayed';
     // Flags surfaced as inline pills on the card.
     const flags = [];
     if (verified)                              flags.push({ k: 'verified', label: 'Verified', tone: C.accent, soft: C.accentSoft });
@@ -9958,53 +10004,44 @@ function AdminHaulers({ db, setDb, navigate }) {
     const truckTypes = new Set(trucks.map(t => t.type));
     return {
       ...op,
-      trucks, truckIds, openShifts,
+      trucks,
       activeTrucks, assignedTrucks, offlineTrucks,
       activeHauls, completedToday, cyToday,
       insuranceAtt, w9Att, msaAtt, insuranceFresh, verified,
-      isOnDelayedProject, opsStatus,
+      opsStatus,
       truckTypes,
       flags,
-      // Mock telemetry (stable per id).
-      responseMin: mockResponseMin(op.id),
-      onTimePct: mockOnTimePct(op.id),
-      reliability: mockRating(op.id),
     };
   });
 
   // === Operational KPI strip data ===
-  // 2026-05-24 sweep: every truck KPI here filters out orphan trucks (no
-  // haulerId / hauler deleted).
+  // Network-wide totals derived from the same haulerLiveStats map as the
+  // per-card stats, so KPI strip + per-card figures always agree.
   const _haulerByIdKpi = new Map((db.haulers || []).map(o => [o.id, o]));
   const realTrucks = db.trucks.filter(t => t && t.haulerId && _haulerByIdKpi.has(t.haulerId));
-  // A truck is "active" iff it has an open shift. The hauler is responsible
-  // for which truck is on the clock.
-  const trucksActiveAll = realTrucks.filter(t =>
-    db.hours.some(h => h.truckId === t.id && h.status === 'open')
-  ).length;
-  const trucksAvailable = realTrucks.length - trucksActiveAll;
-  const trucksOffline   = 0;
-  const avgResponse     = enriched.length ? Math.round(enriched.reduce((s, h) => s + h.responseMin, 0) / enriched.length) : 0;
-  const loadsToday      = todayLoads.length;
-  const cyTodayAll      = todayLoads.reduce((s, l) => s + (l.cy || 0), 0);
+  let trucksActiveAll = 0, loadsToday = 0, cyTodayAll = 0;
+  for (const v of haulerLiveStats.values()) {
+    trucksActiveAll += v.activeSessions;
+    loadsToday      += v.loadsToday;
+    cyTodayAll      += v.cyToday;
+  }
+  const trucksAvailable = Math.max(0, realTrucks.length - trucksActiveAll);
   const kpis = [
-    { label: 'Haulers',          value: enriched.length,        tone: C.ink },
-    { label: 'Available now',    value: Math.max(0, trucksAvailable), tone: C.accent, sub: 'idle' },
-    { label: 'Trucks active',    value: trucksActiveAll,        tone: C.ok,     sub: 'clocked-in' },
-    { label: 'Avg response',     value: avgResponse + ' min',   tone: C.info,   sub: 'mock telemetry' },
-    { label: 'Loads today',      value: loadsToday,             tone: C.accent },
-    { label: 'CY today',         value: cyTodayAll.toLocaleString(),    tone: C.ink, sub: 'across network' },
+    { label: 'Haulers',          value: enriched.length,                tone: C.ink },
+    { label: 'Available now',    value: trucksAvailable,                tone: C.accent, sub: 'idle' },
+    { label: 'Trucks active',    value: trucksActiveAll,                tone: C.ok,     sub: 'on shift' },
+    { label: 'Loads today',      value: loadsToday,                     tone: C.accent },
+    { label: 'CY today',         value: cyTodayAll.toLocaleString(),    tone: C.ink,    sub: 'across network' },
   ];
 
   // === Filter + sort state ===
   const FILTERS_INIT = {
     avail: false,         // Available trucks now (status === 'available' or 'partial')
     verified: false,      // Insurance-verified
-    delayed: false,       // On a delayed project
     typeTAN: false, typeSD: false, typeED: false, typeBD: false, typeHS: false,
   };
   const [filters, setFilters] = useState(FILTERS_INIT);
-  const [sort, setSort] = useState('rating'); // rating | response | trucks | name
+  const [sort, setSort] = useState('trucks'); // trucks | name
   const [search, setSearch] = useState('');
   const [expanded, setExpanded] = useState(null); // hauler id of the open drawer
 
@@ -10015,19 +10052,13 @@ function AdminHaulers({ db, setDb, navigate }) {
     }
     if (filters.avail && !(h.opsStatus === 'available' || h.opsStatus === 'partial' || h.opsStatus === 'standby')) return false;
     if (filters.verified && !h.verified) return false;
-    if (filters.delayed && !h.isOnDelayedProject) return false;
     const typeFlags = ['TAN','SD','ED','BD','HS'];
     const activeTypeFilters = typeFlags.filter(t => filters['type' + t]);
     if (activeTypeFilters.length > 0 && !activeTypeFilters.some(t => h.truckTypes.has(t))) return false;
     return true;
   });
   const sorted = [...filtered].sort((a, b) => {
-    if (sort === 'rating') {
-      const order = { 'A+': 0, 'A': 1, 'A-': 2, 'B+': 3, 'B': 4 };
-      return (order[a.reliability] ?? 5) - (order[b.reliability] ?? 5);
-    }
-    if (sort === 'response') return a.responseMin - b.responseMin;
-    if (sort === 'trucks')   return b.trucks.length - a.trucks.length;
+    if (sort === 'trucks') return b.trucks.length - a.trucks.length;
     return a.name.localeCompare(b.name);
   });
 
@@ -10037,44 +10068,10 @@ function AdminHaulers({ db, setDb, navigate }) {
     partial:   { label: 'Partially booked', tone: C.info,   soft: C.infoSoft },
     deployed:  { label: 'Fully deployed',   tone: C.warn,   soft: C.warnSoft },
     standby:   { label: 'Standby',          tone: C.inkDim, soft: 'rgba(255,255,255,0.06)' },
-    delayed:   { label: 'Delayed on haul',  tone: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft },
     offline:   { label: 'Offline',          tone: C.inkFaint, soft: 'rgba(255,255,255,0.04)' },
   };
-  const FleetMiniViz = ({ h, max = 10 }) => {
-    // Render small dots: green=active, blue=assigned-not-clocked, gray=unassigned,
-    // red=on a delayed project. Pad to max with very-dim placeholder dots.
-    const trucks = h.trucks.slice(0, max);
-    const padCount = Math.max(0, Math.min(max, h.trucks.length) - trucks.length);
-    return (
-      <div style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
-        {trucks.map(t => {
-          const hasOpen = h.openShifts.some(s => s.truckId === t.id);
-          const onDelayed = h.openShifts.some(s => {
-            if (s.truckId !== t.id) return false;
-            const projLoads = db.loads.filter(l => l.projectId === s.projectId);
-            // 2026-05-30 Phase 4 C2.1: pending-load count gone; see comment above.
-            return false;
-          });
-          const color = !t.driverId ? C.inkFaint
-            : onDelayed             ? (C.danger || C.warn)
-            : hasOpen               ? C.ok
-            : C.info;
-          return (
-            <span key={t.id} title={`#${t.plate} · ${t.type}`} style={{
-              display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
-              background: color, boxShadow: hasOpen ? `0 0 6px ${color}` : 'none',
-            }} />
-          );
-        })}
-        {h.trucks.length > max && (
-          <span style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginLeft: 4 }}>+{h.trucks.length - max}</span>
-        )}
-        {padCount === 0 && h.trucks.length === 0 && (
-          <span style={{ ...T.caption, color: C.inkFaint, fontStyle: 'italic' }}>no fleet</span>
-        )}
-      </div>
-    );
-  };
+  // FleetMiniViz deleted 2026-05-31 — vestigial single-dot for small fleets
+  // duplicated the "Trucks N/M" tile to its left, and used stale db.hours.
 
   // === Expanded fleet drawer — truck list + dispatch timeline ===
   const ExpandedFleetPanel = ({ h }) => {
@@ -10212,7 +10209,6 @@ function AdminHaulers({ db, setDb, navigate }) {
               <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                 <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{h.name}</div>
                 <Pill color={stat.tone} soft={stat.soft}>{stat.label}</Pill>
-                <Pill color={C.inkDim} soft="rgba(255,255,255,0.04)">Rating {h.reliability}</Pill>
               </div>
               <div style={{ ...T.caption, fontFamily: F.mono, color: C.inkDim }}>{h.phone} · {h.email}</div>
               {h.address && (
@@ -10272,20 +10268,8 @@ function AdminHaulers({ db, setDb, navigate }) {
               <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.completedToday}</div>
             </div>
             <div>
-              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>Response</div>
-              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.info }}>{h.responseMin}m</div>
-            </div>
-            <div>
-              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>On-time</div>
-              <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: h.onTimePct >= 92 ? C.ok : h.onTimePct >= 85 ? C.ink : C.warn }}>{h.onTimePct}%</div>
-            </div>
-            <div>
               <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase' }}>CY today</div>
               <div style={{ ...T.body, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{h.cyToday}</div>
-            </div>
-            <div style={{ gridColumn: 'span 2' }}>
-              <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 2 }}>Fleet</div>
-              <FleetMiniViz h={h} />
             </div>
           </div>
 
@@ -10324,7 +10308,7 @@ function AdminHaulers({ db, setDb, navigate }) {
       </div>
 
       {/* === Ops KPI strip === */}
-      <div className="haulers-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: S[3], marginBottom: S[5] }}>
+      <div className="haulers-kpi-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: S[3], marginBottom: S[5] }}>
         {kpis.map(k => (
           <Card key={k.label} padding={S[3]}>
             <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: 4 }}>{k.label}</div>
@@ -10345,7 +10329,6 @@ function AdminHaulers({ db, setDb, navigate }) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <FilterPill k="avail"     label="Available now" />
             <FilterPill k="verified"  label="Insurance verified" />
-            <FilterPill k="delayed"   label="Delayed" />
           </div>
           <div style={{ width: 1, height: 22, background: C.rule, margin: '0 4px' }} />
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
@@ -10359,8 +10342,6 @@ function AdminHaulers({ db, setDb, navigate }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2] }}>
             <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, textTransform: 'uppercase' }}>Sort</span>
             <select value={sort} onChange={e => setSort(e.target.value)} style={{ ...T.caption, padding: '4px 6px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surfaceHi, color: C.ink, fontFamily: F.mono, letterSpacing: 0.3, outline: 'none' }}>
-              <option value="rating">Highest rated</option>
-              <option value="response">Fastest response</option>
               <option value="trucks">Largest fleet</option>
               <option value="name">A → Z</option>
             </select>
