@@ -4230,8 +4230,13 @@ function computeDriverStatus(b, issuesForSession) {
   }
   const IDLE_AFTER_MIN = 30;
   const STALE_SHIFT_H = 12;
-  // Open-issue check — any issue_reports row for this session.
-  const hasOpenIssue = Array.isArray(issuesForSession) && issuesForSession.some(i => i.session_id === sess.id);
+  // Open-issue check — only issue_reports rows where resolved_at IS
+  // NULL contribute to the red ISSUE state. Once a dispatcher resolves
+  // every issue, the strip drops back to green/blue/yellow based on
+  // shift activity.
+  const hasOpenIssue = Array.isArray(issuesForSession) && issuesForSession.some(i =>
+    i.session_id === sess.id && i.resolved_at == null
+  );
   // Stale-shift alarm.
   const shiftSec = (() => {
     try {
@@ -11896,7 +11901,121 @@ function AdminInvoicePrint({ invoiceId, db, navigate }) {
 //   • Issues / Notes from driver (issue_reports filtered by session_id)
 //   • dispatcher_notes textarea — saves via PATCH on blur, with a
 //     "Saved · HH:MM MT" status under the field
-function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, navigate, live: liveProp }) {
+// =====================================================================
+// IssueRow — single row inside DriverSessionDrawer's Issues feed
+// =====================================================================
+// 2026-05-31 (Resolve issues): pulled out so each row holds its own
+// resolution-note draft without churning the parent on every keystroke.
+// Two render modes via isResolved flag — unresolved gets warn border +
+// Resolve button + optional note input; resolved gets muted styling +
+// ✓ check + resolver/timestamp.
+function IssueRow({ iss, isResolved, elapsedFmt, hasGps, inFlight, onResolve, fmtClock }) {
+  const [note, setNote] = React.useState('');
+  if (isResolved) {
+    return (
+      <div style={{
+        display: 'flex', gap: S[2], alignItems: 'flex-start',
+        padding: `${S[2]}px ${S[3]}px`,
+        background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
+        fontSize: 12.5, opacity: 0.75,
+      }}>
+        {iss.photo_url && (
+          <a href={iss.photo_url} target="_blank" rel="noopener"
+             onClick={ev => ev.stopPropagation()}
+             style={{ flexShrink: 0, lineHeight: 0 }}>
+            <img src={iss.photo_url} alt=""
+              style={{ width: 32, height: 32, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, display: 'block', filter: 'grayscale(0.5)' }} />
+          </a>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.inkDim, marginBottom: 2, fontSize: 11 }}>
+            <span style={{ color: C.ok, fontWeight: 700 }}>✓ Resolved</span>
+            <span style={{ fontFamily: F.mono, color: C.inkFaint }}>{fmtClock(iss.resolved_at)} MT</span>
+            <span style={{ color: C.inkFaint }}>by {iss.resolved_by || 'Admin'}</span>
+          </div>
+          <div style={{ color: C.inkDim, whiteSpace: 'pre-wrap', wordBreak: 'break-word', textDecoration: 'line-through', textDecorationColor: C.ruleHi }}>
+            {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
+          </div>
+          {iss.resolution_note && (
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 4, fontStyle: 'italic' }}>
+              ↳ {iss.resolution_note}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div style={{
+      display: 'flex', gap: S[2], alignItems: 'flex-start',
+      padding: `${S[2]}px ${S[3]}px`,
+      background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.md,
+      fontSize: 12.5,
+    }}>
+      {iss.photo_url && (
+        <a href={iss.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
+           onClick={ev => ev.stopPropagation()}
+           style={{ flexShrink: 0, lineHeight: 0 }}>
+          <img src={iss.photo_url} alt=""
+            style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.warn}`, display: 'block' }} />
+        </a>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.ink, marginBottom: 4 }}>
+          <span style={{ color: C.warn, fontWeight: 700, fontSize: 11 }}>⚠</span>
+          <span style={{ fontFamily: F.mono, color: C.inkDim, fontSize: 11 }}>{fmtClock(iss.event_at || iss.created_at)}</span>
+          <span style={{ fontFamily: F.mono, color: C.inkFaint, fontSize: 11 }} title="Elapsed shift time when reported">{elapsedFmt}</span>
+          {hasGps && (
+            <a href={`https://www.google.com/maps?q=${iss.latitude},${iss.longitude}`} target="_blank" rel="noopener"
+               onClick={ev => ev.stopPropagation()}
+               style={{ color: C.info, textDecoration: 'none', fontSize: 11, marginLeft: 'auto' }}>
+              map ↗
+            </a>
+          )}
+        </div>
+        <div style={{ color: C.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
+        </div>
+        {/* Optional resolution-note input + Resolve button.
+            stopPropagation so taps don't bubble to the drawer-close. */}
+        <div onClick={(e) => e.stopPropagation()} style={{
+          display: 'flex', gap: 6, alignItems: 'stretch', marginTop: 6,
+        }}>
+          <input
+            type="text"
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); onResolve(note); } }}
+            placeholder="Resolution note (optional)…"
+            disabled={inFlight}
+            style={{
+              flex: 1, minWidth: 0,
+              background: C.bg, color: C.ink,
+              border: `1px solid ${C.ruleHi}`, borderRadius: R.sm,
+              padding: '4px 8px', fontFamily: F.body, fontSize: 11, outline: 'none',
+            }} />
+          <button
+            type="button"
+            onClick={() => onResolve(note)}
+            disabled={inFlight}
+            style={{
+              background: inFlight ? C.surface : C.ok, color: C.bg,
+              border: 'none', borderRadius: R.sm,
+              padding: '4px 12px', fontFamily: F.mono, fontSize: 11,
+              fontWeight: 700, letterSpacing: 0.4,
+              textTransform: 'uppercase', whiteSpace: 'nowrap',
+              cursor: inFlight ? 'wait' : 'pointer',
+              opacity: inFlight ? 0.6 : 1,
+            }}>
+            {inFlight ? '…' : 'Resolve ▸'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, setDb, navigate, live: liveProp }) {
   const ownLive = useDriverSessionsLive();
   const live = liveProp || ownLive;
 
@@ -12251,6 +12370,47 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
     } catch (e) {
       console.warn('[DriverSessionDrawer] saveNotes', e);
       setNoteStatus('Save failed — will retry on next blur');
+    }
+  }
+
+  // 2026-05-31: resolve an issue_reports row from inside the drawer.
+  // PATCHes resolved_at + resolved_by, optionally resolution_note,
+  // logs to the admin Activity Feed (when setDb is wired), and force-
+  // refreshes the live hook so the red ISSUE strip drops on this card
+  // immediately. Realtime UPDATE broadcast picks it up on other tabs
+  // (publication includes issue_reports as of the End Shift fix).
+  const [resolveInFlight, setResolveInFlight] = React.useState({});
+  async function resolveIssue(issue, note) {
+    if (!issue || !issue.id) return;
+    if (!_sb.ready || !_sb.client) return;
+    setResolveInFlight(prev => ({ ...prev, [issue.id]: true }));
+    try {
+      const nowIso = new Date().toISOString();
+      const patch = {
+        resolved_at: nowIso,
+        resolved_by: 'Admin',
+      };
+      if (note && note.trim()) patch.resolution_note = note.trim();
+      const { error } = await _sb.client.from('issue_reports')
+        .update(patch).eq('id', issue.id);
+      if (error) throw new Error('issue_reports update: ' + (error.message || error));
+      // Admin Activity Feed log (only if parent wired setDb through).
+      if (typeof setDb === 'function' && drawerBucket) {
+        const driverName = drawerBucket.session.driver_name || 'driver';
+        const snippet = (issue.issue_text || '').replace(/\s+/g, ' ').trim();
+        const trimmed = snippet.length > 60 ? snippet.slice(0, 57) + '…' : snippet;
+        setDb(prev => appendActivity(prev, {
+          type: 'issue.resolved',
+          actorRole: 'admin', actorId: null,
+          summary: `Issue resolved on ${driverName}'s session${trimmed ? ': "' + trimmed + '"' : ''}`,
+          refId: null,
+        }));
+      }
+      if (live && typeof live.refetch === 'function') live.refetch();
+    } catch (e) {
+      console.warn('[DriverSessionDrawer] resolveIssue', e);
+    } finally {
+      setResolveInFlight(prev => { const n = { ...prev }; delete n[issue.id]; return n; });
     }
   }
 
@@ -12644,56 +12804,56 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
             );
           })()}
 
-          {/* Issues / Notes from driver */}
+          {/* Issues / Notes from driver — 2026-05-31: now resolvable.
+              Unresolved rows show with the warn border + a Resolve
+              button + an optional resolution-note input. Resolved
+              rows show muted with a ✓ + resolver + resolved_at, and
+              the resolution_note if one was added. Once every issue
+              is resolved, computeDriverStatus drops the red strip. */}
           {sess && (() => {
-            const sessIssues = (live.issues || [])
-              .filter(i => i.session_id === sess.id)
-              .sort((x, y) => String(y.event_at || y.created_at || '').localeCompare(String(x.event_at || x.created_at || '')));
-            if (sessIssues.length === 0) return null;
+            const allIssues = (live.issues || []).filter(i => i.session_id === sess.id);
+            if (allIssues.length === 0) return null;
+            const sorted = allIssues.slice().sort((x, y) => {
+              const xResolved = x.resolved_at != null;
+              const yResolved = y.resolved_at != null;
+              if (xResolved !== yResolved) return xResolved ? 1 : -1;  // unresolved first
+              if (!xResolved) {
+                return String(y.event_at || y.created_at || '').localeCompare(String(x.event_at || x.created_at || ''));
+              }
+              return String(y.resolved_at || '').localeCompare(String(x.resolved_at || ''));
+            });
+            const unresolvedCount = sorted.filter(i => !i.resolved_at).length;
             return (
               <div style={{ marginTop: S[4] }}>
-                <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2] }}>
+                <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: S[2], display: 'flex', alignItems: 'center', gap: 8 }}>
                   Issues / notes from driver
+                  {unresolvedCount > 0 && (
+                    <span style={{
+                      ...T.micro, padding: '0 6px', borderRadius: R.pill,
+                      background: C.warnSoft, color: C.warn, border: `1px solid ${C.warn}`,
+                      fontFamily: F.mono, fontWeight: 700, fontSize: 9,
+                    }}>{unresolvedCount} open</span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-                  {sessIssues.map(iss => {
+                  {sorted.map(iss => {
+                    const isResolved = iss.resolved_at != null;
                     const issElapsedFmt = formatShiftDuration(
                       eventElapsedSeconds(sess, { event_at: iss.event_at || iss.created_at }),
                       { padded: true }
                     );
                     const issHasGps = iss.latitude != null && iss.longitude != null;
+                    const inFlight = !!resolveInFlight[iss.id];
                     return (
-                      <div key={iss.id} style={{
-                        display: 'flex', gap: S[2], alignItems: 'flex-start',
-                        padding: `${S[2]}px ${S[3]}px`,
-                        background: C.warnSoft, border: `1px solid ${C.warn}`, borderRadius: R.md,
-                        fontSize: 12.5,
-                      }}>
-                        {iss.photo_url && (
-                          <a href={iss.photo_url} target="_blank" rel="noopener" title="Open full-size photo"
-                             onClick={ev => ev.stopPropagation()}
-                             style={{ flexShrink: 0, lineHeight: 0 }}>
-                            <img src={iss.photo_url} alt=""
-                              style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.warn}`, display: 'block' }} />
-                          </a>
-                        )}
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], color: C.ink, marginBottom: 4 }}>
-                            <span style={{ fontFamily: F.mono, color: C.inkDim, fontSize: 11 }}>{fmtClock(iss.event_at || iss.created_at)}</span>
-                            <span style={{ fontFamily: F.mono, color: C.inkFaint, fontSize: 11 }} title="Elapsed shift time when reported">{issElapsedFmt}</span>
-                            {issHasGps && (
-                              <a href={`https://www.google.com/maps?q=${iss.latitude},${iss.longitude}`} target="_blank" rel="noopener"
-                                 onClick={ev => ev.stopPropagation()}
-                                 style={{ color: C.info, textDecoration: 'none', fontSize: 11, marginLeft: 'auto' }}>
-                                map ↗
-                              </a>
-                            )}
-                          </div>
-                          <div style={{ color: C.ink, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                            {iss.issue_text || <span style={{ color: C.inkFaint }}>— no text</span>}
-                          </div>
-                        </div>
-                      </div>
+                      <IssueRow key={iss.id}
+                        iss={iss}
+                        isResolved={isResolved}
+                        elapsedFmt={issElapsedFmt}
+                        hasGps={issHasGps}
+                        inFlight={inFlight}
+                        onResolve={(note) => resolveIssue(iss, note)}
+                        fmtClock={fmtClock}
+                      />
                     );
                   })}
                 </div>
@@ -14381,6 +14541,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           scrollEventId={drawerScrollEventId}
           onClose={closeDrawer}
           db={db}
+          setDb={setDb}
           navigate={navigate}
           live={live}
         />
