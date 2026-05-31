@@ -4426,6 +4426,26 @@ function formatShiftDuration(seconds, opts) {
   return h > 0 ? (h + 'h ' + m + 'm') : (m + 'm');
 }
 
+// MM/DD/YYYY in America/Denver. Used wherever a "Last: event time" line
+// renders so dispatchers can tell which day's shift the event belongs
+// to without parsing relative phrasing. Robert explicitly rejected
+// "today"/"yesterday"/"2 days ago" wording — always absolute MT date.
+//
+// Time zone matters: a 11:55 PM MT event on 5/30 would render as 5/31
+// if we calendar'd in UTC. en-US locale + timeZone option keeps the
+// civil date aligned with operations.
+function fmtMtDate(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (!Number.isFinite(d.getTime())) return '';
+    return d.toLocaleDateString('en-US', {
+      timeZone: 'America/Denver',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+    });
+  } catch (_) { return ''; }
+}
+
 // =====================================================================
 // adminBackfillToDriverTables — admin write path into the canonical store
 // =====================================================================
@@ -12585,7 +12605,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
     : 0;
   const lastEv = drawerBucket ? drawerBucket.lastEvent : null;
   const lastEvStr = lastEv
-    ? (eventLabel(lastEv.event_type) + ' · ' + fmtClock(lastEv.event_at) + ' MT')
+    ? (eventLabel(lastEv.event_type) + ' · ' + fmtClock(lastEv.event_at) + ' MT · ' + fmtMtDate(lastEv.event_at))
     : '—';
 
   return (
@@ -12864,7 +12884,10 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                       background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.md,
                       fontSize: 12.5, transition: 'box-shadow 200ms ease-out',
                     }}>
-                      <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64 }}>{fmtClock(e.event_at)}</span>
+                      <span style={{ fontFamily: F.mono, color: C.inkDim, flexShrink: 0, width: 64, display: 'flex', flexDirection: 'column', lineHeight: 1.15 }}>
+                        <span>{fmtClock(e.event_at)}</span>
+                        <span style={{ color: C.inkFaint, fontSize: 9.5 }}>{fmtMtDate(e.event_at)}</span>
+                      </span>
                       <span style={{ fontWeight: 700, color: eventColor(e.event_type), flexShrink: 0, width: 70, display: 'flex', alignItems: 'center', gap: 4 }}>
                         {eventLabel(e.event_type)}
                         {isPickup && cyForLoad > 0 && (
@@ -12996,7 +13019,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         const startedAgo = formatShiftDuration(
           computeShiftHours(cs).currentShiftSeconds
         );
-        const lastEvFmt = cLastEv ? fmtClock(cLastEv.event_at) : '—';
+        const lastEvFmt = cLastEv ? (fmtClock(cLastEv.event_at) + ' · ' + fmtMtDate(cLastEv.event_at)) : '—';
         const lastEvAgo = cLastEv
           ? formatShiftDuration(Math.max(0, Math.floor((Date.now() - new Date(cLastEv.event_at).getTime()) / 1000)))
           : '—';
@@ -13212,7 +13235,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     const isOver8h = !isEnded && shiftSec > 8 * 3600;
     const cyToday = cyPerLoad * b.pickupCount;
     const lastEvStr = b.lastEvent
-      ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at)
+      ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at) + ' · ' + fmtMtDate(b.lastEvent.event_at)
       : '—';
     const statusColor = isEnded ? C.inkFaint
                       : isOver8h ? (C.danger || C.warn)
@@ -13240,7 +13263,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
               : lastEv.event_type === 'dropoff_load' ? 'Drop-off'
               : lastEv.event_type === 'end_shift' ? 'End shift'
               : lastEv.event_type;
-    return `Last: ${lbl} ${fmtClock(lastEv.event_at)}`;
+    return `Last: ${lbl} ${fmtClock(lastEv.event_at)} · ${fmtMtDate(lastEv.event_at)}`;
   };
   const issuesArr = live.issues || [];
 
@@ -13616,7 +13639,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
       return map[tt] || tt || '—';
     };
     const lastEvBlurb = b.lastEvent
-      ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)}`
+      ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)} · ${fmtMtDate(b.lastEvent.event_at)}`
       : 'Just clocked in';
     const metaLine = [
       truckPlate ? '#' + truckPlate : null,
@@ -13923,7 +13946,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
         <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
           <div style={{ ...T.caption, color: C.inkDim }}>
             {b.events.length === 0 ? 'No events yet'
-              : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)}</>}
+              : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)} · {fmtMtDate(b.lastEvent.event_at)}</>}
           </div>
           <div style={{ ...T.caption, color: C.inkFaint }}>
             {b.pickupCount} pickup{b.pickupCount === 1 ? '' : 's'} · {b.dropCount} drop · {photoCount} photo{photoCount === 1 ? '' : 's'}
@@ -14021,7 +14044,7 @@ function dispatchExportRows(buckets, trucksById) {
     const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
     const cyToday = cyPerLoad * b.pickupCount;
     const lastEvStr = b.lastEvent
-      ? `${eventLabel(b.lastEvent.event_type)} ${fmtClockShort(b.lastEvent.event_at)}`
+      ? `${eventLabel(b.lastEvent.event_type)} ${fmtClockShort(b.lastEvent.event_at)} · ${fmtMtDate(b.lastEvent.event_at)}`
       : '—';
     // 2026-05-31: rate + dollars today via shared helper.
     const hourlyRate = sessionHourlyRate(sess, trucksById);
