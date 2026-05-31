@@ -13989,24 +13989,46 @@ function dispatchExportRows(buckets, trucksById) {
                           : et === 'end_shift' ? 'End shift'
                           : et || '—';
 
-  // Group + sort.
-  const grouped = new Map();
+  // Sort order (2026-05-31, two-level grouping pass):
+  //   1. Date desc — MT date of started_at, newest day on top.
+  //   2. Hauler alpha within date — Unassigned sinks to bottom.
+  //   3. started_at desc within hauler — newest session first.
+  // Matches the on-screen Dispatch grouping so the export reads like a
+  // print of what the dispatcher sees.
+  const dateKeyForSort = (s) => {
+    if (!s || !s.started_at) return '';
+    return fmtMtDate(s.started_at); // MM/DD/YYYY in MT
+  };
+  const parseDateKey = (s) => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+    if (!m) return 0;
+    return new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2])).getTime();
+  };
+  // Group: date -> hauler -> [buckets]
+  const byDate = new Map();
   for (const b of buckets) {
     if (!b.session) continue;
-    const key = normalizeHauler(b.session.company);
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key).push(b);
+    const dk = dateKeyForSort(b.session);
+    if (!byDate.has(dk)) byDate.set(dk, new Map());
+    const haulerMap = byDate.get(dk);
+    const hkey = normalizeHauler(b.session.company);
+    if (!haulerMap.has(hkey)) haulerMap.set(hkey, []);
+    haulerMap.get(hkey).push(b);
   }
-  const groupNames = Array.from(grouped.keys())
-    .filter(k => k !== '__unassigned__')
-    .sort((a, b) => a.localeCompare(b));
-  if (grouped.has('__unassigned__')) groupNames.push('__unassigned__');
+  const dateKeysDesc = Array.from(byDate.keys()).sort((a, b) => parseDateKey(b) - parseDateKey(a));
   const ordered = [];
-  for (const k of groupNames) {
-    const bs = grouped.get(k).slice().sort((a, b) =>
-      String(b.session.started_at || '').localeCompare(String(a.session.started_at || ''))
-    );
-    for (const b of bs) ordered.push(b);
+  for (const dk of dateKeysDesc) {
+    const haulerMap = byDate.get(dk);
+    const hnames = Array.from(haulerMap.keys())
+      .filter(k => k !== '__unassigned__')
+      .sort((a, b) => a.localeCompare(b));
+    if (haulerMap.has('__unassigned__')) hnames.push('__unassigned__');
+    for (const k of hnames) {
+      const bs = haulerMap.get(k).slice().sort((a, b) =>
+        String(b.session.started_at || '').localeCompare(String(a.session.started_at || ''))
+      );
+      for (const b of bs) ordered.push(b);
+    }
   }
   // Build row objects + the hauler-label per row so the PDF can draw
   // section bands.
@@ -14030,8 +14052,9 @@ function dispatchExportRows(buckets, trucksById) {
     const hourlyRate = sessionHourlyRate(sess, trucksById);
     const dollarsToday = sessionDollarsToday(sess, trucksById);
     return {
-      // Hidden helper for PDF section breaks:
-      __haulerKey: normalizeHauler(sess.company),
+      // Hidden helpers for PDF section breaks:
+      __dateKey: dateKeyForSort(sess),                                  // MM/DD/YYYY in MT — primary section
+      __haulerKey: normalizeHauler(sess.company),                       // secondary section within date
       __haulerDisplay: company === 'Unassigned' ? 'Unassigned' : company,
       // Columns:
       driver: sess.driver_name || '—',
@@ -14207,17 +14230,23 @@ async function exportDispatchPDF(rows, filter) {
     'Last Event', 'Notes']];
   const COL_COUNT = 15;
   const body = [];
-  let lastHaulerKey = null;
+  let lastDateKey = null;
+  let lastSectionKey = null;
   for (const r of rows) {
-    if (r.__haulerKey !== lastHaulerKey) {
+    const sectionKey = (r.__dateKey || '') + '|' + (r.__haulerKey || '');
+    if (sectionKey !== lastSectionKey) {
+      // Count sessions in THIS (date, hauler) section for the trailing
+      // "· N sessions" tag. Walks rows once per section start; small enough
+      // for the export-sized lists this PDF handles.
+      const sectionSize = rows.filter(x =>
+        ((x.__dateKey || '') + '|' + (x.__haulerKey || '')) === sectionKey
+      ).length;
+      const datePrefix = r.__dateKey ? (r.__dateKey + '  ·  ') : '';
       // Section-break pseudo-row. Marked via a sentinel object so
       // didParseCell can recolor it.
       body.push([{
-        content: r.__haulerDisplay.toUpperCase() + '  ·  ' + (
-          rows.filter(x => x.__haulerKey === r.__haulerKey).length
-        ) + ' session' + (
-          rows.filter(x => x.__haulerKey === r.__haulerKey).length === 1 ? '' : 's'
-        ),
+        content: datePrefix + r.__haulerDisplay.toUpperCase() + '  ·  '
+                 + sectionSize + ' session' + (sectionSize === 1 ? '' : 's'),
         colSpan: COL_COUNT,
         styles: {
           fillColor: JE_GREEN,
@@ -14228,7 +14257,8 @@ async function exportDispatchPDF(rows, filter) {
           cellPadding: { top: 5, right: 8, bottom: 5, left: 8 },
         },
       }]);
-      lastHaulerKey = r.__haulerKey;
+      lastSectionKey = sectionKey;
+      lastDateKey = r.__dateKey || null;
     }
     body.push([
       r.driver, r.company, r.truckType, r.plate, r.status,
@@ -14330,12 +14360,15 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   }, [allTrucks]);
 
   // 2026-05-31 (Dispatch rename + filters): three-way segmented filter
-  // above the hauler-grouped grid. Declared HERE — above filteredBuckets
-  // — so the JS Temporal Dead Zone doesn't bite the useMemo.
-  // 2026-05-31: honour ?filter=<all|on_shift|off_shift> in the hash
-  // query string so the "View all in Dispatch →" link from the
-  // Hauling Overview embed lands on the same filter the user was
-  // viewing. Falls back to 'on_shift' for direct navigations.
+  // above the date/hauler-grouped grid. Declared HERE — above
+  // filteredBuckets — so the JS Temporal Dead Zone doesn't bite the
+  // useMemo.
+  // Default changed to 'all' (2026-05-31, second pass): the page opens
+  // showing every session across every date. On Shift / Off Shift
+  // narrow to live or completed sessions respectively. The "View all
+  // in Dispatch →" link from the Hauling Overview embed still passes
+  // ?filter=<all|on_shift|off_shift> in the hash query string to
+  // preserve whatever filter the dispatcher had selected upstream.
   const initialDispatchFilter = (() => {
     try {
       const h = (typeof window !== 'undefined' && window.location && window.location.hash) || '';
@@ -14344,7 +14377,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
       const f = params.get('filter');
       if (f === 'all' || f === 'on_shift' || f === 'off_shift') return f;
     } catch (e) {}
-    return 'on_shift';
+    return 'all';
   })();
   const [dispatchFilter, setDispatchFilter] = React.useState(initialDispatchFilter);
 
@@ -14631,83 +14664,135 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           </div>
         </Card>
       ) : (() => {
-        // 2026-05-30 (Hauler grouping): bucket filteredBuckets by
-        // session.company. Unassigned sinks to the bottom; the rest
-        // sort alphabetically. The grouping key normalizes whitespace
-        // + case so 'J&C' and 'j&c' don't render as two sections.
-        // Display label preserves the first non-empty original casing.
+        // 2026-05-31 (Two-level grouping): bucket filteredBuckets first
+        // by MT date of started_at (newest day on top), then by hauler
+        // within each date (alpha, Unassigned last). Empty dates and
+        // empty haulers are skipped — if a day has no sessions, no
+        // header renders for it.
+        //
+        // Grouping key normalizes whitespace + case so 'J&C' and 'j&c'
+        // don't render as two sub-sections; display label preserves
+        // the first non-empty original casing.
         const normalizeHaulerKey = (s) => {
           if (s == null) return '__unassigned__';
           const cleaned = String(s).trim().replace(/\s+/g, ' ');
           return cleaned ? cleaned.toUpperCase() : '__unassigned__';
         };
-        const grouped = new Map();
+        // Date key = the started_at moment rendered as MM/DD/YYYY in
+        // America/Denver. Reuses fmtMtDate so the date header text on
+        // the section matches the date stamps inside each card.
+        const dateKey = (sess) => sess && sess.started_at ? fmtMtDate(sess.started_at) : '';
+
+        // 1) Group by date.
+        const byDate = new Map();
         for (const b of filteredBuckets) {
-          const key = normalizeHaulerKey(b.session.company);
-          if (!grouped.has(key)) grouped.set(key, []);
-          grouped.get(key).push(b);
+          const dk = dateKey(b.session);
+          if (!dk) continue;
+          if (!byDate.has(dk)) byDate.set(dk, []);
+          byDate.get(dk).push(b);
         }
-        const groupNames = Array.from(grouped.keys())
-          .filter(k => k !== '__unassigned__')
-          .sort((a, b) => a.localeCompare(b));
-        if (grouped.has('__unassigned__')) groupNames.push('__unassigned__');
-        // 2026-05-31: count label reflects the filter — "active" while
-        // on-shift, "completed" while off-shift, "session(s)" for the
-        // mixed 'all' view.
-        const countLabel = (n) => {
-          if (dispatchFilter === 'off_shift') return `${n} completed`;
-          if (dispatchFilter === 'on_shift')  return `${n} active`;
-          return `${n} session${n === 1 ? '' : 's'}`;
+        // Date sections descending. MM/DD/YYYY sorts lexicographically
+        // wrong (months come before years), so parse to Date for the
+        // compare.
+        const parseDateKey = (s) => {
+          const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s);
+          if (!m) return 0;
+          return new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2])).getTime();
         };
+        const dateKeysDesc = Array.from(byDate.keys())
+          .sort((a, b) => parseDateKey(b) - parseDateKey(a));
+
+        // 2) Within each date, sub-group by hauler.
+        const haulerSubGroupsForDate = (buckets) => {
+          const grouped = new Map();
+          for (const b of buckets) {
+            const key = normalizeHaulerKey(b.session.company);
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key).push(b);
+          }
+          // Sort cards within each hauler by started_at descending.
+          for (const arr of grouped.values()) {
+            arr.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+          }
+          const names = Array.from(grouped.keys())
+            .filter(k => k !== '__unassigned__')
+            .sort((a, b) => a.localeCompare(b));
+          if (grouped.has('__unassigned__')) names.push('__unassigned__');
+          return names.map(key => ({
+            key,
+            cards: grouped.get(key),
+            isUnassigned: key === '__unassigned__',
+            originalDisplay: key === '__unassigned__'
+              ? 'Unassigned'
+              : (grouped.get(key).find(b => b.session.company && b.session.company.trim()) || grouped.get(key)[0]).session.company.trim(),
+          }));
+        };
+
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
-            {groupNames.map(key => {
-              const cards = grouped.get(key);
-              const isUnassigned = key === '__unassigned__';
-              const originalDisplay = !isUnassigned
-                ? (cards.find(b => b.session.company && b.session.company.trim()) || cards[0]).session.company.trim()
-                : 'Unassigned';
-              const headerLabel = originalDisplay;
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[6] }}>
+            {dateKeysDesc.map(dk => {
+              const dateBuckets = byDate.get(dk);
+              const haulerGroups = haulerSubGroupsForDate(dateBuckets);
               return (
-                <div key={key}>
+                <div key={dk}>
+                  {/* Date header — most prominent, full-width, accent rule below */}
                   <div style={{
-                    display: 'flex', alignItems: 'baseline', gap: S[2],
-                    paddingBottom: S[2], marginBottom: S[3],
-                    borderBottom: `1px solid ${C.rule}`,
+                    display: 'flex', alignItems: 'baseline', gap: S[3],
+                    paddingBottom: S[2], marginBottom: S[4],
+                    borderBottom: `2px solid ${C.accent}`,
                   }}>
-                    <div style={{ ...T.h4, fontWeight: 700, color: isUnassigned ? C.inkFaint : C.ink,
-                                  letterSpacing: -0.2, textTransform: 'uppercase' }}>
-                      {headerLabel}
+                    <div style={{ ...T.h3, fontWeight: 700, color: C.ink, letterSpacing: -0.3, fontFamily: F.mono }}>
+                      {dk}
                     </div>
                     <div style={{ ...T.caption, color: C.inkDim }}>
-                      {countLabel(cards.length)}
+                      {dateBuckets.length} session{dateBuckets.length === 1 ? '' : 's'}
                     </div>
                   </div>
-                  <div className="jse-active-trucks-grid" style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                    gap: S[3],
-                  }}>
-                    {cards.map(b => (
-                      <ActiveTruckCard
-                        key={b.session.id}
-                        b={b}
-                        trucksById={trucksById}
-                        live={live}
-                        onOpenDrawer={(eventId) => {
-                          setDrawerScrollEventId(eventId || null);
-                          setDrawerSessionId(b.session.id);
-                        }}
-                        onEdit={() => {
-                          setDrawerScrollEventId(null);
-                          setDrawerSessionId(b.session.id);
-                        }}
-                        onDelete={() => setDeleteConfirmFor(b)}
-                        fmtClock={fmtClock}
-                        fmtElapsed={fmtElapsed}
-                        eventLabel={eventLabel}
-                        eventColor={eventColor}
-                      />
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
+                    {haulerGroups.map(({ key, cards, isUnassigned, originalDisplay }) => (
+                      <div key={key}>
+                        {/* Hauler sub-header — smaller than date, no accent rule */}
+                        <div style={{
+                          display: 'flex', alignItems: 'baseline', gap: S[2],
+                          marginBottom: S[2],
+                        }}>
+                          <div style={{ ...T.bodySm, fontWeight: 700,
+                                        color: isUnassigned ? C.inkFaint : C.ink,
+                                        letterSpacing: 0.2, textTransform: 'uppercase' }}>
+                            {originalDisplay}
+                          </div>
+                          <div style={{ ...T.micro, color: C.inkDim, fontFamily: F.mono, letterSpacing: 0.4 }}>
+                            · {cards.length}
+                          </div>
+                        </div>
+                        <div className="jse-active-trucks-grid" style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                          gap: S[3],
+                        }}>
+                          {cards.map(b => (
+                            <ActiveTruckCard
+                              key={b.session.id}
+                              b={b}
+                              trucksById={trucksById}
+                              live={live}
+                              onOpenDrawer={(eventId) => {
+                                setDrawerScrollEventId(eventId || null);
+                                setDrawerSessionId(b.session.id);
+                              }}
+                              onEdit={() => {
+                                setDrawerScrollEventId(null);
+                                setDrawerSessionId(b.session.id);
+                              }}
+                              onDelete={() => setDeleteConfirmFor(b)}
+                              fmtClock={fmtClock}
+                              fmtElapsed={fmtElapsed}
+                              eventLabel={eventLabel}
+                              eventColor={eventColor}
+                            />
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>
