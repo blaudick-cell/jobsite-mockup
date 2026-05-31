@@ -445,6 +445,124 @@
       border-radius: 50%; border: 3px solid #0A0A0A;
       box-shadow: 0 1px 4px #0000008c;
     }
+
+    /* =====================================================================
+       MOBILE RESPONSIVENESS PASS (2026-05-30)
+       Single breakpoint at 640px. Rules below are additive — desktop
+       layouts unaffected. JS components also consult the useIsMobile()
+       hook for shape changes that CSS can't pull off (table → cards,
+       side-drawer → bottom-sheet, sidebar → hamburger).
+       ===================================================================== */
+    .jse-hide-mobile { }
+    .jse-show-mobile { display: none !important; }
+    @media (max-width: 640px) {
+      .jse-hide-mobile { display: none !important; }
+      .jse-show-mobile { display: initial !important; }
+
+      /* Tighter page padding so content doesn't bleed off-screen. */
+      body { font-size: 14px; }
+
+      /* The h1 hero on every admin page is too large on phones. Shrink
+         display sizes globally; React components hand-set inline font-
+         size, so this only catches plain headings. Targeted overrides
+         below. */
+      h1 { font-size: 24px !important; letter-spacing: -0.5px !important; }
+      h2 { font-size: 20px !important; }
+
+      /* Hauling Overview capacity-summary header — let the three
+         "X drivers active · Y CY/load · Z CY hauled" pills wrap +
+         shrink rather than scrolling sideways. */
+      .jse-capacity-summary-row {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+      }
+      .jse-capacity-summary-stats {
+        flex-wrap: wrap !important;
+        gap: 12px !important;
+      }
+
+      /* Tables on mobile: hide them in favour of the card-stack
+         (DriverActivityTable handles this via the useIsMobile hook,
+         but legacy admin tables that aren't yet hook-aware just get
+         a horizontal scroll so nothing crashes). */
+      .jse-table-card-stack { display: flex !important; flex-direction: column; gap: 8px; }
+      .jse-mobile-scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Hauler grouping section headers stack tightly. */
+      .jse-active-trucks-group-header { gap: 6px !important; }
+
+      /* Bench-trucks table (AdminActiveTrucks) — let it horizontal-
+         scroll instead of breaking the layout. */
+      .jse-bench-trucks-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Active Trucks card grid: ensure single column. The
+         repeat(auto-fill, minmax(320px, 1fr)) already does this since
+         the viewport is < 320px, but lock it in explicitly. */
+      .jse-active-trucks-grid { grid-template-columns: 1fr !important; }
+
+      /* Filter/sort bars: stack pills under the search input. */
+      .jse-filter-bar { flex-direction: column !important; align-items: stretch !important; }
+
+      /* Landing-page audience cards (Dispatchers / Fleet managers) —
+         stack 1-up + shrink heading. */
+      .jse-landing-audience-grid { grid-template-columns: 1fr !important; gap: 16px !important; }
+      .jse-landing-hero h1 { font-size: 32px !important; line-height: 1.1 !important; }
+      .jse-landing-hero p, .jse-landing-hero div { font-size: 15px !important; }
+
+      /* Sidebar — hidden by default, slides in as an overlay when the
+         hamburger flips state. The AdminSidebar component owns the
+         state; we just provide the offscreen-by-default rule here. */
+      .jse-sidebar-overlay {
+        position: fixed !important; inset: 0 !important; z-index: 600 !important;
+        background: rgba(0,0,0,0.65) !important;
+      }
+      .jse-sidebar-hidden { display: none !important; }
+
+      /* Drawer-as-bottom-sheet — the DriverSessionDrawer container
+         swaps to this class on mobile. Full-width, slides up from
+         the bottom, max-height 90vh so the user can dismiss by
+         tapping the dark backdrop above. */
+      .jse-drawer-sheet {
+        align-items: flex-end !important;
+        justify-content: stretch !important;
+      }
+      .jse-drawer-sheet > div {
+        max-width: 100% !important;
+        width: 100% !important;
+        max-height: 90vh !important;
+        border-left: none !important;
+        border-top: 1px solid #2A2A2A !important;
+        border-top-left-radius: 14px !important;
+        border-top-right-radius: 14px !important;
+        box-shadow: 0 -24px 64px rgba(0,0,0,0.45) !important;
+      }
+
+      /* End-shift confirmation modal scrolls if content overflows. */
+      .jse-confirm-modal > div { max-height: 92vh !important; }
+
+      /* Hit-target floor — bump the close-X buttons in modals/drawers
+         so a thumb actually catches them. */
+      .jse-close-btn { min-width: 44px !important; min-height: 44px !important; padding: 10px 14px !important; }
+
+      /* Tighten the outer padding on admin pages so content gets the
+         full viewport width on a phone. Targets `<main>` inside the
+         AdminShell flex container — every admin page renders inside
+         this so one rule covers them all. */
+      main > div[style*="padding: 32px"],
+      main > div[style*="padding:32px"] {
+        padding: 16px !important;
+      }
+
+      /* Admin-Active-Trucks KPI cards: 3-up → 2-up on phones (the
+         page heading + KPI strip is the only horizontal-scroll trap
+         we still have if rates/hauler names get long). */
+      .jse-active-trucks-kpis { grid-template-columns: repeat(2, 1fr) !important; }
+
+      /* DriverSessionDrawer mini-map shrinks on phones so the meta
+         block + event timeline get more room above the fold. */
+      .jse-drawer-minimap { height: 140px !important; }
+    }
   </style>
 </head>
 <body>
@@ -3884,6 +4002,33 @@ function subscribeRealtime(setDbRaw, bumpRemote) {
 // subscriptions cleanly coexist + can be torn down independently.
 const DRIVER_LIVE_TABLES = ['driver_sessions', 'truck_events', 'event_photos', 'issue_reports'];
 
+// =====================================================================
+// useIsMobile — single 640px breakpoint hook
+// =====================================================================
+// 2026-05-30 (Mobile pass): components that need to swap SHAPE on
+// mobile (table → card stack, side-drawer → bottom-sheet, sidebar →
+// hamburger overlay) consult this hook. CSS @media handles font-size
+// + spacing tweaks elsewhere; this hook covers the cases CSS can't
+// pull off with inline-style React components.
+//
+// Listens to window resize so the layout reflows when a phone is
+// rotated. Initial value falls back to false during SSR / pre-mount
+// — caller should treat that as "desktop until proven otherwise".
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = React.useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth <= breakpoint;
+  });
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onResize = () => setIsMobile(window.innerWidth <= breakpoint);
+    window.addEventListener('resize', onResize);
+    onResize();
+    return () => window.removeEventListener('resize', onResize);
+  }, [breakpoint]);
+  return isMobile;
+}
+
 function useDriverSessionsLive() {
   const [state, setState] = React.useState({
     sessions: [], events: [], photos: [], issues: [],
@@ -4235,7 +4380,7 @@ function Landing({ navigate }) {
       </div>
 
       {/* === 1. Hero === */}
-      <section id="hero" style={{ borderBottom: `1px solid ${C.rule}` }}>
+      <section id="hero" className="jse-landing-hero" style={{ borderBottom: `1px solid ${C.rule}` }}>
         <div style={{ ...sectionShell, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[8], alignItems: 'center' }}>
           {/* Left — copy + CTAs */}
           <div>
@@ -4297,7 +4442,7 @@ function Landing({ navigate }) {
           <h2 style={{ ...T.h2Lg, margin: `${S[3]}px 0 ${S[6]}px`, color: C.ink }}>
             Built for the people who actually move dirt.
           </h2>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
+          <div className="jse-landing-audience-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
             {audience.map((a) => {
               const Icon = a.Icon;
               return (
@@ -11950,6 +12095,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
       aria-modal="true"
       aria-label={`Session detail for ${sess ? (sess.driver_name || '—') : (truckPlate ? '#' + truckPlate : 'truck')}`}
       onClick={onClose}
+      className="jse-drawer-sheet"
       style={{
         position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 400,
         display: 'flex', alignItems: 'stretch', justifyContent: 'flex-end',
@@ -11983,7 +12129,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
                 : <span style={{ color: C.inkFaint }}>No active driver session for this truck</span>}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Close" style={{
+          <button onClick={onClose} aria-label="Close" className="jse-close-btn" style={{
             background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
             padding: '6px 12px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
             fontWeight: 700, letterSpacing: 0.5, cursor: 'pointer',
@@ -12050,7 +12196,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
               full-width before the meta grid so it stays readable at
               the narrower 460-520px drawer width). */}
           {sess && (
-            <div ref={mapContainerRef} style={{
+            <div ref={mapContainerRef} className="jse-drawer-minimap" style={{
               width: '100%', height: 180,
               border: `1px solid ${C.rule}`, borderRadius: R.md,
               overflow: 'hidden', background: C.surface,
@@ -12392,6 +12538,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
 function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false }) {
   const ownLive = useDriverSessionsLive();
   const live = liveProp || ownLive;
+  const isMobile = useIsMobile();
 
   const trucksById = React.useMemo(() => {
     const m = new Map();
@@ -12456,9 +12603,31 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     ? 'No drivers on shift right now. Sessions surface here as drivers clock in.'
     : 'No driver sessions yet. The first widget clock-in will appear here.';
 
+  // Per-row computed data — shared between desktop table and mobile
+  // card stack. Pulled out so the render path is single-source.
+  const decoratedRows = rows.map(b => {
+    const sess = b.session;
+    const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+    const truckType = truck ? truck.type : sess.truck_type;
+    const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+    const isEnded = !!sess.ended_at;
+    const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
+    const isOver8h = !isEnded && shiftSec > 8 * 3600;
+    const cyToday = cyPerLoad * b.pickupCount;
+    const lastEvStr = b.lastEvent
+      ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at)
+      : '—';
+    const statusColor = isEnded ? C.inkFaint
+                      : isOver8h ? (C.danger || C.warn)
+                      : C.ok;
+    const statusSoft = isOver8h ? C.warnSoft : (isEnded ? 'rgba(255,255,255,0.04)' : C.okSoft);
+    const statusLabel = isEnded ? 'Ended' : isOver8h ? 'Over 8h' : 'On shift';
+    return { b, sess, truckType, cyPerLoad, isEnded, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel };
+  });
+
   return (
     <>
-      <div style={{
+      <div className="jse-capacity-summary-row" style={{
         marginBottom: S[3],
         display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
         gap: S[3], flexWrap: 'wrap',
@@ -12467,29 +12636,102 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
         {/* 2026-05-30: capacity-summary header (originally on the
             standalone Active Drivers capacity strip). Folded in so
             "X drivers active · Y CY/load combined · Z CY hauled today"
-            sits right next to the table on Hauling Overview. */}
+            sits right next to the table on Hauling Overview. On mobile
+            this row stacks via the .jse-capacity-summary-row CSS. */}
         {showCapacitySummary && rows.length > 0 && (
-          <div style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
+          <div className="jse-capacity-summary-stats" style={{ display: 'flex', gap: S[4], flexWrap: 'wrap', ...T.caption, color: C.inkDim }}>
             <span><span style={{ color: C.ok, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.count}</span> driver{capacitySummary.count === 1 ? '' : 's'} active</span>
             <span><span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyPerLoadCombined}</span> CY/load combined</span>
             <span><span style={{ color: C.ink, fontFamily: F.mono, fontWeight: 700 }}>{capacitySummary.cyHauledToday}</span> CY hauled today</span>
           </div>
         )}
       </div>
-      <Card padding={0} style={{ marginBottom: S[5] }}>
-        {live.loading && rows.length === 0 ? (
+      {live.loading && rows.length === 0 ? (
+        <Card padding={0} style={{ marginBottom: S[5] }}>
           <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
             Loading driver sessions…
           </div>
-        ) : live.error ? (
+        </Card>
+      ) : live.error ? (
+        <Card padding={0} style={{ marginBottom: S[5] }}>
           <div style={{ ...T.bodySm, color: C.warn, textAlign: 'center', padding: S[5] }}>
             Live driver data unavailable — {live.error}
           </div>
-        ) : rows.length === 0 ? (
+        </Card>
+      ) : rows.length === 0 ? (
+        <Card padding={0} style={{ marginBottom: S[5] }}>
           <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5] }}>
             {emptyMessage}
           </div>
-        ) : (
+        </Card>
+      ) : isMobile ? (
+        /* 2026-05-30 (Mobile pass): wide tables don't fit phone
+           viewports. On mobile we stack each row as a vertical card
+           with labeled fields. Same data, scannable shape, no
+           horizontal scroll. Card click still opens the drawer. */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: S[2], marginBottom: S[5] }}>
+          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel }) => (
+            <Card key={sess.id} padding={S[3]} style={{
+              cursor: 'pointer',
+              background: isOver8h ? 'rgba(239,68,68,0.06)' : undefined,
+            }}>
+              <div onClick={() => setDrawerSessionId(sess.id)}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
+                      {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
+                    </div>
+                    <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+                      {sess.company || <span style={{ color: C.inkFaint }}>— unassigned</span>}
+                    </div>
+                  </div>
+                  <Pill color={statusColor} soft={statusSoft}>{statusLabel}</Pill>
+                </div>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(2, 1fr)',
+                  gap: '8px 12px',
+                  marginTop: S[2], paddingTop: S[2],
+                  borderTop: `1px solid ${C.rule}`,
+                  fontSize: 12,
+                }}>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>TRUCK</div>
+                    <div style={{ ...T.bodySm, color: C.ink, marginTop: 2 }}>
+                      <span style={{ fontFamily: F.mono }}>{truckType || '—'}</span>
+                      <span style={{ color: C.accent, marginLeft: 6, fontFamily: F.mono, fontWeight: 700 }}>{cyPerLoad}</span>
+                      <span style={{ color: C.inkDim, fontSize: 11 }}> CY/load</span>
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>STARTED</div>
+                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>{fmtClock(sess.started_at)}</div>
+                  </div>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>SHIFT TIME</div>
+                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</div>
+                  </div>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>CY TODAY</div>
+                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, fontWeight: 700, marginTop: 2 }}>{cyToday}</div>
+                  </div>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>LOADS</div>
+                    <div style={{ ...T.bodySm, color: C.ink, fontFamily: F.mono, marginTop: 2 }}>
+                      {b.pickupCount} pickup · {b.dropCount} drop
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ ...T.micro, color: C.inkFaint }}>LAST EVENT</div>
+                    <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, fontSize: 11.5 }}>{lastEvStr}</div>
+                  </div>
+                </div>
+              </div>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Card padding={0} style={{ marginBottom: S[5] }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
@@ -12507,50 +12749,29 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
               </tr>
             </thead>
             <tbody>
-              {rows.map(b => {
-                const sess = b.session;
-                const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
-                const truckType = truck ? truck.type : sess.truck_type;
-                const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
-                const isEnded = !!sess.ended_at;
-                const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
-                const isOver8h = !isEnded && shiftSec > 8 * 3600;
-                const cyToday = cyPerLoad * b.pickupCount;
-                const lastEvStr = b.lastEvent
-                  ? eventLabel(b.lastEvent.event_type) + ' · ' + fmtClock(b.lastEvent.event_at)
-                  : '—';
-                const statusColor = isEnded ? C.inkFaint
-                                  : isOver8h ? (C.danger || C.warn)
-                                  : C.ok;
-                const statusLabel = isEnded ? 'Ended'
-                                  : isOver8h ? 'Over 8h'
-                                  : 'On shift';
-                return (
-                  <Tr key={sess.id}
-                      onClick={() => setDrawerSessionId(sess.id)}
-                      style={isOver8h ? { background: 'rgba(239,68,68,0.06)' } : null}>
-                    <Td>
-                      <Pill color={statusColor} soft={isOver8h ? C.warnSoft : (isEnded ? 'rgba(255,255,255,0.04)' : C.okSoft)}>
-                        {statusLabel}
-                      </Pill>
-                    </Td>
-                    <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                    <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                    <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
-                    <Td align="right" mono>{cyPerLoad || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                    <Td mono>{fmtClock(sess.started_at)}</Td>
-                    <Td mono>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
-                    <Td align="right" mono>{b.pickupCount}</Td>
-                    <Td align="right" mono>{b.dropCount}</Td>
-                    <Td align="right" mono>{cyToday}</Td>
-                    <Td><span style={{ ...T.caption, color: C.inkDim }}>{lastEvStr}</span></Td>
-                  </Tr>
-                );
-              })}
+              {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel }) => (
+                <Tr key={sess.id}
+                    onClick={() => setDrawerSessionId(sess.id)}
+                    style={isOver8h ? { background: 'rgba(239,68,68,0.06)' } : null}>
+                  <Td>
+                    <Pill color={statusColor} soft={statusSoft}>{statusLabel}</Pill>
+                  </Td>
+                  <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                  <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                  <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
+                  <Td align="right" mono>{cyPerLoad || <span style={{ color: C.inkFaint }}>—</span>}</Td>
+                  <Td mono>{fmtClock(sess.started_at)}</Td>
+                  <Td mono>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
+                  <Td align="right" mono>{b.pickupCount}</Td>
+                  <Td align="right" mono>{b.dropCount}</Td>
+                  <Td align="right" mono>{cyToday}</Td>
+                  <Td><span style={{ ...T.caption, color: C.inkDim }}>{lastEvStr}</span></Td>
+                </Tr>
+              ))}
             </tbody>
           </table>
-        )}
-      </Card>
+        </Card>
+      )}
 
       {/* Drawer opens for the clicked row. Hoists out of the table so
           the parent grid doesn't clip its overlay. */}
@@ -12871,7 +13092,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
             renders inside the drawer where the action originates. */}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
+      <div className="jse-active-trucks-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[6] }}>
         <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="shift in progress" /></Card>
         <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not on shift" /></Card>
         <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
@@ -12940,7 +13161,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                       {cards.length} active
                     </div>
                   </div>
-                  <div style={{
+                  <div className="jse-active-trucks-grid" style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
                     gap: S[3],
@@ -12972,8 +13193,8 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
       {benchedTrucks.length > 0 && (
         <div style={{ marginTop: S[6] }}>
           <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
-          <Card padding={0}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <Card padding={0} className="jse-bench-trucks-table-wrap">
+            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
               <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
               <tbody>
                 {benchedTrucks.map(t => {
@@ -14033,7 +14254,7 @@ function AdminShell({ db, setDb, navigate, hash }) {
       <Topbar navigate={navigate} role="Admin" current="Admin - all hauls" right={chromeMenu} />
       <div style={{ display: 'flex', alignItems: 'stretch', minHeight: 'calc(100vh - 56px)' }}>
         <aside
-          className="admin-sidebar"
+          className="admin-sidebar jse-hide-mobile"
           style={{
             width: 240, flexShrink: 0,
             background: C.surface, borderRight: `1px solid ${C.rule}`,
