@@ -374,6 +374,23 @@
       gap: 4px;
     }
     .site-cond-strip > * { min-width: 0; }
+    /* Site Conditions — compact 2x2 + tightened recommendation cards on phones.
+       Desktop layout is unchanged. Mobile targets the top stat grid (4 blocks),
+       the Haul Recommendation + Mud Outlook strip, and the attribution line. */
+    @media (max-width: 640px) {
+      .site-cond-stat-grid { padding: 10px !important; gap: 8px !important; }
+      .site-cond-stat-cell { min-width: 0; }
+      .site-cond-stat-label { font-size: 10px !important; letter-spacing: 0.5px; }
+      .site-cond-stat-value { font-size: 21px !important; line-height: 1.1 !important; }
+      .site-cond-stat-value-sm { font-size: 18px !important; line-height: 1.1 !important; }
+      .site-cond-stat-sub { font-size: 11px !important; line-height: 1.2 !important; margin-top: 1px !important; }
+      .site-cond-rec-strip { padding: 10px !important; gap: 8px !important; }
+      .site-cond-rec-row { gap: 10px !important; }
+      .site-cond-rec-icon { width: 22px !important; height: 22px !important; font-size: 11px !important; }
+      .site-cond-rec-label { font-size: 10px !important; margin-bottom: 1px !important; }
+      .site-cond-rec-body { font-size: 12px !important; line-height: 1.35 !important; }
+      .site-cond-rec-footer { display: none !important; }
+    }
     /* Live Operations Map — header filter row wraps on narrow viewports */
     @media (max-width: 700px) {
       .lom-filters { width: 100%; }
@@ -5148,33 +5165,33 @@ function SiteConditionsCard() {
       </div>
 
       {/* Today: 2x2 stat grid — TEMPERATURE / WIND / PRECIP RISK / HAUL CONDITION. */}
-      <div style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: S[4] }}>
-        <div>
-          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
+      <div className="site-cond-stat-grid" style={{ padding: S[4], display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: S[4] }}>
+        <div className="site-cond-stat-cell">
+          <div className="site-cond-stat-label" style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>TEMPERATURE</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
+            <div className="site-cond-stat-value" style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{todayTempNow != null ? `${todayTempNow}°F` : '—'}</div>
             <div style={{ color: wxColorFor(today ? today.wx : 'cloud'), display: 'inline-flex' }}><WxIcon kind={today ? today.wx : 'cloud'} size={20} /></div>
           </div>
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+          <div className="site-cond-stat-sub" style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
             {today && today.hi != null ? `Hi ${today.hi}°` : ''}{today && today.hi != null && today.lo != null ? ' · ' : ''}{today && today.lo != null ? `Lo ${today.lo}°` : ''}
           </div>
         </div>
-        <div>
-          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
+        <div className="site-cond-stat-cell">
+          <div className="site-cond-stat-label" style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>WIND</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{(today ? today.windMph : 0)} mph</div>
+            <div className="site-cond-stat-value" style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{(today ? today.windMph : 0)} mph</div>
           </div>
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{todayWindDir || '—'}</div>
+          <div className="site-cond-stat-sub" style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{todayWindDir || '—'}</div>
         </div>
-        <div>
-          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
-          <div style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: (today ? today.precipPct : 0) >= 40 ? WX_COLORS.wet : ((today ? today.precipPct : 0) >= 20 ? WX_COLORS.drying : WX_COLORS.dry) }}>{(today ? today.precipPct : 0)}%</div>
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next period</div>
+        <div className="site-cond-stat-cell">
+          <div className="site-cond-stat-label" style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>PRECIP RISK</div>
+          <div className="site-cond-stat-value" style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: (today ? today.precipPct : 0) >= 40 ? WX_COLORS.wet : ((today ? today.precipPct : 0) >= 20 ? WX_COLORS.drying : WX_COLORS.dry) }}>{(today ? today.precipPct : 0)}%</div>
+          <div className="site-cond-stat-sub" style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>next period</div>
         </div>
-        <div>
-          <div style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
-          <div style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: cond.tone, letterSpacing: -0.3 }}>{cond.label}</div>
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{cond.sub}</div>
+        <div className="site-cond-stat-cell">
+          <div className="site-cond-stat-label" style={{ ...T.caption, color: C.inkFaint, marginBottom: 2 }}>HAUL CONDITION</div>
+          <div className="site-cond-stat-value-sm" style={{ ...T.h4, fontFamily: F.display, fontWeight: 700, color: cond.tone, letterSpacing: -0.3 }}>{cond.label}</div>
+          <div className="site-cond-stat-sub" style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{cond.sub}</div>
         </div>
       </div>
 
@@ -5222,9 +5239,9 @@ function SiteConditionsCard() {
       </div>
 
       {/* Haul Recommendation + Mud Outlook strip. Both derive from `days`. */}
-      <div style={{ borderTop: `1px solid ${C.rule}`, padding: S[4], display: 'grid', gridTemplateColumns: '1fr', gap: S[3] }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
-          <span aria-hidden="true" style={{
+      <div className="site-cond-rec-strip" style={{ borderTop: `1px solid ${C.rule}`, padding: S[4], display: 'grid', gridTemplateColumns: '1fr', gap: S[3] }}>
+        <div className="site-cond-rec-row" style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
+          <span aria-hidden="true" className="site-cond-rec-icon" style={{
             width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             background: WX_COLORS_SOFT.dry, color: WX_COLORS.dry,
@@ -5232,12 +5249,12 @@ function SiteConditionsCard() {
             fontSize: 13, fontWeight: 800, lineHeight: 1,
           }}>✓</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>HAUL RECOMMENDATION</div>
-            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{haulRec}</div>
+            <div className="site-cond-rec-label" style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>HAUL RECOMMENDATION</div>
+            <div className="site-cond-rec-body" style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{haulRec}</div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
-          <span aria-hidden="true" style={{
+        <div className="site-cond-rec-row" style={{ display: 'flex', alignItems: 'flex-start', gap: S[3] }}>
+          <span aria-hidden="true" className="site-cond-rec-icon" style={{
             width: 26, height: 26, borderRadius: '50%', flexShrink: 0,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
             background: WX_COLORS_SOFT.wet, color: WX_COLORS.wet,
@@ -5245,11 +5262,11 @@ function SiteConditionsCard() {
             fontSize: 13, fontWeight: 800, lineHeight: 1,
           }}>◐</span>
           <div style={{ minWidth: 0 }}>
-            <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>MUD OUTLOOK</div>
-            <div style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{mudOutlook}</div>
+            <div className="site-cond-rec-label" style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.5, marginBottom: 2 }}>MUD OUTLOOK</div>
+            <div className="site-cond-rec-body" style={{ ...T.bodySm, color: C.ink, lineHeight: 1.45 }}>{mudOutlook}</div>
           </div>
         </div>
-        <div style={{ ...T.micro, color: C.inkFaint, fontSize: 9, letterSpacing: 0.3 }}>
+        <div className="site-cond-rec-footer" style={{ ...T.micro, color: C.inkFaint, fontSize: 9, letterSpacing: 0.3 }}>
           Based on NWS forecast data · not field-verified · refreshes every 30 min
         </div>
       </div>
