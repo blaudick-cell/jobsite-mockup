@@ -4036,6 +4036,13 @@ function useDriverSessionsLive() {
   });
   const tickRef = React.useRef(0);
   const debounceRef = React.useRef(null);
+  // 2026-05-31 (End-Shift fix): hold the fetchAll closure in a ref so
+  // callers (eg. endShiftFromAdmin) can trigger an immediate refetch
+  // without waiting for the Realtime broadcast roundtrip. The Supabase
+  // realtime publication only got `driver_sessions` / `truck_events`
+  // added today; until clients reconnect, the broadcast might also
+  // miss in-flight transactions. Self-trigger covers both gaps.
+  const fetchAllRef = React.useRef(null);
 
   React.useEffect(() => {
     if (!_sb.ready || !_sb.client) {
@@ -4070,6 +4077,7 @@ function useDriverSessionsLive() {
         if (!cancelled) setState(s => ({ ...s, loading: false, error: String(e) }));
       }
     };
+    fetchAllRef.current = fetchAll;
     fetchAll();
 
     // Realtime subscription. We debounce 1s so a burst of inserts at end-of-
@@ -4090,9 +4098,17 @@ function useDriverSessionsLive() {
     channel.subscribe();
     return () => {
       cancelled = true;
+      fetchAllRef.current = null;
       if (debounceRef.current) clearTimeout(debounceRef.current);
       try { _sb.client.removeChannel(channel); } catch (e) {}
     };
+  }, []);
+
+  // Force-refetch handle for components that just wrote to the DB and
+  // don't want to wait for Realtime to broadcast back. Safe to call any
+  // time after mount; no-op before the effect runs.
+  const refetch = React.useCallback(() => {
+    if (fetchAllRef.current) fetchAllRef.current();
   }, []);
 
   // Aggregated views. Memoized on the raw arrays so React doesn't re-derive
@@ -4124,6 +4140,7 @@ function useDriverSessionsLive() {
     photos: state.photos,
     issues: state.issues,
     buckets,
+    refetch,
   };
 }
 
@@ -12053,6 +12070,15 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, n
         .update({ ended_at: nowIso, dispatcher_notes: appendedNotes })
         .eq('id', session.id);
       if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
+      // 2026-05-31 (End-Shift fix): force-refetch the live state instead
+      // of waiting for the Realtime broadcast. The supabase_realtime
+      // publication just got driver_sessions / truck_events added —
+      // existing clients may still be on stale subscriptions until they
+      // reconnect, and even after reconnect the broadcast roundtrip is
+      // 1-2s. The clicking user expects instant feedback. live.refetch()
+      // pulls the row with the new ended_at + the new end_shift event in
+      // a single round-trip.
+      if (live && typeof live.refetch === 'function') live.refetch();
       setAdminFlash({
         text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
         kind: 'ok',
