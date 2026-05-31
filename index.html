@@ -12792,29 +12792,79 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                 </div>
 
                 {/* ── TIME ── */}
-                <div style={sectionLabelStyle}>Time</div>
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Start</span>
-                  <span style={{ ...valueStyle, fontFamily: F.mono }}>
-                    <MetaField fieldKey="started_at" fieldLabel="start time"
-                      value={sess.started_at}
-                      displayValue={`${fmtClock(sess.started_at)} MT`}
-                      type="datetime" />
-                  </span>
-                </div>
-                <div style={rowStyle}>
-                  <span style={labelStyle}>Shift</span>
-                  <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-                </div>
-                <div style={rowStyle}>
-                  <span style={labelStyle}>End</span>
-                  <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
-                    <MetaField fieldKey="ended_at" fieldLabel="end time"
-                      value={sess.ended_at}
-                      displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
-                      type="datetime" />
-                  </span>
-                </div>
+                {/* 2026-05-31 (quick-select): "Set to first/last activity"
+                    one-tap buttons under Start + End. Robert"s common
+                    case: driver forgets to clock out, shift balloons to
+                    41h. Last real activity (8:27 AM Pickup) is the true
+                    end. Picker stays as a fallback for manual edits. */}
+                {(() => { /* compute candidates + render the time block */
+                  const evList = drawerBucket.events;
+                  const firstEv = evList.length > 0 ? evList[0] : null;
+                  const lastEv  = evList.length > 0 ? evList[evList.length - 1] : null;
+                  const quickSetStyle = {
+                    background: 'transparent',
+                    color: C.accent,
+                    border: 'none',
+                    padding: '2px 4px',
+                    fontFamily: F.body,
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    outline: 'none',
+                    textAlign: 'right',
+                    whiteSpace: 'nowrap',
+                  };
+                  const applyEventTimestamp = (fieldKey, fieldLabel, ev) => {
+                    if (!ev || !ev.event_at) return;
+                    const currentValue = sess[fieldKey];
+                    if (currentValue === ev.event_at) return;
+                    saveSessionField(fieldKey, ev.event_at, currentValue, fieldLabel);
+                  };
+                  const showStartQuick = firstEv && firstEv.event_at && firstEv.event_at !== sess.started_at;
+                  const showEndQuick   = lastEv  && lastEv.event_at;
+                  return (
+                    <>
+                      <div style={sectionLabelStyle}>Time</div>
+                      <div style={rowStyle}>
+                        <span style={labelStyle}>Start</span>
+                        <span style={{ ...valueStyle, display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2, fontFamily: F.mono }}>
+                          <MetaField fieldKey="started_at" fieldLabel="start time"
+                            value={sess.started_at}
+                            displayValue={`${fmtClock(sess.started_at)} MT`}
+                            type="datetime" />
+                          {showStartQuick && (
+                            <button type="button"
+                              onClick={() => applyEventTimestamp('started_at', 'start time', firstEv)}
+                              title="Set start time to the first event"
+                              style={quickSetStyle}>
+                              Set to first activity → {fmtClock(firstEv.event_at)} {fmtMtDate(firstEv.event_at)} ({eventLabel(firstEv.event_type)})
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                      <div style={rowStyle}>
+                        <span style={labelStyle}>Shift</span>
+                        <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+                      </div>
+                      <div style={rowStyle}>
+                        <span style={labelStyle}>End</span>
+                        <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic', display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                          <MetaField fieldKey="ended_at" fieldLabel="end time"
+                            value={sess.ended_at}
+                            displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
+                            type="datetime" />
+                          {showEndQuick && (
+                            <button type="button"
+                              onClick={() => applyEventTimestamp('ended_at', 'end time', lastEv)}
+                              title="Set end time to the most recent event"
+                              style={quickSetStyle}>
+                              Set to last activity → {fmtClock(lastEv.event_at)} {fmtMtDate(lastEv.event_at)} ({eventLabel(lastEv.event_type)})
+                            </button>
+                          )}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
                 {/* 2026-05-31: hourly rate + computed $ today. Rate is
                     editable; $ today is read-only (hours × rate). */}
                 <div style={rowStyle}>
