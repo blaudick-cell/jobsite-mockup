@@ -5209,9 +5209,14 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
     // Driver markers — one per session with a geocoded last-known event.
     // Walk the events back-to-front looking for the most recent point;
     // sessions without any geocoded events are dropped (no marker).
+    // 2026-05-31 (Active Drivers map fix): status derived via the
+    // shared 4-state computeDriverStatus helper instead of the old
+    // 8h-binary isOver8h flag. Marker color stays consistent with
+    // the status strip on the Active Drivers card list.
     const driverPoints = useMemo(() => {
       if (mapMode !== 'drivers') return [];
       const out = [];
+      const issuesArr = live.issues || [];
       for (const b of (live.buckets || [])) {
         const sess = b.session;
         if (sess.ended_at) continue;
@@ -5225,19 +5230,19 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
           }
         }
         if (!coord) continue;
+        const status = computeDriverStatus(b, issuesArr);
         const shiftSec = computeShiftHours(sess, b.events).currentShiftSeconds;
-        const isOver8h = shiftSec > 8 * 3600;
         out.push({
           id: 'drv-' + sess.id,
           sessionId: sess.id,
           coord,
-          label: (sess.driver_name || 'Driver') + ' · ' + formatShiftDuration(shiftSec),
-          isOver8h,
+          status,
+          label: (sess.driver_name || 'Driver') + ' · ' + formatShiftDuration(shiftSec) + ' · ' + status.label,
         });
       }
       return out;
-    }, [mapMode, live.buckets]);
-    const driverSignature = driverPoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5) + ':' + (p.isOver8h ? '8' : 'g')).join('|');
+    }, [mapMode, live.buckets, live.issues]);
+    const driverSignature = driverPoints.map(p => p.id + '@' + p.coord.lng.toFixed(5) + ',' + p.coord.lat.toFixed(5) + ':' + p.status.kind).join('|');
     const driverMarkersRef = useRef(new Map());
     // Drawer state — opens when a driver marker is clicked.
     const [drawerSessionId, setDrawerSessionId] = useState(null);
@@ -5606,33 +5611,37 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
         if (cancelled) return;
         const map = mapRef.current;
         if (!map) return;
-        const GREEN_HALO = 'radial-gradient(circle, #22c55e8c, #22c55e2e 55%, #22c55e00 75%)';
-        const RED_HALO   = 'radial-gradient(circle, #ef44448c, #ef44442e 55%, #ef444400 75%)';
-        const GREEN_DOT = '#22c55e';
-        const RED_DOT   = '#ef4444';
-        const mkEl = (over8h) => {
+        // 2026-05-31 (Active Drivers map fix): solid 18px circle pin,
+        // matching the dispatch-live.html reference recipe. The old
+        // halo+dot pattern (shared with haul markers) was visually
+        // weak — the dot only covered ~14% of the 28px container, so
+        // pins looked like faint dots over the basemap. Solid filled
+        // circle with a black border + white halo reads from arm's
+        // length on a dispatcher screen.
+        const mkEl = (status) => {
           const el = document.createElement('div');
-          el.className = 'jx-haul-pin';
-          el.style.cursor = 'pointer';
-          const halo = document.createElement('span');
-          halo.className = 'jx-haul-pin-halo';
-          halo.style.background = over8h ? RED_HALO : GREEN_HALO;
-          const dot = document.createElement('span');
-          dot.className = 'jx-haul-pin-dot';
-          dot.style.background = over8h ? RED_DOT : GREEN_DOT;
-          el.appendChild(halo);
-          el.appendChild(dot);
+          el.style.cssText = [
+            'width:18px', 'height:18px', 'border-radius:50%',
+            'background:' + status.strip,
+            'border:2px solid #0A0A0A',
+            'box-shadow:0 0 0 3px rgba(255,255,255,0.15)',
+            'cursor:pointer',
+            '-webkit-tap-highlight-color:transparent',
+            'transition:transform 0.2s ease',
+          ].join(';');
+          el.addEventListener('mouseenter', () => { el.style.transform = 'scale(1.3)'; });
+          el.addEventListener('mouseleave', () => { el.style.transform = 'scale(1)'; });
           return el;
         };
         const mkMarker = (want) => {
-          const el = mkEl(want.isOver8h);
+          const el = mkEl(want.status);
           el.addEventListener('click', (ev) => {
             ev.stopPropagation();
             setDrawerSessionId(want.sessionId);
           });
           return new window.maplibregl.Marker({ element: el, anchor: 'center' })
             .setLngLat([want.coord.lng, want.coord.lat])
-            .setPopup(new window.maplibregl.Popup({ offset: 22, closeButton: false })
+            .setPopup(new window.maplibregl.Popup({ offset: 14, closeButton: false })
               .setHTML('<div style="font-family:Inter,sans-serif;font-size:12px;color:#0A0A0A;font-weight:600;">' +
                 (want.label || '').replace(/</g, '&lt;') + '</div>'));
         };
@@ -5642,7 +5651,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
             const desired = new Map();
             if (mapMode === 'drivers') {
               for (const pt of driverPoints) {
-                desired.set(pt.id, { sessionId: pt.sessionId, coord: pt.coord, label: pt.label, isOver8h: pt.isOver8h });
+                desired.set(pt.id, { sessionId: pt.sessionId, coord: pt.coord, label: pt.label, status: pt.status });
               }
             }
             const current = (driverMarkersRef.current instanceof Map) ? driverMarkersRef.current : new Map();
@@ -5652,7 +5661,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
             }
             for (const [id, want] of desired.entries()) {
               const coordKey = want.coord.lng.toFixed(5) + ',' + want.coord.lat.toFixed(5);
-              const sigKey = coordKey + ':' + (want.isOver8h ? '8' : 'g');
+              const sigKey = coordKey + ':' + want.status.kind;
               const cur = current.get(id);
               if (cur && cur.sigKey === sigKey) {
                 next.set(id, cur);
@@ -5677,6 +5686,67 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
       }, 0);
       return () => { cancelled = true; clearTimeout(t); };
     }, [mapMode, driverSignature, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // 2026-05-31 (Active Drivers map fix): hide the haul-route polyline
+    // layers when the toggle is on Drivers. The 4 routes-* layers are
+    // added once inside map.on('load') and were never toggled before —
+    // that's why Robert's screenshot showed a green polyline UNDER the
+    // (missing) driver pins. Keyed on styleLoaded so the effect runs
+    // once the layers actually exist; subsequent toggles re-run via
+    // the mapMode dep.
+    useEffect(() => {
+      if (!mlAvailable) return undefined;
+      const map = mapRef.current;
+      if (!map) return undefined;
+      const apply = () => {
+        const vis = mapMode === 'drivers' ? 'none' : 'visible';
+        ['routes-casing', 'routes-glow', 'routes-lines', 'routes-lines-fallback'].forEach(id => {
+          try { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis); } catch (e) {}
+        });
+      };
+      apply();
+      return undefined;
+    }, [mapMode, mlAvailable, styleLoaded]);
+
+    // 2026-05-31 (Active Drivers map fix): auto-fit bounds when the
+    // mode toggles. Drivers mode → fit to the driver pins. Hauls mode
+    // → fit to the union of route geometry + project endpoints. Only
+    // fires when bounds change MEANINGFULLY (signature dep) so the
+    // dispatcher's manual pan/zoom is preserved as much as possible.
+    // padding: 40 / maxZoom: 13 matches the dispatch-live reference.
+    const haulsFitSignature = useMemo(
+      () => mapMode === 'hauls' ? `${reqRoutes.length}|${projectEndpoints.length}|${projectPoints.length}` : '',
+      [mapMode, reqRoutes.length, projectEndpoints.length, projectPoints.length]
+    );
+    useEffect(() => {
+      if (!mlAvailable || !styleLoaded) return undefined;
+      const map = mapRef.current;
+      if (!map) return undefined;
+      try {
+        const b = new window.maplibregl.LngLatBounds();
+        let extended = false;
+        if (mapMode === 'drivers') {
+          for (const p of driverPoints) {
+            b.extend([p.coord.lng, p.coord.lat]);
+            extended = true;
+          }
+        } else {
+          for (const rt of reqRoutes) {
+            for (const c of rt.coords) { b.extend(c); extended = true; }
+          }
+          for (const p of projectEndpoints) {
+            b.extend([p.coord.lng, p.coord.lat]); extended = true;
+          }
+          for (const p of projectPoints) {
+            b.extend([p.coord.lng, p.coord.lat]); extended = true;
+          }
+        }
+        if (extended) {
+          map.fitBounds(b, { padding: 40, maxZoom: 13, duration: 600 });
+        }
+      } catch (e) {}
+      return undefined;
+    }, [mapMode, driverSignature, haulsFitSignature, styleLoaded, mlAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
     useEffect(() => {
       if (!mlAvailable || !containerRef.current) return;
