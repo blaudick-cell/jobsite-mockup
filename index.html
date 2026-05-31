@@ -2341,6 +2341,87 @@ async function geocodeAddress(address) {
       || (await geocodeViaPhoton(address))
       || (await geocodeViaNominatim(address));
 }
+
+// =====================================================================
+// Reverse geocoder — coordinate → human address.
+// =====================================================================
+// 2026-05-31 — Robert wants each truck_events row in the drawer to show
+// a readable street address below the raw "40.4964, -104.9807". Reverse
+// lookup hits Nominatim (free, no key, same provider as the forward
+// geocoder above). Results cache in `truck_events.address` so we only
+// pay the API call once per row; user manual edits set
+// `address_manually_set=true` so subsequent auto-runs skip them.
+//
+// Nominatim ToS allows 1 req/sec per IP. A module-singleton queue
+// serializes every call across the whole tab. Coords are de-duped per
+// 5-decimal key so two rows at the same dropoff fire one network
+// request, not two. Browsers don"t let us set User-Agent — Referer
+// (auto-set to the deploy URL) satisfies Nominatim"s identification
+// requirement.
+const _reverseGeocodeQueue = (() => {
+  const queue = [];
+  let running = false;
+  const inFlight = new Set();
+  const memCache = new Map();
+  async function pump() {
+    if (running) return;
+    running = true;
+    while (queue.length > 0) {
+      const job = queue.shift();
+      const cached = memCache.get(job.key);
+      if (cached !== undefined) {
+        job.resolve(cached);
+        continue;
+      }
+      try {
+        const url = 'https://nominatim.openstreetmap.org/reverse'
+          + '?format=json&lat=' + encodeURIComponent(job.lat)
+          + '&lon=' + encodeURIComponent(job.lng)
+          + '&zoom=18&addressdetails=1';
+        const r = await fetch(url, { headers: { Accept: 'application/json' } });
+        if (r.ok) {
+          const j = await r.json();
+          const result = composeReverseGeocodeLabel(j);
+          memCache.set(job.key, result);
+          job.resolve(result);
+        } else {
+          memCache.set(job.key, null);
+          job.resolve(null);
+        }
+      } catch (_) {
+        job.resolve(null);
+      }
+      await new Promise(res => setTimeout(res, 1100));
+    }
+    running = false;
+  }
+  return {
+    geocode(lat, lng) {
+      const key = Number(lat).toFixed(5) + ',' + Number(lng).toFixed(5);
+      if (inFlight.has(key) && memCache.has(key)) return Promise.resolve(memCache.get(key));
+      inFlight.add(key);
+      return new Promise(resolve => {
+        queue.push({ lat: Number(lat), lng: Number(lng), key, resolve: (v) => { inFlight.delete(key); resolve(v); } });
+        pump();
+      });
+    },
+  };
+})();
+// Take a Nominatim reverse-geocode payload and return a compact, on-screen-
+// friendly label. Prefers a short composed "house_number road, city ST"
+// over display_name (which Nominatim returns as a comma-soup with country,
+// county, and postcode). Falls back to display_name when the structured
+// fields are sparse.
+function composeReverseGeocodeLabel(j) {
+  if (!j) return null;
+  const a = j.address || {};
+  const street = [a.house_number, a.road].filter(Boolean).join(' ');
+  const city = a.city || a.town || a.village || a.hamlet || a.suburb || a.county;
+  const state = a.state_code || a.state || '';
+  const parts = [street, city, state].filter(s => s && String(s).trim());
+  if (parts.length === 0) return j.display_name || null;
+  return parts.join(', ');
+}
 // Autocomplete suggestions. Photon alone misses many US residential addresses
 // (1105 Rogers St Golden CO, 14200 Smith Rd Aurora CO, 5800 Federal Blvd Denver
 // — all absent from its OSM index, while Census knows them). So we query
@@ -12349,6 +12430,141 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
     );
   }
 
+  // Inline editable address renderer for an event row. Three states:
+  //   1. address already cached on the row -> render the text + ✎ edit
+  //   2. coords present + address null     -> kick off reverse geocode
+  //                                            on mount, render coords
+  //                                            while waiting, then text
+  //   3. no coords                         -> "+ Add address" button
+  //                                            that opens an inline input
+  //
+  // Editing always writes address_manually_set=true so a future auto-
+  // geocode run won"t clobber a dispatcher correction.
+  function EventAddressLine({ event, hasGps }) {
+    const [draft, setDraft] = React.useState('');
+    const [editing, setEditing] = React.useState(false);
+    const [flash, setFlash] = React.useState(null); // 'saving'|'saved'|'error'
+    // Local mirror of the address — fall back to event.address when the
+    // refetch hasn't bubbled the post-save row through yet.
+    const [localAddress, setLocalAddress] = React.useState(event.address || null);
+    // Keep localAddress in sync with the prop on Realtime updates.
+    React.useEffect(() => {
+      setLocalAddress(event.address || null);
+    }, [event.address]);
+    // Auto-geocode trigger: row has coords but no cached address and
+    // hasn't been manually set. Fires once per event id per mount.
+    React.useEffect(() => {
+      if (!hasGps) return;
+      if (event.address) return;
+      if (event.address_manually_set) return;
+      let cancelled = false;
+      (async () => {
+        const label = await _reverseGeocodeQueue.geocode(event.latitude, event.longitude);
+        if (cancelled || !label) return;
+        setLocalAddress(label);
+        // Best-effort persist; address_manually_set stays false so a
+        // future improved geocoder pass can re-run if needed.
+        try {
+          if (_sb && _sb.ready && _sb.client) {
+            await _sb.client.from('truck_events')
+              .update({ address: label })
+              .eq('id', event.id);
+            if (live && typeof live.refetch === 'function') live.refetch();
+          }
+        } catch (_) { /* network or RLS — leave localAddress as-is */ }
+      })();
+      return () => { cancelled = true; };
+    }, [event.id, event.address, event.address_manually_set, hasGps, event.latitude, event.longitude]);
+    const beginEdit = () => {
+      setDraft(localAddress || '');
+      setEditing(true);
+    };
+    const commitEdit = async () => {
+      const next = (draft || '').trim();
+      const prev = (localAddress || '').trim();
+      if (next === prev) { setEditing(false); return; }
+      setFlash('saving');
+      try {
+        if (!_sb || !_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+        const patch = { address: next || null, address_manually_set: true };
+        const { error } = await _sb.client.from('truck_events').update(patch).eq('id', event.id);
+        if (error) throw error;
+        setLocalAddress(next || null);
+        setFlash('saved');
+        setEditing(false);
+        if (live && typeof live.refetch === 'function') live.refetch();
+        setTimeout(() => setFlash(null), 1500);
+      } catch (e) {
+        console.warn('[EventAddressLine] save failed', e);
+        setFlash('error');
+        setTimeout(() => setFlash(null), 2500);
+      }
+    };
+    const inputStyle = {
+      width: '100%', minWidth: 180, maxWidth: 260,
+      background: C.surface, color: C.ink,
+      border: `1px solid ${C.accent}`, borderRadius: R.sm,
+      padding: '2px 6px', fontFamily: F.body, fontSize: 11,
+      outline: 'none',
+    };
+    if (editing) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+          <input autoFocus value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onBlur={commitEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') { setEditing(false); setFlash(null); }
+              else if (e.key === 'Enter') { e.currentTarget.blur(); }
+            }}
+            placeholder="Street, city, state"
+            style={inputStyle} />
+        </span>
+      );
+    }
+    if (localAddress) {
+      return (
+        <span
+          role="button" tabIndex={0}
+          title="Click to edit address"
+          onClick={(ev) => { ev.stopPropagation(); beginEdit(); }}
+          onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); beginEdit(); } }}
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4,
+            fontSize: 10.5, color: C.inkDim, cursor: 'pointer',
+            maxWidth: 320, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            padding: '0 2px', borderRadius: 3,
+            background: flash === 'saved' ? C.okSoft : flash === 'error' ? C.warnSoft : 'transparent',
+            transition: 'background 200ms ease-out',
+          }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{localAddress}</span>
+          <span aria-hidden="true" style={{ ...T.micro, color: C.inkFaint, opacity: 0.6 }}>✎</span>
+          {flash === 'saving' && <span style={{ ...T.micro, color: C.inkDim }}>…</span>}
+        </span>
+      );
+    }
+    // Has coords but geocoder hasn"t returned yet — show muted hint.
+    if (hasGps) {
+      return (
+        <span style={{ fontSize: 10, color: C.inkFaint, fontStyle: 'italic' }}>
+          looking up address…
+        </span>
+      );
+    }
+    // No coords — let dispatcher type one in.
+    return (
+      <button type="button"
+        onClick={(ev) => { ev.stopPropagation(); beginEdit(); }}
+        style={{
+          background: 'transparent', border: 'none', color: C.accent,
+          fontSize: 10.5, cursor: 'pointer', padding: '0 2px',
+          fontFamily: F.body, outline: 'none',
+        }}>
+        + Add address
+      </button>
+    );
+  }
+
   // ── Scroll-to-event when invoked with `scrollEventId` ───────────
   React.useEffect(() => {
     if (!drawerBucket || !scrollEventId) return;
@@ -12941,14 +13157,15 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                             style={{ width: 40, height: 40, objectFit: 'cover', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, display: 'block' }} />
                         </a>
                       )}
-                      <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11, textAlign: 'right' }}>
+                      <span style={{ flex: 1, minWidth: 0, color: C.inkDim, fontSize: 11, textAlign: 'right', display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
                         {hasGps ? (
                           <a href={`https://www.google.com/maps?q=${e.latitude},${e.longitude}`} target="_blank" rel="noopener"
                              onClick={ev => ev.stopPropagation()}
                              style={{ color: C.info, textDecoration: 'none' }}>
                             {Number(e.latitude).toFixed(4)},{Number(e.longitude).toFixed(4)} ↗
                           </a>
-                        ) : <span style={{ color: C.inkFaint }}>—</span>}
+                        ) : <span style={{ color: C.inkFaint }}>— no GPS</span>}
+                        <EventAddressLine event={e} hasGps={hasGps} />
                       </span>
                     </div>
                   );
