@@ -14043,6 +14043,27 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
     const lastEvBlurb = b.lastEvent
       ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)} · ${fmtMtDate(b.lastEvent.event_at)}`
       : 'Just clocked in';
+    // 2026-05-31 (two-col density refactor): the J&C chip was pulled
+    // out of its own row and dropped into the truck-meta line as
+    // inline editable text — same companyEditing / saveCompany write
+    // path, just no pill chrome. Click the text → input replaces it;
+    // ✎ glyph hints editability.
+    const haulerDisplay = sess.company || 'Unassigned';
+    const haulerInlineStyle = {
+      color: sess.company ? C.ink : C.inkFaint,
+      fontWeight: 700,
+      cursor: 'pointer',
+    };
+    // Compact action-icon buttons. 28x28 hit area, 16px glyph at low
+    // opacity — small visual weight, full accessibility target.
+    const actionBtnStyle = {
+      width: 28, height: 28, borderRadius: R.sm,
+      background: 'transparent', border: 'none',
+      color: C.inkFaint, opacity: 0.55,
+      cursor: 'pointer', padding: 0,
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 14, lineHeight: 1, transition: 'opacity 120ms ease, color 120ms ease',
+    };
     return (
       <div
         onClick={() => onOpenDrawer()}
@@ -14051,11 +14072,13 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           background: C.surface,
           border: `1px solid ${C.rule}`,
           borderRadius: R.md,
-          padding: '10px 12px',
-          display: 'flex', flexDirection: 'column', gap: 5,
+          padding: '7px 12px',
+          display: 'flex', flexDirection: 'column', gap: 3,
         }}>
-        {/* Row 1: driver name (primary) + action cluster (photo / edit / delete) */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+        {/* Row 1: driver name (left) + revenue (right, accent) + action icons (smaller, low contrast).
+            Name dominates by font; revenue is right-aligned next; edit/delete sit furthest right at
+            low opacity so the eye lands on name and revenue first. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
           <div style={{
             ...T.body, fontFamily: F.display, fontSize: 16, fontWeight: 700,
             color: C.ink, lineHeight: 1.2, letterSpacing: -0.2,
@@ -14065,134 +14088,114 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
             {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
-            {mostRecentPhoto && (
-              <img
-                src={mostRecentPhoto.photo_url}
-                alt="Latest event photo"
-                onClick={(e) => { e.stopPropagation(); onOpenDrawer(mostRecentPhoto.event_id); }}
-                style={{
-                  width: 26, height: 26, objectFit: 'cover',
-                  borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
-                  cursor: 'pointer',
-                }}
-              />
-            )}
+            <span style={{
+              fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
+              fontSize: 15, fontWeight: 700, color: C.accent, letterSpacing: -0.2,
+            }}>{fmtUsd0(dollarsToday)}</span>
             {onEdit && (
               <button type="button" aria-label="Edit session" title="Edit session"
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                style={{
-                  width: 22, height: 22, borderRadius: R.sm,
-                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
-                  color: C.inkDim, cursor: 'pointer', padding: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, lineHeight: 1,
-                }}>✎</button>
+                style={actionBtnStyle}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.color = C.accent; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.color = C.inkFaint; }}
+              >✎</button>
             )}
             {onDelete && (
               <button type="button" aria-label="Delete session" title="Delete session"
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                style={{
-                  width: 22, height: 22, borderRadius: R.sm,
-                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
-                  color: C.inkDim, cursor: 'pointer', padding: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 11, lineHeight: 1,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+                style={actionBtnStyle}
+                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.color = C.warn; }}
+                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.color = C.inkFaint; }}
               >🗑</button>
             )}
           </div>
         </div>
 
-        {/* Row 2: hauler chip — editable inline. Stops card-click. */}
-        <div onClick={(e) => e.stopPropagation()}>
-          {!companyEditing ? (
-            <button type="button"
-              onClick={() => { setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 4,
-                padding: '1px 8px', borderRadius: R.pill,
-                background: chipBg, color: chipColor, border: `1px solid ${chipBorder}`,
-                fontFamily: F.mono, fontSize: 10, fontWeight: 700,
-                letterSpacing: 0.4, textTransform: 'uppercase',
-                cursor: 'pointer', lineHeight: 1.5,
-              }}>
-              {sess.company || 'Unassigned'}
-              <span aria-hidden="true" style={{ opacity: 0.6 }}>✎</span>
-              {flashColor && <span style={{ color: flashColor }}>{flashLabel}</span>}
-            </button>
-          ) : (
-            <>
-              <input autoFocus list={datalistId} value={companyDraft}
-                onChange={(e) => setCompanyDraft(e.target.value)}
-                onBlur={saveCompany}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
-                  else if (e.key === 'Enter') { e.currentTarget.blur(); }
-                }}
-                placeholder="Hauler / company"
-                style={{
-                  width: '100%', maxWidth: 240,
-                  background: C.surface, color: C.ink,
-                  border: `1px solid ${C.accent}`, borderRadius: R.pill,
-                  padding: '4px 12px', fontFamily: F.mono, fontSize: 11,
-                  letterSpacing: 0.3, outline: 'none',
-                }} />
-              <datalist id={datalistId}>
-                {knownCompanies.map(c => <option key={c} value={c} />)}
-              </datalist>
-            </>
-          )}
+        {/* Row 2: hauler (inline editable) • truck type • CY/load — single line meta. */}
+        <div style={{
+          ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
+          <span onClick={(e) => { e.stopPropagation(); }}>
+            {!companyEditing ? (
+              <span
+                role="button" tabIndex={0}
+                onClick={(e) => { e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); } }}
+                title={sess.company ? 'Change hauler' : 'Assign hauler'}
+                style={haulerInlineStyle}>
+                {haulerDisplay}
+                <span aria-hidden="true" style={{ opacity: 0.5, marginLeft: 3, fontSize: 9 }}>✎</span>
+                {flashColor && <span style={{ color: flashColor, marginLeft: 3 }}>{flashLabel}</span>}
+              </span>
+            ) : (
+              <>
+                <input autoFocus list={datalistId} value={companyDraft}
+                  onChange={(e) => setCompanyDraft(e.target.value)}
+                  onBlur={saveCompany}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
+                    else if (e.key === 'Enter') { e.currentTarget.blur(); }
+                  }}
+                  placeholder="Hauler"
+                  style={{
+                    background: C.surface, color: C.ink,
+                    border: `1px solid ${C.accent}`, borderRadius: 3,
+                    padding: '1px 6px', fontFamily: F.body, fontSize: 11.5,
+                    outline: 'none', minWidth: 100, maxWidth: 200,
+                  }} />
+                <datalist id={datalistId}>
+                  {knownCompanies.map(c => <option key={c} value={c} />)}
+                </datalist>
+              </>
+            )}
+          </span>
+          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
+          {truckTypeShort(truckType || sess.truck_type)}
+          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
+          {cyPerLoad} CY/load
         </div>
 
-        {/* Row 3: Truck type • CY/load (muted subtitle) */}
-        <div style={{ ...T.caption, color: C.inkDim, fontSize: 11.5,
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {truckTypeShort(truckType || sess.truck_type)} • {cyPerLoad} CY/load
-        </div>
-
-        {/* Rows 4-5: Pickup / Drop-off addresses (hidden if no event) */}
+        {/* Pickup / Drop-off addresses — smaller, muted, tighter than before. */}
         {firstPickup && (
-          <div style={addressLineStyle}>
-            <span style={addressLabelStyle}>Pickup:</span>{' '}
+          <div style={{
+            color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            <span style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.3 }}>Pickup:</span>{' '}
             <span>{fmtEventLocation(firstPickup)}</span>
           </div>
         )}
         {firstDropoff && (
-          <div style={addressLineStyle}>
-            <span style={addressLabelStyle}>Drop-off:</span>{' '}
+          <div style={{
+            color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            <span style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.3 }}>Drop-off:</span>{' '}
             <span>{fmtEventLocation(firstDropoff)}</span>
           </div>
         )}
 
-        {/* Row 6: Hours (left) / Revenue (right). Two equal columns. */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2,
-                      fontFamily: F.mono, fontVariantNumeric: 'tabular-nums' }}>
-          <span style={{ fontSize: 17, fontWeight: 700, color: C.ink }}>
-            {fmtElapsed(sess.started_at, sess.ended_at)}
-          </span>
-          <span style={{ fontSize: 17, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
-            {fmtUsd0(dollarsToday)}
-          </span>
+        {/* Metrics row — single horizontal 3-col grid: Hours | CY | Loads.
+            Left-aligned first, then right-aligned values stretch into the
+            right half of the card (the "use the right half more aggressively"
+            ask). Mono numerals so columns line up across stacked cards. */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 1,
+          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums', color: C.ink,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, textAlign: 'center' }}>{cyToday} CY</span>
+          <span style={{ fontSize: 14, fontWeight: 700, textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} Loads</span>
         </div>
 
-        {/* Row 7: CY hauled (left) / Loads completed (right) */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
-                      fontFamily: F.mono, fontSize: 12, color: C.ink,
-                      fontVariantNumeric: 'tabular-nums' }}>
-          <span>{cyToday} CY</span>
-          <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} Loads</span>
-        </div>
-
-        {/* Row 8: $/hr muted */}
-        <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, fontSize: 10.5 }}>
-          ${hourlyRate}/hr
-        </div>
-
-        {/* Row 9: Last event (muted, with date) */}
-        <div style={{ ...T.caption, color: C.inkFaint, fontSize: 11 }}>
-          {lastEvBlurb}
+        {/* Footer: $/hr (left, mono) + Last event (right, italic). One row to keep height tight. */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          gap: 8, color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2,
+        }}>
+          <span style={{ fontFamily: F.mono, fontSize: 10 }}>${hourlyRate}/hr</span>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{lastEvBlurb}</span>
         </div>
       </div>
     );
