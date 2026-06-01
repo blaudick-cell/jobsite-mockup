@@ -13183,12 +13183,34 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                       type="select" options={TRUCK_TYPE_OPTIONS} />
                   </span>
                 </div>
+                {/* 2026-06-01: Plate row → Truck #. Edits write the
+                    new truck_number column; the display chain falls
+                    back to plate_input (legacy widget sessions) and
+                    finally to a matched truck's plate. */}
                 <div style={rowStyle}>
-                  <span style={labelStyle}>Plate</span>
+                  <span style={labelStyle}>Truck #</span>
                   <span style={{ ...valueStyle, color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>
-                    <MetaField fieldKey="plate_input" fieldLabel="plate"
-                      value={sess.plate_input || (truck ? truck.plate : '')}
-                      displayValue={truckPlate ? '#' + truckPlate : (sess.plate_input ? '#' + sess.plate_input : <span style={{ color: C.inkFaint }}>—</span>)}
+                    {(() => {
+                      const truckNumNow = (sess.truck_number && sess.truck_number.trim())
+                        || (sess.plate_input && sess.plate_input.trim())
+                        || (truck ? truck.plate : '');
+                      return (
+                        <MetaField fieldKey="truck_number" fieldLabel="truck #"
+                          value={truckNumNow}
+                          displayValue={truckNumNow
+                            ? '#' + truckNumNow
+                            : <span style={{ color: C.inkFaint }}>—</span>}
+                          type="text" />
+                      );
+                    })()}
+                  </span>
+                </div>
+                <div style={rowStyle}>
+                  <span style={labelStyle}>Dispatch</span>
+                  <span style={valueStyle}>
+                    <MetaField fieldKey="dispatch_company" fieldLabel="dispatch company"
+                      value={sess.dispatch_company || ''}
+                      displayValue={sess.dispatch_company || <span style={{ color: C.inkFaint }}>—</span>}
                       type="text" />
                   </span>
                 </div>
@@ -14092,6 +14114,12 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
       fontWeight: 700,
       cursor: 'pointer',
     };
+    // 2026-06-01: prefer the new truck_number column, fall back to the
+    // legacy plate_input for sessions started before the driver widget
+    // shipped these fields. Skip the segment entirely if both are blank.
+    const truckNumDisplay = (sess.truck_number && sess.truck_number.trim())
+      || (sess.plate_input && sess.plate_input.trim())
+      || '';
     // Compact action-icon buttons. 28x28 hit area, 16px glyph at low
     // opacity — small visual weight, full accessibility target.
     const actionBtnStyle = {
@@ -14190,6 +14218,12 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           </span>
           <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
           {truckTypeShort(truckType || sess.truck_type)}
+          {truckNumDisplay && (
+            <>
+              <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
+              <span style={{ fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>#{truckNumDisplay}</span>
+            </>
+          )}
           <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
           {cyPerLoad} CY/load
         </div>
@@ -14339,7 +14373,12 @@ function dispatchExportRows(buckets, trucksById) {
     const sess = b.session;
     const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
     const truckType = truck ? truck.type : sess.truck_type;
-    const plate = (sess.plate_input && sess.plate_input.trim())
+    // 2026-06-01: prefer the new truck_number column (written by the
+    // updated driver widget). Legacy sessions still have the value in
+    // plate_input; matched_truck_id-bearing rows can also fall back
+    // to trucks.plate. Em-dash if all three are blank.
+    const truckNum = (sess.truck_number && sess.truck_number.trim())
+      || (sess.plate_input && sess.plate_input.trim())
       || (truck && truck.plate)
       || '—';
     const company = (sess.company && sess.company.trim()) || 'Unassigned';
@@ -14363,7 +14402,7 @@ function dispatchExportRows(buckets, trucksById) {
       driver: sess.driver_name || '—',
       company,
       truckType: truckTypeLabel(truckType),
-      plate,
+      truckNum,
       status: isOnShift ? 'ON SHIFT' : 'OFF SHIFT',
       start: fmtClock(sess.started_at),
       end: sess.ended_at ? fmtClock(sess.ended_at) : '—',
@@ -14396,13 +14435,13 @@ function dispatchFilenameBase(filter) {
 }
 
 function exportDispatchCSV(rows, filter) {
-  const headers = ['Driver', 'Company', 'Truck Type', 'Plate', 'Status',
+  const headers = ['Driver', 'Company', 'Truck Type', 'Truck #', 'Status',
     'Start Time', 'End Time', 'Shift Hours', 'Hourly Rate', '$ Today',
     'Pickups', 'Drop-offs', 'Total CY Today', 'Last Event', 'Notes'];
   const lines = [headers.map(dispatchCsvEscape).join(',')];
   for (const r of rows) {
     lines.push([
-      r.driver, r.company, r.truckType, r.plate, r.status,
+      r.driver, r.company, r.truckType, r.truckNum, r.status,
       r.start, r.end, r.shiftHours, r.hourlyRate, r.dollarsToday,
       r.pickups, r.dropoffs,
       r.cyToday, r.lastEvent, r.notes,
@@ -14528,7 +14567,7 @@ async function exportDispatchPDF(rows, filter) {
   // Build table body with hauler section-break rows interleaved.
   // AutoTable renders these as full-width "header" rows by using a
   // colSpan + custom styling via didParseCell.
-  const head = [['Driver', 'Company', 'Truck', 'Plate', 'Status',
+  const head = [['Driver', 'Company', 'Truck', 'Truck #', 'Status',
     'Start', 'End', 'Hrs', '$/hr', '$ Today', 'Pickups', 'Drops', 'CY',
     'Last Event', 'Notes']];
   const COL_COUNT = 15;
@@ -14564,7 +14603,7 @@ async function exportDispatchPDF(rows, filter) {
       lastDateKey = r.__dateKey || null;
     }
     body.push([
-      r.driver, r.company, r.truckType, r.plate, r.status,
+      r.driver, r.company, r.truckType, r.truckNum, r.status,
       r.start, r.end, r.shiftHours, r.hourlyRate, r.dollarsToday,
       r.pickups, r.dropoffs,
       r.cyToday, r.lastEvent,
