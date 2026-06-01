@@ -7434,14 +7434,19 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           a glance. The standalone <ActiveDriversCapacityStrip /> that
           briefly sat here was superseded by these two props on the
           shared table. */}
-      {/* 2026-05-31: Hauling Overview embed now carries the same
-          filter pills as Dispatch + caps visible cards at 5 (newest
+      {/* 2026-05-31: Dispatch Overview embed carries the same filter
+          pills as the Dispatch tab + caps visible cards at 5 (newest
           first) + a "View all in Dispatch →" link that passes the
-          current filter through as a query string. */}
+          current filter through as a query string.
+          2026-06-01: `showCapacitySummary` removed — the 4-tile strip
+          (Active drivers / Capacity CY / CY today / Billed today) was
+          reporting numbers Robert flagged as inaccurate. The computation
+          logic stays in DriverActivityTable so the tiles can be
+          re-enabled once the math is fixed; only this mount point is
+          unmounted. */}
       <DriverActivityTable
         db={db}
         navigate={navigate}
-        showCapacitySummary
         showFilterPills
         maxRows={5}
         viewAllHref="/admin/dispatch"
