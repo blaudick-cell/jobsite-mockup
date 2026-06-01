@@ -14020,11 +14020,20 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
                    : companyFlash === 'saving' ? C.inkDim : null;
   const flashLabel = companyFlash === 'saved' ? '✓' : companyFlash === 'error' ? '✗' : '…';
 
-  // 2026-05-31 (Mobile dispatch redesign): on mobile, render the
-  // compact dispatch-first card (4px left status strip, big name +
-  // status pill, single-line meta, 3-col metrics, last-event footer).
-  // Desktop keeps the existing expanded layout intact.
-  if (isMobile) {
+  // 2026-05-31 (Dispatch refactor): single unified card render for
+  // mobile + desktop. No more status pill, no more colored left
+  // strip — the on-shift/off-shift context is implicit from the
+  // filter selection. Visual hierarchy per Robert spec:
+  //   1. Driver name
+  //   2. Revenue
+  //   3. Hours
+  //   4. CY hauled
+  //   5. Loads completed
+  //   6. Truck type
+  //   7. Pickup / Drop-off addresses
+  //   8. Last event
+  // Tight padding throughout; goal is 2+ cards visible on iPhone.
+  {
     const truckTypeShort = (tt) => {
       const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
                     SIDE: 'Side Dump', HISIDE: 'High Side',
@@ -14034,11 +14043,6 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
     const lastEvBlurb = b.lastEvent
       ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)} · ${fmtMtDate(b.lastEvent.event_at)}`
       : 'Just clocked in';
-    const metaLine = [
-      truckPlate ? '#' + truckPlate : null,
-      truckTypeShort(truckType || sess.truck_type),
-      `${cyPerLoad} CY/load`,
-    ].filter(Boolean).join(' • ');
     return (
       <div
         onClick={() => onOpenDrawer()}
@@ -14046,67 +14050,53 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           cursor: 'pointer',
           background: C.surface,
           border: `1px solid ${C.rule}`,
-          borderLeft: `4px solid ${status.strip}`,
           borderRadius: R.md,
-          padding: '10px 14px',
+          padding: '10px 12px',
+          display: 'flex', flexDirection: 'column', gap: 5,
         }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+        {/* Row 1: driver name (primary) + action cluster (photo / edit / delete) */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
           <div style={{
             ...T.body, fontFamily: F.display, fontSize: 16, fontWeight: 700,
-            color: C.ink, lineHeight: 1.15, letterSpacing: -0.2,
+            color: C.ink, lineHeight: 1.2, letterSpacing: -0.2,
             minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            flex: 1,
           }}>
             {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
             {mostRecentPhoto && (
               <img
                 src={mostRecentPhoto.photo_url}
                 alt="Latest event photo"
                 onClick={(e) => { e.stopPropagation(); onOpenDrawer(mostRecentPhoto.event_id); }}
                 style={{
-                  width: 28, height: 28, objectFit: 'cover',
+                  width: 26, height: 26, objectFit: 'cover',
                   borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
                   cursor: 'pointer',
                 }}
               />
             )}
-            <span style={{
-              padding: '2px 8px', borderRadius: R.pill,
-              background: status.soft, color: status.color,
-              border: `1px solid ${status.color}`,
-              fontFamily: F.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.5,
-              textTransform: 'uppercase', lineHeight: 1.4,
-            }}>{status.label}</span>
-            {/* 2026-05-31: per-card Edit + Delete icon buttons. Both
-                stopPropagation so card-level drawer-open doesn't double
-                fire. Compact 24x24 to fit the mobile card. */}
             {onEdit && (
-              <button
-                type="button"
-                aria-label="Edit session"
-                title="Edit session"
+              <button type="button" aria-label="Edit session" title="Edit session"
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
                 style={{
-                  width: 24, height: 24, borderRadius: R.sm,
+                  width: 22, height: 22, borderRadius: R.sm,
                   background: 'transparent', border: `1px solid ${C.ruleHi}`,
                   color: C.inkDim, cursor: 'pointer', padding: 0,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, lineHeight: 1,
+                  fontSize: 11, lineHeight: 1,
                 }}>✎</button>
             )}
             {onDelete && (
-              <button
-                type="button"
-                aria-label="Delete session"
-                title="Delete session"
+              <button type="button" aria-label="Delete session" title="Delete session"
                 onClick={(e) => { e.stopPropagation(); onDelete(); }}
                 style={{
-                  width: 24, height: 24, borderRadius: R.sm,
+                  width: 22, height: 22, borderRadius: R.sm,
                   background: 'transparent', border: `1px solid ${C.ruleHi}`,
                   color: C.inkDim, cursor: 'pointer', padding: 0,
                   display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, lineHeight: 1,
+                  fontSize: 11, lineHeight: 1,
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
                 onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
@@ -14115,11 +14105,10 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           </div>
         </div>
 
-        {/* Hauler chip — tappable on its own, doesn't open drawer. */}
-        <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 4 }}>
+        {/* Row 2: hauler chip — editable inline. Stops card-click. */}
+        <div onClick={(e) => e.stopPropagation()}>
           {!companyEditing ? (
-            <button
-              type="button"
+            <button type="button"
               onClick={() => { setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 4,
@@ -14135,8 +14124,7 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
             </button>
           ) : (
             <>
-              <input
-                autoFocus list={datalistId} value={companyDraft}
+              <input autoFocus list={datalistId} value={companyDraft}
                 onChange={(e) => setCompanyDraft(e.target.value)}
                 onBlur={saveCompany}
                 onKeyDown={(e) => {
@@ -14158,14 +14146,13 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           )}
         </div>
 
-        {/* Single-line meta: plate • truck type • CY/load */}
-        <div style={{
-          ...T.caption, color: C.inkDim, marginTop: 4, fontSize: 11.5,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{metaLine}</div>
+        {/* Row 3: Truck type • CY/load (muted subtitle) */}
+        <div style={{ ...T.caption, color: C.inkDim, fontSize: 11.5,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {truckTypeShort(truckType || sess.truck_type)} • {cyPerLoad} CY/load
+        </div>
 
-        {/* First pickup + first drop-off addresses. Hidden when no
-            matching event has fired yet. */}
+        {/* Rows 4-5: Pickup / Drop-off addresses (hidden if no event) */}
         {firstPickup && (
           <div style={addressLineStyle}>
             <span style={addressLabelStyle}>Pickup:</span>{' '}
@@ -14179,205 +14166,37 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           </div>
         )}
 
-        {/* 2026-05-31: 3-col metric row. Hours + $ today are the two
-            big primary tiles. Rate sits muted under $. CY + loads
-            demoted to a tighter right column. */}
-        <div style={{
-          display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-          gap: 8, marginTop: 8,
-          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
-          color: C.ink,
-        }}>
-          <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-          <span style={{ textAlign: 'center' }}>
-            <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
-            <span style={{ display: 'block', color: C.inkFaint, fontWeight: 400, fontSize: 10, marginTop: 1 }}>${hourlyRate}/hr</span>
+        {/* Row 6: Hours (left) / Revenue (right). Two equal columns. */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2,
+                      fontFamily: F.mono, fontVariantNumeric: 'tabular-nums' }}>
+          <span style={{ fontSize: 17, fontWeight: 700, color: C.ink }}>
+            {fmtElapsed(sess.started_at, sess.ended_at)}
           </span>
-          <span style={{ textAlign: 'right', fontSize: 11.5, color: C.inkDim, alignSelf: 'center', lineHeight: 1.4 }}>
-            <span style={{ color: C.ink, fontWeight: 700 }}>{cyToday}</span> CY
-            <span style={{ color: C.inkFaint }}>{' · '}</span>
-            <span style={{ color: C.ink, fontWeight: 700 }}>{b.pickupCount}/{b.dropCount}</span> loads
+          <span style={{ fontSize: 17, fontWeight: 700, color: C.accent, textAlign: 'right' }}>
+            {fmtUsd0(dollarsToday)}
           </span>
         </div>
 
-        <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontSize: 11 }}>
+        {/* Row 7: CY hauled (left) / Loads completed (right) */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8,
+                      fontFamily: F.mono, fontSize: 12, color: C.ink,
+                      fontVariantNumeric: 'tabular-nums' }}>
+          <span>{cyToday} CY</span>
+          <span style={{ textAlign: 'right' }}>{b.pickupCount}/{b.dropCount} Loads</span>
+        </div>
+
+        {/* Row 8: $/hr muted */}
+        <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono, fontSize: 10.5 }}>
+          ${hourlyRate}/hr
+        </div>
+
+        {/* Row 9: Last event (muted, with date) */}
+        <div style={{ ...T.caption, color: C.inkFaint, fontSize: 11 }}>
           {lastEvBlurb}
         </div>
       </div>
     );
   }
-
-  return (
-    <Card padding={S[4]} style={{ cursor: 'pointer' }}>
-      <div onClick={() => onOpenDrawer()}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[2], marginBottom: S[2] }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ ...T.body, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
-              {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
-            </div>
-            <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-              {truckPlate ? <span style={{ color: C.accent, fontFamily: F.mono, fontWeight: 700 }}>#{truckPlate}</span> : <span style={{ color: C.inkFaint }}>— no truck</span>}
-              {truckType && <span style={{ marginLeft: S[2] }}>{truckType}</span>}
-            </div>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexShrink: 0 }}>
-            {mostRecentPhoto && (
-              <img
-                src={mostRecentPhoto.photo_url}
-                alt="Latest event photo"
-                title="Open this driver's most recent photo"
-                onClick={(e) => { e.stopPropagation(); onOpenDrawer(mostRecentPhoto.event_id); }}
-                style={{
-                  width: 40, height: 40, objectFit: 'cover',
-                  borderRadius: R.sm, border: `1px solid ${C.ruleHi}`,
-                  cursor: 'pointer',
-                }}
-              />
-            )}
-            {/* 2026-05-31: status pill now derives from
-                computeDriverStatus so 'Ended' / 'Idle' / 'En route' /
-                'Issue' all surface alongside 'On shift'. */}
-            <span style={{
-              padding: '2px 8px', borderRadius: R.pill,
-              background: status.soft, color: status.color,
-              border: `1px solid ${status.color}`,
-              fontFamily: F.mono, fontSize: 10, fontWeight: 700, letterSpacing: 0.5,
-              textTransform: 'uppercase', lineHeight: 1.4,
-            }}>{status.label}</span>
-            {/* 2026-05-31: per-card Edit + Delete icon buttons. */}
-            {onEdit && (
-              <button
-                type="button"
-                aria-label="Edit session"
-                title="Edit session"
-                onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                style={{
-                  width: 28, height: 28, borderRadius: R.sm,
-                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
-                  color: C.inkDim, cursor: 'pointer', padding: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, lineHeight: 1,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
-              >✎</button>
-            )}
-            {onDelete && (
-              <button
-                type="button"
-                aria-label="Delete session"
-                title="Delete session"
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                style={{
-                  width: 28, height: 28, borderRadius: R.sm,
-                  background: 'transparent', border: `1px solid ${C.ruleHi}`,
-                  color: C.inkDim, cursor: 'pointer', padding: 0,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, lineHeight: 1,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.color = C.warn; e.currentTarget.style.borderColor = C.warn; }}
-                onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
-              >🗑</button>
-            )}
-          </div>
-        </div>
-
-        {/* 2026-05-30: hauler-assignment chip. Stops card-click so the
-            drawer doesn't open when editing the chip. */}
-        <div onClick={(e) => e.stopPropagation()} style={{ marginTop: S[2], marginBottom: S[2] }}>
-          {!companyEditing ? (
-            <button
-              type="button"
-              onClick={() => { setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
-              title={sess.company ? 'Change hauler' : 'Assign to a hauler'}
-              style={{
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-                padding: '4px 10px', borderRadius: R.pill,
-                background: chipBg, color: chipColor, border: `1px solid ${chipBorder}`,
-                fontFamily: F.mono, fontSize: 10.5, fontWeight: 700,
-                letterSpacing: 0.5, textTransform: 'uppercase',
-                cursor: 'pointer',
-              }}
-            >
-              {sess.company || 'Unassigned'}
-              <span aria-hidden="true" style={{ opacity: 0.6 }}>✎</span>
-              {flashColor && <span style={{ color: flashColor }}>{flashLabel}</span>}
-            </button>
-          ) : (
-            <>
-              <input
-                autoFocus
-                list={datalistId}
-                value={companyDraft}
-                onChange={(e) => setCompanyDraft(e.target.value)}
-                onBlur={saveCompany}
-                onKeyDown={(e) => {
-                  if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
-                  else if (e.key === 'Enter') { e.currentTarget.blur(); }
-                }}
-                placeholder="Hauler / company"
-                style={{
-                  width: '100%', maxWidth: 240,
-                  background: C.surface, color: C.ink,
-                  border: `1px solid ${C.accent}`, borderRadius: R.pill,
-                  padding: '4px 12px', fontFamily: F.mono, fontSize: 11,
-                  letterSpacing: 0.3, outline: 'none',
-                }}
-              />
-              <datalist id={datalistId}>
-                {knownCompanies.map(c => <option key={c} value={c} />)}
-              </datalist>
-            </>
-          )}
-        </div>
-
-        {/* First pickup + first drop-off addresses. Hidden when no
-            matching event has fired yet. */}
-        {firstPickup && (
-          <div style={addressLineStyle}>
-            <span style={addressLabelStyle}>Pickup:</span>{' '}
-            <span>{fmtEventLocation(firstPickup)}</span>
-          </div>
-        )}
-        {firstDropoff && (
-          <div style={addressLineStyle}>
-            <span style={addressLabelStyle}>Drop-off:</span>{' '}
-            <span>{fmtEventLocation(firstDropoff)}</span>
-          </div>
-        )}
-
-        {/* 2026-05-31: hours + $ today now the two BIG primary tiles
-            (left + middle), each in their own bordered cell. CY today
-            stays in the third cell but secondary. Rate sits muted
-            under $ today. STARTED moves into the right cell. */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[2], marginTop: S[3] }}>
-          <div style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '8px 10px' }}>
-            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>HOURS</div>
-            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</div>
-          </div>
-          <div style={{ background: C.accentSoft, border: `1px solid ${C.accent}`, borderRadius: R.sm, padding: '8px 10px' }}>
-            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>$ TODAY</div>
-            <div style={{ fontFamily: F.mono, color: C.accent, marginTop: 2, fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{fmtUsd0(dollarsToday)}</div>
-            <div style={{ ...T.micro, color: C.inkDim, fontSize: 10, marginTop: 3 }}>${hourlyRate}/hr</div>
-          </div>
-          <div style={{ background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.sm, padding: '8px 10px' }}>
-            <div style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.4 }}>CY TODAY</div>
-            <div style={{ fontFamily: F.mono, color: C.ink, marginTop: 2, fontSize: 16, fontWeight: 700 }}>{cyToday}</div>
-            <div style={{ ...T.micro, color: C.inkDim, fontSize: 10, marginTop: 3 }}>Started {fmtClock(sess.started_at)}</div>
-          </div>
-        </div>
-        <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2] }}>
-          <div style={{ ...T.caption, color: C.inkDim }}>
-            {b.events.length === 0 ? 'No events yet'
-              : <>Last: <span style={{ color: eventColor(lastEvType), fontWeight: 700 }}>{eventLabel(lastEvType)}</span> · {fmtClock(b.lastEvent.event_at)} · {fmtMtDate(b.lastEvent.event_at)}</>}
-          </div>
-          <div style={{ ...T.caption, color: C.inkFaint }}>
-            {b.pickupCount} pickup{b.pickupCount === 1 ? '' : 's'} · {b.dropCount} drop · {photoCount} photo{photoCount === 1 ? '' : 's'}
-          </div>
-        </div>
-      </div>
-    </Card>
-  );
 }
 
 // =====================================================================
@@ -14899,6 +14718,9 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   const [deleteConfirmFor, setDeleteConfirmFor] = React.useState(null);
   const [deleteInFlight, setDeleteInFlight] = React.useState(false);
   const [dispatchFlash, setDispatchFlash] = React.useState(null);
+  // 2026-05-31 (Dispatch refactor): inline-rendered Export menu so
+  // CSV + PDF don't permanently occupy the filter row.
+  const [exportMenuOpen, setExportMenuOpen] = React.useState(false);
 
   async function deleteSession(bucket) {
     if (!bucket || !bucket.session) return;
@@ -14988,39 +14810,36 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch' }]} navigate={navigate} />
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
-        <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Dispatch</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Every driver, every shift.</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            {live.loading ? 'Loading live driver data…'
-              : live.error ? <span style={{ color: C.warn }}>Live data unavailable — {live.error}</span>
-              : 'Live session data from the field widget. Filter to on-shift / off-shift / all, click a card for the event timeline, or use the row icons to edit or delete a session.'}
-          </div>
-        </div>
-        {/* 2026-05-31: ephemeral flash for delete-action feedback. */}
+
+      {/* 2026-05-31 (Dispatch refactor): driver list IS the dashboard.
+          Drop the "Every driver, every shift." h1 + tagline + KPI
+          strip + verbose tagline. Replace with a tight "Dispatch"
+          heading and a sticky filter row immediately below. Inspiration:
+          Samsara / Motive — dispatchers want the list immediately,
+          not three rows of summary chrome first. */}
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], marginBottom: S[2], flexWrap: 'wrap' }}>
+        <h1 style={{ ...T.h2, fontWeight: 700, letterSpacing: -0.6, margin: 0, color: C.ink }}>Dispatch</h1>
         {dispatchFlash && (
           <div style={{
             ...T.caption, fontWeight: 700, letterSpacing: 0.3,
-            padding: '8px 14px', borderRadius: R.pill,
+            padding: '4px 10px', borderRadius: R.pill,
             background: dispatchFlash.kind === 'error' ? C.warnSoft : C.accentSoft,
             color: dispatchFlash.kind === 'error' ? C.warn : C.accent,
             border: '1px solid ' + (dispatchFlash.kind === 'error' ? C.warn : C.accent),
-            maxWidth: 420,
+            maxWidth: 420, fontSize: 11,
           }}>{dispatchFlash.text}</div>
         )}
       </div>
+      {live.error && (
+        <div style={{ ...T.caption, color: C.warn, marginBottom: S[2] }}>
+          Live data unavailable — {live.error}
+        </div>
+      )}
 
-      <div className="jse-active-trucks-kpis" style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: S[3], marginBottom: S[4] }}>
-        <Card padding={S[4]}><Stat label="Active right now" value={activeCount} sub="shift in progress" /></Card>
-        <Card padding={S[4]}><Stat label="Idle (driver assigned)" value={idleCount} sub="not on shift" /></Card>
-        <Card padding={S[4]}><Stat label="Benched trucks" value={benchedTrucks.length} sub="no driver assigned" /></Card>
-      </div>
-
-      {/* 2026-05-31: filter pills. Default 'on_shift' preserves the
-          old Active-Trucks behaviour; flip to 'all' or 'off_shift' to
-          review history + correct mis-clocked sessions. Single-select.
-          Adjacent CSV/PDF export buttons honour the current filter. */}
+      {/* Sticky filter row — primary nav on this screen. CSV + PDF
+          live inside the Export ▾ menu so they don't permanently take
+          up filter-row real estate. Sticky to the page top so the
+          filter stays accessible as the driver list scrolls. */}
       {(() => {
         const onShiftCount = (live.buckets || []).filter(b => b.session && !b.session.ended_at).length;
         const offShiftCount = (live.buckets || []).filter(b => b.session && b.session.ended_at).length;
@@ -15034,7 +14853,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           color: active ? C.accent : C.inkDim,
           cursor: 'pointer', outline: 'none',
         });
-        const exportBtn = {
+        const exportTriggerStyle = {
           ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.6,
           textTransform: 'uppercase',
           padding: '6px 12px', borderRadius: R.sm,
@@ -15043,7 +14862,15 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           cursor: 'pointer', outline: 'none',
           display: 'inline-flex', alignItems: 'center', gap: 4,
         };
+        const exportMenuItemStyle = {
+          ...T.caption, fontFamily: F.body, fontWeight: 600,
+          padding: '8px 14px', textAlign: 'left',
+          background: 'transparent', color: C.ink,
+          border: 'none', cursor: 'pointer', outline: 'none',
+          width: '100%', whiteSpace: 'nowrap',
+        };
         const onExportCsv = () => {
+          setExportMenuOpen(false);
           try {
             const rows = dispatchExportRows(filteredBuckets, trucksById);
             exportDispatchCSV(rows, dispatchFilter);
@@ -15055,6 +14882,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           }
         };
         const onExportPdf = async () => {
+          setExportMenuOpen(false);
           try {
             setDispatchFlash({ text: 'Building PDF…', kind: 'ok' });
             const rows = dispatchExportRows(filteredBuckets, trucksById);
@@ -15067,32 +14895,68 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           }
         };
         return (
-          <div className="jse-dispatch-actions-row" style={{
-            display: 'flex', alignItems: 'center', gap: S[2],
-            marginBottom: S[4], flexWrap: 'wrap',
+          <div style={{
+            position: 'sticky', top: 0, zIndex: 50,
+            background: C.bg,
+            paddingTop: S[2], paddingBottom: S[2],
+            marginBottom: S[3],
+            borderBottom: `1px solid ${C.rule}`,
           }}>
-            <div style={{
-              display: 'inline-flex', gap: 4, padding: 2,
-              background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+            <div className="jse-dispatch-actions-row" style={{
+              display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap',
             }}>
-              <button type="button" onClick={() => setDispatchFilter('on_shift')} style={pill(dispatchFilter === 'on_shift')}>
-                On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
-              </button>
-              <button type="button" onClick={() => setDispatchFilter('off_shift')} style={pill(dispatchFilter === 'off_shift')}>
-                Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
-              </button>
-              <button type="button" onClick={() => setDispatchFilter('all')} style={pill(dispatchFilter === 'all')}>
-                All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
-              </button>
+              <div style={{
+                display: 'inline-flex', gap: 4, padding: 2,
+                background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+              }}>
+                <button type="button" onClick={() => setDispatchFilter('all')} style={pill(dispatchFilter === 'all')}>
+                  All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+                </button>
+                <button type="button" onClick={() => setDispatchFilter('on_shift')} style={pill(dispatchFilter === 'on_shift')}>
+                  On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
+                </button>
+                <button type="button" onClick={() => setDispatchFilter('off_shift')} style={pill(dispatchFilter === 'off_shift')}>
+                  Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
+                </button>
+              </div>
+              <div style={{ flex: 1 }} />
+              <div style={{ position: 'relative' }}>
+                <button type="button"
+                  onClick={() => setExportMenuOpen(v => !v)}
+                  aria-haspopup="menu"
+                  aria-expanded={exportMenuOpen}
+                  style={exportTriggerStyle}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
+                >
+                  Export <span aria-hidden="true" style={{ fontSize: 9 }}>▾</span>
+                </button>
+                {exportMenuOpen && (
+                  <>
+                    {/* click-outside backdrop */}
+                    <div
+                      onClick={() => setExportMenuOpen(false)}
+                      style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                    <div role="menu" style={{
+                      position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                      background: C.surfaceHi, border: `1px solid ${C.ruleHi}`,
+                      borderRadius: R.sm, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                      minWidth: 160, zIndex: 70, padding: 4,
+                      display: 'flex', flexDirection: 'column',
+                    }}>
+                      <button type="button" role="menuitem" onClick={onExportCsv} style={exportMenuItemStyle}
+                        onMouseEnter={e => e.currentTarget.style.background = C.surface}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >⬇ Download CSV</button>
+                      <button type="button" role="menuitem" onClick={onExportPdf} style={exportMenuItemStyle}
+                        onMouseEnter={e => e.currentTarget.style.background = C.surface}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >⬇ Download PDF</button>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
-            <button type="button" onClick={onExportCsv} aria-label="Export current filter to CSV" style={exportBtn}
-              onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
-            >⬇ CSV</button>
-            <button type="button" onClick={onExportPdf} aria-label="Export current filter to PDF" style={exportBtn}
-              onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; e.currentTarget.style.borderColor = C.accent; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; e.currentTarget.style.borderColor = C.ruleHi; }}
-            >⬇ PDF</button>
           </div>
         );
       })()}
@@ -15172,46 +15036,49 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         };
 
         return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: S[6] }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
             {dateKeysDesc.map(dk => {
               const dateBuckets = byDate.get(dk);
               const haulerGroups = haulerSubGroupsForDate(dateBuckets);
               return (
                 <div key={dk}>
-                  {/* Date header — most prominent, full-width, accent rule below */}
+                  {/* 2026-05-31 (Dispatch refactor): compressed date header.
+                      Was T.h3 + 2px accent rule + S[4] margin. Now T.bodySm
+                      with inline bullet separator, 1px subtle rule, much
+                      tighter. */}
                   <div style={{
-                    display: 'flex', alignItems: 'baseline', gap: S[3],
-                    paddingBottom: S[2], marginBottom: S[4],
-                    borderBottom: `2px solid ${C.accent}`,
+                    display: 'flex', alignItems: 'baseline', gap: 6,
+                    paddingBottom: 3, marginBottom: S[2],
+                    borderBottom: `1px solid ${C.rule}`,
                   }}>
-                    <div style={{ ...T.h3, fontWeight: 700, color: C.ink, letterSpacing: -0.3, fontFamily: F.mono }}>
+                    <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink, fontFamily: F.mono, letterSpacing: 0.2 }}>
                       {dk}
                     </div>
-                    <div style={{ ...T.caption, color: C.inkDim }}>
-                      {dateBuckets.length} session{dateBuckets.length === 1 ? '' : 's'}
+                    <div style={{ ...T.caption, color: C.inkDim, fontSize: 11 }}>
+                      • {dateBuckets.length} Session{dateBuckets.length === 1 ? '' : 's'}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: S[5] }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
                     {haulerGroups.map(({ key, cards, isUnassigned, originalDisplay }) => (
                       <div key={key}>
-                        {/* Hauler sub-header — smaller than date, no accent rule */}
+                        {/* Hauler sub-header — smaller, tighter spacing */}
                         <div style={{
-                          display: 'flex', alignItems: 'baseline', gap: S[2],
-                          marginBottom: S[2],
+                          display: 'flex', alignItems: 'baseline', gap: 4,
+                          marginBottom: 4,
                         }}>
-                          <div style={{ ...T.bodySm, fontWeight: 700,
-                                        color: isUnassigned ? C.inkFaint : C.ink,
-                                        letterSpacing: 0.2, textTransform: 'uppercase' }}>
+                          <div style={{ ...T.micro, fontWeight: 700,
+                                        color: isUnassigned ? C.inkFaint : C.inkDim,
+                                        letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 10 }}>
                             {originalDisplay}
                           </div>
-                          <div style={{ ...T.micro, color: C.inkDim, fontFamily: F.mono, letterSpacing: 0.4 }}>
+                          <div style={{ ...T.micro, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, fontSize: 10 }}>
                             · {cards.length}
                           </div>
                         </div>
                         <div className="jse-active-trucks-grid" style={{
                           display: 'grid',
                           gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                          gap: S[3],
+                          gap: S[2],
                         }}>
                           {cards.map(b => (
                             <ActiveTruckCard
