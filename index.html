@@ -8136,20 +8136,26 @@ function HaulerRollupStats({ hauler, db }) {
       const offsetMin = (nowMt.getTime() - Date.now()) / 60000;
       startOfDayUtcMs = startOfDayMt.getTime() - offsetMin * 60000;
     } catch (_) {}
-    let active = 0, cyToday = 0, dollarsToday = 0, hoursToday = 0;
+    let active = 0, cyToday = 0, dollarsToday = 0;
+    // 2026-06-01 (stabilization): "Trucks active" = distinct
+    // matched_truck_id || truck_type for sessions where ended_at IS NULL.
+    // Falls back to truck_type when a session has no matched_truck_id so
+    // we still get a useful per-type spread for legacy / unmatched rows.
+    const activeTruckKeys = new Set();
     for (const b of buckets) {
       const sess = b.session;
-      if (!sess.ended_at) active += 1;
+      if (!sess.ended_at) {
+        active += 1;
+        activeTruckKeys.add(sess.matched_truck_id || ('type:' + (sess.truck_type || 'unknown')));
+      }
       const startMs = sess.started_at ? new Date(sess.started_at).getTime() : NaN;
       if (!Number.isFinite(startMs) || startMs < startOfDayUtcMs) continue;
       const truckType = sess.truck_type;
       const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
       cyToday += cyPerLoad * (b.pickupCount || 0);
       dollarsToday += sessionDollarsToday(sess, trucksById);
-      const { currentShiftSeconds } = computeShiftHours(sess);
-      hoursToday += (currentShiftSeconds || 0) / 3600;
     }
-    return { active, cyToday, dollarsToday, hoursToday, total: buckets.length };
+    return { active, trucksActive: activeTruckKeys.size, cyToday, dollarsToday, total: buckets.length };
   }, [live.buckets, hauler.id, trucksById]);
   return (
     <Card padding={S[4]} style={{ marginBottom: S[4] }}>
@@ -8166,8 +8172,12 @@ function HaulerRollupStats({ hauler, db }) {
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3] }}>
         <div>
-          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Active</div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Active sessions</div>
           <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: stats.active > 0 ? C.ok : C.inkDim }}>{stats.active}</div>
+        </div>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Trucks active</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: stats.trucksActive > 0 ? C.ok : C.inkDim }}>{stats.trucksActive}</div>
         </div>
         <div>
           <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>CY today</div>
@@ -8176,10 +8186,6 @@ function HaulerRollupStats({ hauler, db }) {
         <div>
           <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>$ today</div>
           <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.accent }}>${stats.dollarsToday.toLocaleString()}</div>
-        </div>
-        <div>
-          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Hours today</div>
-          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.ink }}>{stats.hoursToday.toFixed(1)}</div>
         </div>
       </div>
     </Card>
@@ -10667,21 +10673,14 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     }
   };
   const truckTypeOptions = TRUCK_TYPES.map(tt => ({ value: tt.code, label: tt.label }));
-  // 2026-05-30 Phase 4 C2.3: swapped haulerRollupV31 (per-haul-request
-  // filter) for haulerSimpleRollup (per-truck filter). Same shape, same
-  // tile rendering — just no longer scoped through haulRequests.
-  // assignments[].truckId. Hauls count still comes from haul_requests
-  // (contractor-side intent) but CY/loads/hours/revenue come from every
-  // load + hour on this hauler's trucks.
-  const haulerRollup = haulerSimpleRollup(hauler.id, db);
-  const totalHours = haulerRollup.totalHours;
-  const totalRevenue = haulerRollup.totalRevenue;
-  const totalCYDelivered = haulerRollup.totalCY;
-  const totalLoadsCount = haulerRollup.totalLoads;
-  const haulsCount = haulerRollup.haulsCount;
-  // F-cleanup (2026-05-24 audit): removed `legacyTotalHours` +
-  // `legacyTotalRevenue` — they were computed but never rendered. The four
-  // hauler header stat cards below all read from `haulerRollup` already.
+  // 2026-06-01 (stabilization): header stats migrated off
+  // haulerSimpleRollup (which summed db.loads + db.hours — both purged in
+  // C2 and no longer the operational source of truth) onto driver_sessions
+  // via <HaulerRollupStats /> below. Active sessions / Trucks active /
+  // CY today / $ today all flow through useDriverSessionsLive →
+  // live.buckets filtered by hauler_id, same data path as Dispatch +
+  // Job detail. Removed dead vars: totalHours, totalRevenue,
+  // totalCYDelivered, totalLoadsCount, haulsCount.
 
   const beginEdit = () => { setDraft({ name: hauler.name, phone: hauler.phone, email: hauler.email }); setEditing(true); };
   // Match the new-hauler wizard's email validator. Empty is allowed (some
@@ -10922,12 +10921,11 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         </div>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Jobs" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul request` : 'assigned'} /></Card>
-        <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => db.hours.some(h => h.truckId === t.id && h.status === 'open')).length} active now`} /></Card>
-        <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
-        <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
-      </div>
+      {/* 2026-06-01 (stabilization): header stats sourced from
+          driver_sessions via the live hook — replaces the legacy
+          Jobs / Trucks / Loads / Total revenue grid that summed
+          db.loads + db.hours (both purged in C2). */}
+      <HaulerRollupStats hauler={hauler} db={db} />
 
       {/* Fleet — every truck registered to this hauler. Inline-editable;
           Edit/Remove per row; "+ Add truck" routes to the new-truck wizard
@@ -10988,14 +10986,9 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         )}
       </Card>
 
-      {/* 2026-06-01 (rename batch): rollup stats above the live
-          sessions section, computed from the same live.buckets filtered
-          by hauler_id. Active count = sessions with no ended_at;
-          totals walk every session ever assigned to this hauler. The
-          data path mirrors C4's HaulTruckingIntegration progress so
-          card-level assignments flow through to these tiles in
-          realtime. */}
-      <HaulerRollupStats hauler={hauler} db={db} />
+      {/* 2026-06-01 (stabilization): HaulerRollupStats now mounts in
+          the header position (above) — removed the duplicate from
+          this slot. Active driver sessions section follows directly. */}
 
       {/* 2026-06-01 (v21 trucking integration): live driver sessions
           scoped to this hauler. Reads driver_sessions WHERE hauler_id =
