@@ -2046,7 +2046,17 @@ const LOADS_SEED = [
   { id: 'ld-2035', driverId: 'dr-014', truckId: 'tk-612', projectId: 'GE', material: 'CF', cy: 15, ticketNo: 'C-7461',  time: '09:50', date: isoDaysAgo(7), status: 'approved' },
 ];
 const DB_STORAGE_KEY = 'jse_db_v1';
-const DB_SCHEMA_VERSION = 20;
+// 2026-06-01 (v21): trucking integration. Additive Supabase migration on
+// project naqqlztgbayxcgfphrxg added five columns + one join table:
+//   trucks.hauler_id            TEXT FK → haulers(id)
+//   driver_sessions.hauler_id   TEXT FK → haulers(id)
+//   driver_sessions.haul_id     TEXT FK → haul_requests(id)
+//   haul_requests.assigned_hauler_id TEXT FK → haulers(id)
+//   haul_assigned_trucks (haul_id, truck_id) join table + assigned_at
+// All new columns nullable; no existing rows touched. JS code that reads
+// these columns falls back to null gracefully, so sessions started before
+// the migration shipped continue to render.
+const DB_SCHEMA_VERSION = 21;
 
 // === Geocode cache (v14) — keyed by raw address string, value { lat, lng }.
 // Pre-seeded with all known seed-project + seed-haul-request addresses so the
