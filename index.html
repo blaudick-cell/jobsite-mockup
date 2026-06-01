@@ -14491,18 +14491,15 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
           </div>
         </div>
 
-        {/* Row 2: hauler (inline editable) • truck type • CY/load — single line meta. */}
-        <div style={{
-          ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {/* 2026-06-01: Contractor / Dispatcher chip is now a real <select>
-              dropdown so it pairs visually with the Job ▾ chip and Robert's
-              spec ("Each driver session card has two dropdowns") is met.
-              Picking a hauler writes both hauler_id (FK) AND company text
-              (legacy display) in one PATCH. Click bubble stopped so the
-              card-open-drawer doesn't fire while the picker is open. */}
-          <span onClick={(e) => e.stopPropagation()}>
+        {/* 2026-06-01 (mobile pass): two-row meta block. Row 2a holds
+            the two assignment dropdowns (Contractor + Job) which carry
+            most of the width on narrow viewports; Row 2b holds the
+            static info (truck type · #truck · CY/load). Both rows
+            wrap independently so cards never overflow horizontally at
+            375px. Dropdowns use min-width + flex:1 to share available
+            width when stacked, and a max-width on desktop. */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, flex: '1 1 140px' }}>
             <select value={sess.hauler_id || ''}
               onChange={(e) => saveHaulerFromCard(e.target.value || null)}
               title={sess.hauler_id ? `Assigned to: ${haulerDisplay}` : 'Assign contractor / dispatcher'}
@@ -14512,31 +14509,18 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 color: sess.hauler_id ? C.accent : C.inkFaint,
                 border: `1px solid ${sess.hauler_id ? C.accent : C.ruleHi}`,
                 borderRadius: R.sm, padding: '1px 6px', cursor: 'pointer',
-                fontSize: 11.5, outline: 'none', fontWeight: 700, maxWidth: 200,
+                fontSize: 11.5, outline: 'none', fontWeight: 700,
+                width: '100%', minWidth: 0, maxWidth: 240,
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden',
               }}>
-              <option value="">Contractor / Dispatcher ▾</option>
+              <option value="">Contractor ▾</option>
               {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
                 <option key={h.id} value={h.id}>{h.name}</option>
               ))}
             </select>
-            {flashColor && <span style={{ color: flashColor, marginLeft: 3 }}>{flashLabel}</span>}
+            {flashColor && <span style={{ color: flashColor, marginLeft: 3, flexShrink: 0 }}>{flashLabel}</span>}
           </span>
-          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
-          {truckTypeShort(truckType || sess.truck_type)}
-          {truckNumDisplay && (
-            <>
-              <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
-              <span style={{ fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>#{truckNumDisplay}</span>
-            </>
-          )}
-          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
-          {cyPerLoad} CY/load
-          {/* 2026-06-01 (v21 trucking integration): inline Haul dropdown.
-              Cascade-filtered against the session's hauler_id when set.
-              Click bubbling stopped so the card-open-drawer onClick
-              doesn't fire while the dispatcher is operating the select. */}
-          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
-          <span onClick={(e) => e.stopPropagation()}>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, flex: '1 1 100px' }}>
             <select value={sess.haul_id || ''}
               onChange={(e) => saveHaul(e.target.value || null)}
               title={currentHaulLabel ? `Assigned to job: ${currentHaulLabel}` : 'Assign to a job'}
@@ -14547,6 +14531,8 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 border: `1px solid ${sess.haul_id ? C.accent : C.ruleHi}`,
                 borderRadius: R.sm, padding: '1px 6px', cursor: 'pointer',
                 fontSize: 10.5, outline: 'none',
+                width: '100%', minWidth: 0, maxWidth: 200,
+                textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden',
               }}>
               <option value="">Job ▾</option>
               {pickableHauls.map(r => (
@@ -14555,10 +14541,24 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 </option>
               ))}
             </select>
-            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 3 }}>…</span>}
-            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 3 }}>✓</span>}
-            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 3 }}>✗</span>}
+            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 3, flexShrink: 0 }}>…</span>}
+            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 3, flexShrink: 0 }}>✓</span>}
+            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 3, flexShrink: 0 }}>✗</span>}
           </span>
+        </div>
+        <div style={{
+          ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
+          display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4,
+        }}>
+          <span>{truckTypeShort(truckType || sess.truck_type)}</span>
+          {truckNumDisplay && (
+            <>
+              <span style={{ color: C.inkFaint }}>•</span>
+              <span style={{ fontFamily: F.mono, color: C.ink, fontWeight: 700 }}>#{truckNumDisplay}</span>
+            </>
+          )}
+          <span style={{ color: C.inkFaint }}>•</span>
+          <span>{cyPerLoad} CY/load</span>
         </div>
 
         {/* Pickup / Drop-off addresses — smaller, muted, tighter than before. */}
@@ -15980,7 +15980,7 @@ function AdminActivity({ db, setDb, navigate }) {
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
           {merged.length} admin event{merged.length === 1 ? '' : 's'}. Driver activity surfaces on{' '}
           <a onClick={() => navigate('/admin/dispatch')} style={{ color: C.accent, cursor: 'pointer' }}>Dispatch</a>
-          {' '}and the Hauling Overview Active Drivers section.
+          {' '}and the Dispatch Overview Active Drivers section.
         </div>
       </div>
 
