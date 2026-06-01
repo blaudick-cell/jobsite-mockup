@@ -13902,6 +13902,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
               b={b}
               trucksById={trucksById}
               live={live}
+              db={db}
               onOpenDrawer={() => setDrawerSessionId(b.session.id)}
               fmtClock={fmtClock}
               fmtElapsed={fmtElapsed}
@@ -13934,7 +13935,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
 // inline company-edit chip can hold local state without churning the
 // parent on every keystroke. PATCHes driver_sessions.company + appends
 // an audit line to dispatcher_notes.
-function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, fmtClock, fmtElapsed, eventLabel, eventColor }) {
+function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDelete, fmtClock, fmtElapsed, eventLabel, eventColor }) {
   const sess = b.session;
   const isMobile = useIsMobile();
   const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
@@ -14021,8 +14022,21 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
       });
       const auditLine = `Admin edited company at ${stamp} MT: '${prev || '—'}' → '${next || '—'}'`;
       const appendedNotes = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
+      // 2026-06-01 (v21 trucking integration): also resolve to a formal
+      // hauler_id when the typed name matches a known hauler. Clearing
+      // the company clears hauler_id; an exact (case-insensitive) match
+      // sets it; an unrecognized free-text name leaves hauler_id alone
+      // (no clobber if the dispatcher is mid-typo).
+      const update = { company: next, dispatcher_notes: appendedNotes };
+      if (next === null) {
+        update.hauler_id = null;
+      } else {
+        const norm = next.toLowerCase();
+        const matchedHauler = (db.haulers || []).find(h => (h.name || '').trim().toLowerCase() === norm);
+        if (matchedHauler) update.hauler_id = matchedHauler.id;
+      }
       const upd = await _sb.client.from('driver_sessions')
-        .update({ company: next, dispatcher_notes: appendedNotes })
+        .update(update)
         .eq('id', sess.id)
         .select()
         .single();
@@ -14042,6 +14056,66 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
       setTimeout(() => setCompanyFlash(null), 3000);
     }
   }
+
+  // 2026-06-01 (v21 trucking integration): saveHaul writes driver_sessions.haul_id
+  // and emits an audit line into dispatcher_notes. Setting the field to
+  // null detaches the session from any haul.
+  const [haulFlash, setHaulFlash] = React.useState(null);
+  async function saveHaul(nextHaulId) {
+    const next = nextHaulId || null;
+    const prev = sess.haul_id || null;
+    if (next === prev) return;
+    setHaulFlash('saving');
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes').eq('id', sess.id).single();
+      if (cur.error) throw cur.error;
+      const curNotes = (cur.data && cur.data.dispatcher_notes) || '';
+      const stamp = new Date().toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+      const prevLabel = prev
+        ? (((db.haulRequests || []).find(r => r.id === prev) || {}).projectLabel || prev)
+        : '—';
+      const nextLabel = next
+        ? (((db.haulRequests || []).find(r => r.id === next) || {}).projectLabel || next)
+        : '—';
+      const auditLine = `Admin edited haul at ${stamp} MT: '${prevLabel}' → '${nextLabel}'`;
+      const appendedNotes = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ haul_id: next, dispatcher_notes: appendedNotes })
+        .eq('id', sess.id).select().single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
+      }
+      setHaulFlash('saved');
+      setTimeout(() => setHaulFlash(null), 1800);
+    } catch (e) {
+      console.warn('[ActiveTruckCard] saveHaul', e);
+      setHaulFlash('error');
+      setTimeout(() => setHaulFlash(null), 3000);
+    }
+  }
+  // Hauls eligible for cascade filtering: if the session has a hauler_id
+  // set, narrow strictly to hauls whose assigned_hauler_id matches (per
+  // Robert's spec: "only show hauls assigned to that hauler"). Without
+  // hauler_id, show every haul so the dispatcher can pick first and
+  // backfill hauler later. ALWAYS include the currently-selected haul,
+  // even if its hauler no longer matches — otherwise the dropdown can't
+  // render its own current value and the select degrades.
+  const pickableHauls = React.useMemo(() => {
+    const all = db.haulRequests || [];
+    if (!sess.hauler_id) return all;
+    return all.filter(r => r.assignedHaulerId === sess.hauler_id || r.id === sess.haul_id);
+  }, [db.haulRequests, sess.hauler_id, sess.haul_id]);
+  const currentHaulLabel = sess.haul_id
+    ? (((db.haulRequests || []).find(r => r.id === sess.haul_id) || {}).projectLabel || sess.haul_id)
+    : null;
 
   const chipBg = sess.company ? C.accentSoft : 'rgba(255,255,255,0.04)';
   const chipColor = sess.company ? C.accent : C.inkFaint;
@@ -14197,6 +14271,34 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
           )}
           <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
           {cyPerLoad} CY/load
+          {/* 2026-06-01 (v21 trucking integration): inline Haul dropdown.
+              Cascade-filtered against the session's hauler_id when set.
+              Click bubbling stopped so the card-open-drawer onClick
+              doesn't fire while the dispatcher is operating the select. */}
+          <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
+          <span onClick={(e) => e.stopPropagation()}>
+            <select value={sess.haul_id || ''}
+              onChange={(e) => saveHaul(e.target.value || null)}
+              title={currentHaulLabel ? `Assigned to haul: ${currentHaulLabel}` : 'Assign to a haul'}
+              style={{
+                ...T.caption, fontFamily: F.mono, letterSpacing: 0.3,
+                background: sess.haul_id ? C.accentSoft : 'transparent',
+                color: sess.haul_id ? C.accent : C.inkFaint,
+                border: `1px solid ${sess.haul_id ? C.accent : C.ruleHi}`,
+                borderRadius: R.sm, padding: '1px 6px', cursor: 'pointer',
+                fontSize: 10.5, outline: 'none',
+              }}>
+              <option value="">Haul ▾</option>
+              {pickableHauls.map(r => (
+                <option key={r.id} value={r.id}>
+                  {(r.projectLabel || r.id) + (r.contractorName ? ` · ${r.contractorName}` : '')}
+                </option>
+              ))}
+            </select>
+            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 3 }}>…</span>}
+            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 3 }}>✓</span>}
+            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 3 }}>✗</span>}
+          </span>
         </div>
 
         {/* Pickup / Drop-off addresses — smaller, muted, tighter than before. */}
@@ -15137,6 +15239,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                               b={b}
                               trucksById={trucksById}
                               live={live}
+                              db={db}
                               onOpenDrawer={(eventId) => {
                                 setDrawerScrollEventId(eventId || null);
                                 setDrawerSessionId(b.session.id);
