@@ -8475,6 +8475,17 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
 function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const requests = db.haulRequests || [];
   const req = requests.find(r => r.id === requestId);
+  // 2026-06-01 (invoice + settlement rework): live driver_sessions hook
+  // here at the AdminHaulRequestDetail level so the Final Invoice +
+  // per-dispatcher Settlement generators can aggregate over every
+  // ticket (driver_session) assigned to this job. HaulTruckingIntegration
+  // child component runs its own subscription too — both hit the same
+  // Realtime channel via useDriverSessionsLive's internal dedupe.
+  const haulLive = useDriverSessionsLive();
+  // PDF generator UI state — flash banner + which dispatcher dropdown
+  // is currently open (closed = null, open = '__menu__').
+  const [pdfFlash, setPdfFlash] = useState(null);
+  const [settlementMenuOpen, setSettlementMenuOpen] = useState(false);
   const [assigningTruck, setAssigningTruck] = useState(false);
   const [addingDayFor, setAddingDayFor] = useState(null);
   const [newDayDate, setNewDayDate] = useState(TODAY_ISO);
@@ -8865,74 +8876,343 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   // Legacy assign (suggested-haulers list) — now routes through assignTruck for parity
   const assign = (haulerId, truckId) => assignTruck(haulerId, truckId);
 
-  // v23: invoices section. JSE-issued (Jobsite Exchange → GC) interim/final
-  // invoices keyed off this haul request. Line items bill HOURS × hourly rate
-  // resolved through the rate chain (assignment.ratePerHour →
-  // truck.ratePerHour → DEFAULT_RATES[truck.type]; db.rates deprecated).
-  // `deliveredCY` is carried on each line for reporting only — it is not
-  // multiplied into the amount.
-  // `kind` distinguishes interim from final and is also encoded into the
-  // number prefix so cross-tab Realtime survives missing-column migrations.
+  // v23 + 2026-06-01 (invoice + settlement rework): invoices section.
+  // Final invoice now sources line items from driver_sessions WHERE
+  // haul_id = req.id (the e-ticket pivot from commit 7894e42 made that
+  // the canonical store; the old req.assignments[] + db.loads pipe was
+  // returning empty line items because both collections were purged in
+  // commit 26cc34e). Interim invoices removed entirely per Robert's
+  // 2026-06-01 spec — button gone, generator no longer accepts 'interim'.
+  // Settlement statements (per-dispatcher) are PDF-only (no DB row).
   const invoicesForHaul = (db.invoices || []).filter(inv => inv.haulRequestId === req.id);
-  const generateHaulInvoice = (kind) => {
-    const today = new Date().toISOString().slice(0, 10);
-    // 2026-05-30 Phase 4 C4.3: per-truck line items still carry admin-
-    // entered deliveredCY (db.loads tagged with haulRequestId) but hours +
-    // amount default to 0. Per-haul-request hours are gone (drivers don't
-    // tag sessions to hauls; admin can't enter hours by hand per C3.3).
-    // A future commit will restructure invoices to period-based hour sums
-    // over driver_sessions; until then invoices show "0 hrs · $0" so the
-    // generator path stays unbroken.
-    const lineItems = (req.assignments || []).map(a => {
-      const truck = db.trucks.find(t => t.id === a.truckId);
-      const driverName = truck && truck.driverId ? String(truck.driverId) : null;
-      const cy = (db.loads || [])
-        .filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId)
-        .reduce((s, l) => s + (Number(l.cy) || 0), 0);
-      const ratePerHour = rateForAssignment(a, truck);
+  // Aggregate every driver_session assigned to this haul into a
+  // line-item shape suitable for both the DB invoice row + the PDF
+  // line-items table.
+  const haulTickets = React.useMemo(() => {
+    const trucksById = new Map((db.trucks || []).map(t => [t.id, t]));
+    const buckets = (haulLive.buckets || []).filter(b => b && b.session && b.session.haul_id === req.id);
+    return buckets.map(b => {
+      const sess = b.session;
+      const truck = sess.matched_truck_id ? trucksById.get(sess.matched_truck_id) : null;
+      const truckType = sess.truck_type || (truck ? truck.type : null);
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+      const deliveredCY = cyPerLoad * (b.pickupCount || 0);
+      const { currentShiftSeconds } = computeShiftHours(sess);
+      const hours = (currentShiftSeconds || 0) / 3600;
+      const ratePerHour = sessionHourlyRate(sess, trucksById);
+      const amount = hours * ratePerHour;
       return {
-        id: 'li-' + Math.random().toString(36).substring(2, 7),
-        truckPlate: truck ? truck.plate : '?',
-        truckType: truck ? truck.type : '',
-        driverName: driverName || '—',
-        deliveredCY: cy,        // informational; not used in amount
-        hours: 0,
-        rate: ratePerHour,      // $/hr (kept on shape `rate` to match legacy seed invoices)
-        amount: 0,
+        sessionId: sess.id,
+        haulerId: sess.hauler_id || null,
+        haulerName: sess.company || '—',
+        driverName: sess.driver_name || '—',
+        truckPlate: (sess.truck_number && sess.truck_number.trim())
+          || (sess.plate_input && sess.plate_input.trim())
+          || (truck && truck.plate)
+          || '—',
+        truckType: truckType || '—',
+        startedAt: sess.started_at || null,
+        endedAt: sess.ended_at || null,
+        pickupCount: b.pickupCount || 0,
+        deliveredCY,
+        hours,
+        rate: ratePerHour,
+        amount,
       };
-    });
-    const totalCYForInv = lineItems.reduce((s, li) => s + li.deliveredCY, 0);
-    const totalAmount = parseFloat(lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0).toFixed(2));
-    const prefix = kind === 'final' ? 'INV-FIN-' : 'INV-INT-';
-    const invoiceId = 'inv-' + Date.now();
-    const newInvoice = {
-      id: invoiceId,
-      haulerId: null,
-      projectId: req.projectId,
-      haulRequestId: req.id,
-      number: prefix + String(Math.floor(Math.random() * 9000) + 1000),
-      periodStart: today, periodEnd: today, issuedDate: today,
-      createdAt: new Date().toISOString(),
-      billTo: project ? project.gc : '—',
-      lineItems,
-      loadCount: (db.loads || []).filter(l => l && l.haulRequestId === req.id).length,
-      totalCY: totalCYForInv,
-      amount: totalAmount,
-      notes: '',
-      status: 'draft',
-      kind,
-    };
-    setDb(prev => appendActivity(
-      { ...prev, invoices: [...(prev.invoices || []), newInvoice] },
-      {
-        type: 'invoice.drafted',
-        actorRole: 'admin',
-        actorId: null,
-        summary: 'Admin drafted ' + newInvoice.number + ' (' + kind + ') for ' + (project ? project.gc : 'a haul'),
-        refId: req.id,
-      }
-    ));
-    navigate('/admin/invoices/' + invoiceId + '/print');
+    }).sort((a, b) => String(b.startedAt || '').localeCompare(String(a.startedAt || '')));
+  }, [haulLive.buckets, req.id, db.trucks]);
+
+  const ticketsByHauler = React.useMemo(() => {
+    const m = new Map();
+    for (const t of haulTickets) {
+      const key = t.haulerId || '__unassigned__';
+      if (!m.has(key)) m.set(key, []);
+      m.get(key).push(t);
+    }
+    return m;
+  }, [haulTickets]);
+
+  // Distinct contractor/dispatcher list (for the Settlement Statement
+  // picker). Excludes the synthetic "__unassigned__" bucket so the
+  // dropdown only offers picks that can produce a meaningful statement.
+  const dispatchersForHaul = React.useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    for (const t of haulTickets) {
+      if (!t.haulerId || seen.has(t.haulerId)) continue;
+      seen.add(t.haulerId);
+      const hauler = (db.haulers || []).find(h => h.id === t.haulerId);
+      out.push({ id: t.haulerId, name: (hauler && hauler.name) || t.haulerName || t.haulerId });
+    }
+    return out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [haulTickets, db.haulers]);
+
+  // Shared JE-branded PDF header drawer — mirrors exportDispatchPDF (line 14823+).
+  const drawJsePdfHeader = (doc, opts) => {
+    const JE_GREEN = [179, 230, 53];
+    const JE_DARK  = [10, 10, 10];
+    const MUTED    = [130, 140, 150];
+    const pageW = doc.internal.pageSize.getWidth();
+    const logoX = 40, logoY = 20, logoSize = 32;
+    const cx = logoX + logoSize / 2, cy = logoY + logoSize / 2;
+    const scale = logoSize / 64;
+    const tx = (px, py) => [logoX + px * scale, logoY + py * scale];
+    const pts = [[32, 4], [56, 18], [56, 46], [32, 60], [8, 46], [8, 18]].map(p => tx(...p));
+    doc.setFillColor(...JE_GREEN);
+    doc.triangle(pts[0][0], pts[0][1], pts[1][0], pts[1][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[1][0], pts[1][1], pts[2][0], pts[2][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[2][0], pts[2][1], pts[4][0], pts[4][1], pts[5][0], pts[5][1], 'F');
+    doc.triangle(pts[2][0], pts[2][1], pts[3][0], pts[3][1], pts[4][0], pts[4][1], 'F');
+    doc.setFontSize(20); doc.setTextColor(...JE_DARK); doc.setFont(undefined, 'bold');
+    doc.text('J', cx, cy + 7, { align: 'center' });
+    doc.setFontSize(15); doc.text('JobsiteExchange', logoX + logoSize + 12, logoY + 16);
+    doc.setFontSize(9); doc.setTextColor(...MUTED); doc.setFont(undefined, 'normal');
+    doc.text(opts.subtitle, logoX + logoSize + 12, logoY + 30);
+    doc.setFontSize(16); doc.setTextColor(...JE_DARK); doc.setFont(undefined, 'bold');
+    doc.text(opts.title, pageW - 40, logoY + 16, { align: 'right' });
+    doc.setFontSize(9); doc.setTextColor(...MUTED); doc.setFont(undefined, 'normal');
+    doc.text(opts.subRight, pageW - 40, logoY + 30, { align: 'right' });
+    doc.setDrawColor(...JE_GREEN); doc.setLineWidth(2);
+    doc.line(40, 66, pageW - 40, 66);
+  };
+
+  const fmtUsd = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const fmtMtDateLong = (iso) => {
+    if (!iso) return '—';
+    try {
+      return new Date(iso).toLocaleString('en-US', {
+        timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric',
+        hour: 'numeric', minute: '2-digit',
+      }) + ' MT';
+    } catch (_) { return '—'; }
+  };
+  const generatedAtStr = () => new Date().toLocaleString('en-US', {
+    timeZone: 'America/Denver', month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  }) + ' MT';
+
+  // Final invoice — full job rollup across every assigned ticket.
+  // Writes a draft db.invoices row (so the existing "Invoices on this
+  // haul" list keeps its lifecycle: Mark sent / Mark paid / Delete)
+  // AND emits a PDF download.
+  const generateFinalInvoicePdf = async () => {
+    if (!haulTickets.length) return;
+    setPdfFlash({ kind: 'pending', text: 'Generating final invoice…' });
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const lineItems = haulTickets.map(t => ({
+        id: 'li-' + Math.random().toString(36).substring(2, 7),
+        truckPlate: t.truckPlate,
+        truckType: t.truckType,
+        driverName: t.driverName,
+        deliveredCY: t.deliveredCY,
+        hours: parseFloat(t.hours.toFixed(2)),
+        rate: t.rate,
+        amount: parseFloat(t.amount.toFixed(2)),
+      }));
+      const totalCY = lineItems.reduce((s, li) => s + (li.deliveredCY || 0), 0);
+      const totalHours = lineItems.reduce((s, li) => s + (li.hours || 0), 0);
+      const totalAmount = parseFloat(lineItems.reduce((s, li) => s + (li.amount || 0), 0).toFixed(2));
+      const invoiceId = 'inv-' + Date.now();
+      const number = 'INV-FIN-' + String(Math.floor(Math.random() * 9000) + 1000);
+      const newInvoice = {
+        id: invoiceId,
+        haulerId: null,
+        projectId: req.projectId,
+        haulRequestId: req.id,
+        number,
+        periodStart: today, periodEnd: today, issuedDate: today,
+        createdAt: new Date().toISOString(),
+        billTo: (project && project.gc) || req.contractorName || '—',
+        lineItems,
+        loadCount: haulTickets.reduce((s, t) => s + (t.pickupCount || 0), 0),
+        totalCY,
+        amount: totalAmount,
+        notes: '',
+        status: 'draft',
+        kind: 'final',
+      };
+      setDb(prev => appendActivity(
+        { ...prev, invoices: [...(prev.invoices || []), newInvoice] },
+        {
+          type: 'invoice.drafted',
+          actorRole: 'admin', actorId: null,
+          summary: 'Admin drafted ' + number + ' (final) for ' + ((project && project.gc) || req.contractorName || 'a job') + ' — ' + lineItems.length + ' ticket' + (lineItems.length === 1 ? '' : 's') + ', ' + totalCY + ' CY, ' + fmtUsd(totalAmount),
+          refId: req.id,
+        }
+      ));
+
+      // ── PDF ──
+      const jsPDF = await loadJsPdf();
+      if (!jsPDF) throw new Error('jsPDF failed to load');
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const JE_GREEN = [179, 230, 53], JE_DARK = [10, 10, 10], MUTED = [130, 140, 150];
+      const billTo = (project && project.gc) || req.contractorName || '—';
+
+      drawJsePdfHeader(doc, {
+        subtitle: 'Final invoice',
+        title: number,
+        subRight: 'Issued ' + today + ' · ' + lineItems.length + ' ticket' + (lineItems.length === 1 ? '' : 's'),
+      });
+
+      // Meta block
+      let y = 90;
+      doc.setFontSize(10); doc.setTextColor(...JE_DARK); doc.setFont(undefined, 'bold');
+      doc.text('Job', 40, y); doc.text('Bill to', 320, y);
+      doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
+      doc.text((req.projectLabel || haulRequestLabel(db, req) || req.id).slice(0, 60), 40, y + 14);
+      doc.text(String(billTo).slice(0, 50), 320, y + 14);
+      y += 32;
+      doc.setFont(undefined, 'bold'); doc.setTextColor(...JE_DARK);
+      doc.text('Material', 40, y); doc.text('Ordered volume', 320, y);
+      doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
+      doc.text(String(materialLabel(req.materialCode) || req.materialCode || '—'), 40, y + 14);
+      doc.text((Number(req.volumeCY) || 0).toLocaleString() + ' CY ordered · ' + totalCY.toLocaleString() + ' CY delivered', 320, y + 14);
+      y += 36;
+
+      // Line items table
+      doc.autoTable({
+        startY: y,
+        head: [['Driver', 'Truck', 'Type', 'Started', 'CY', 'Hrs', '$/hr', 'Amount']],
+        body: lineItems.map(li => {
+          const ticket = haulTickets.find(t => t.driverName === li.driverName && t.truckPlate === li.truckPlate) || {};
+          return [
+            li.driverName,
+            '#' + li.truckPlate,
+            String(li.truckType || '—'),
+            ticket.startedAt ? new Date(ticket.startedAt).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: '2-digit', day: '2-digit' }) : '—',
+            String(li.deliveredCY),
+            li.hours.toFixed(2),
+            fmtUsd(li.rate),
+            fmtUsd(li.amount),
+          ];
+        }),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: JE_GREEN, textColor: JE_DARK, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: 40, right: 40 },
+      });
+      const afterTableY = doc.lastAutoTable.finalY + 16;
+
+      // Totals
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...JE_DARK);
+      doc.text('Total hours', pageW - 220, afterTableY); doc.text(totalHours.toFixed(2) + ' h', pageW - 40, afterTableY, { align: 'right' });
+      doc.text('Total CY',    pageW - 220, afterTableY + 16); doc.text(String(totalCY), pageW - 40, afterTableY + 16, { align: 'right' });
+      doc.setFontSize(14);
+      doc.text('Total due',   pageW - 220, afterTableY + 38); doc.text(fmtUsd(totalAmount), pageW - 40, afterTableY + 38, { align: 'right' });
+
+      // Footer
+      const pageH = doc.internal.pageSize.getHeight();
+      doc.setDrawColor(...JE_GREEN); doc.setLineWidth(1);
+      doc.line(40, pageH - 32, pageW - 40, pageH - 32);
+      doc.setFontSize(8); doc.setTextColor(...MUTED); doc.setFont(undefined, 'normal');
+      doc.text('Generated ' + generatedAtStr(), 40, pageH - 20);
+      doc.text(JSE_INVOICE_ISSUER.name + ' · ' + JSE_INVOICE_ISSUER.email, pageW - 40, pageH - 20, { align: 'right' });
+
+      const filenameDate = today;
+      doc.save('final-invoice-' + (req.id || 'job') + '-' + filenameDate + '.pdf');
+
+      setPdfFlash({ kind: 'ok', text: 'Final invoice ' + number + ' generated.' });
+      setTimeout(() => setPdfFlash(null), 4000);
+    } catch (e) {
+      console.warn('[generateFinalInvoicePdf]', e);
+      setPdfFlash({ kind: 'error', text: 'Final invoice failed — ' + (e && e.message ? e.message : 'unknown error') });
+      setTimeout(() => setPdfFlash(null), 6000);
+    }
+  };
+
+  // Settlement statement — per-dispatcher PDF. No DB persistence; this is
+  // a one-shot statement to send to a single contractor showing their
+  // work-product on this job. Falls back to the job's assigned hauler
+  // name if the contractor isn't in db.haulers (legacy data).
+  const generateSettlementPdf = async (haulerId) => {
+    const tickets = ticketsByHauler.get(haulerId) || [];
+    if (!tickets.length) return;
+    const hauler = (db.haulers || []).find(h => h.id === haulerId);
+    const haulerName = (hauler && hauler.name) || tickets[0].haulerName || haulerId;
+    setPdfFlash({ kind: 'pending', text: 'Generating settlement for ' + haulerName + '…' });
+    try {
+      const totalCY = tickets.reduce((s, t) => s + (t.deliveredCY || 0), 0);
+      const totalHours = tickets.reduce((s, t) => s + (t.hours || 0), 0);
+      const totalAmount = parseFloat(tickets.reduce((s, t) => s + (t.amount || 0), 0).toFixed(2));
+      const today = new Date().toISOString().slice(0, 10);
+
+      const jsPDF = await loadJsPdf();
+      if (!jsPDF) throw new Error('jsPDF failed to load');
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'letter' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const JE_GREEN = [179, 230, 53], JE_DARK = [10, 10, 10], MUTED = [130, 140, 150];
+
+      drawJsePdfHeader(doc, {
+        subtitle: 'Settlement statement',
+        title: haulerName,
+        subRight: 'Issued ' + today + ' · ' + tickets.length + ' ticket' + (tickets.length === 1 ? '' : 's'),
+      });
+
+      // Meta block
+      let y = 90;
+      doc.setFontSize(10); doc.setTextColor(...JE_DARK); doc.setFont(undefined, 'bold');
+      doc.text('Job', 40, y); doc.text('Contractor / Dispatcher', 320, y);
+      doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
+      doc.text((req.projectLabel || haulRequestLabel(db, req) || req.id).slice(0, 60), 40, y + 14);
+      doc.text(String(haulerName).slice(0, 50), 320, y + 14);
+      y += 32;
+      doc.setFont(undefined, 'bold'); doc.setTextColor(...JE_DARK);
+      doc.text('Material', 40, y); doc.text('Work period', 320, y);
+      doc.setFont(undefined, 'normal'); doc.setTextColor(60, 60, 60);
+      doc.text(String(materialLabel(req.materialCode) || req.materialCode || '—'), 40, y + 14);
+      const earliest = tickets.map(t => t.startedAt).filter(Boolean).sort()[0];
+      const latest   = tickets.map(t => t.endedAt   || t.startedAt).filter(Boolean).sort().slice(-1)[0];
+      const earliestStr = earliest ? new Date(earliest).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }) : '—';
+      const latestStr   = latest   ? new Date(latest  ).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: 'short', day: 'numeric' }) : '—';
+      doc.text(earliestStr + ' – ' + latestStr, 320, y + 14);
+      y += 36;
+
+      doc.autoTable({
+        startY: y,
+        head: [['Driver', 'Truck', 'Type', 'Started', 'CY', 'Hrs', '$/hr', 'Amount']],
+        body: tickets.map(t => [
+          t.driverName,
+          '#' + t.truckPlate,
+          String(t.truckType || '—'),
+          t.startedAt ? new Date(t.startedAt).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: '2-digit', day: '2-digit' }) : '—',
+          String(t.deliveredCY),
+          t.hours.toFixed(2),
+          fmtUsd(t.rate),
+          fmtUsd(t.amount),
+        ]),
+        styles: { fontSize: 9, cellPadding: 4 },
+        headStyles: { fillColor: JE_GREEN, textColor: JE_DARK, fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        margin: { left: 40, right: 40 },
+      });
+      const afterTableY = doc.lastAutoTable.finalY + 16;
+
+      doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...JE_DARK);
+      doc.text('Total hours',     pageW - 220, afterTableY);      doc.text(totalHours.toFixed(2) + ' h', pageW - 40, afterTableY, { align: 'right' });
+      doc.text('Total CY',        pageW - 220, afterTableY + 16); doc.text(String(totalCY), pageW - 40, afterTableY + 16, { align: 'right' });
+      doc.setFontSize(14);
+      doc.text('Settlement amount', pageW - 220, afterTableY + 38); doc.text(fmtUsd(totalAmount), pageW - 40, afterTableY + 38, { align: 'right' });
+
+      const pageH = doc.internal.pageSize.getHeight();
+      doc.setDrawColor(...JE_GREEN); doc.setLineWidth(1);
+      doc.line(40, pageH - 32, pageW - 40, pageH - 32);
+      doc.setFontSize(8); doc.setTextColor(...MUTED); doc.setFont(undefined, 'normal');
+      doc.text('Generated ' + generatedAtStr(), 40, pageH - 20);
+      doc.text(JSE_INVOICE_ISSUER.name + ' · ' + JSE_INVOICE_ISSUER.email, pageW - 40, pageH - 20, { align: 'right' });
+
+      const slug = String(haulerName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'dispatcher';
+      doc.save('settlement-' + slug + '-' + (req.id || 'job') + '-' + today + '.pdf');
+
+      setPdfFlash({ kind: 'ok', text: 'Settlement for ' + haulerName + ' generated.' });
+      setSettlementMenuOpen(false);
+      setTimeout(() => setPdfFlash(null), 4000);
+    } catch (e) {
+      console.warn('[generateSettlementPdf]', e);
+      setPdfFlash({ kind: 'error', text: 'Settlement failed — ' + (e && e.message ? e.message : 'unknown error') });
+      setTimeout(() => setPdfFlash(null), 6000);
+    }
   };
   const advanceInvoiceStatus = (invId, nextStatus) => {
     const stampField = nextStatus === 'sent' ? 'sentAt' : nextStatus === 'paid' ? 'paidAt' : null;
@@ -9892,14 +10172,78 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               Issued by <span style={{ color: C.ink, fontWeight: 600 }}>{JSE_INVOICE_ISSUER.name}</span> · billed to <span style={{ color: C.ink }}>{project ? project.gc : '—'}</span>
             </div>
           </div>
-          <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
-            <Btn variant="secondary" onClick={() => generateHaulInvoice('interim')}>Generate interim invoice</Btn>
-            <Btn variant="primary"   onClick={() => generateHaulInvoice('final')}>Generate final invoice</Btn>
+          {/* 2026-06-01: Final Invoice rebuilt — now pulls from
+              driver_sessions (e-ticket pivot). Interim button removed
+              per Robert. Settlement Statement dropdown emits a
+              per-dispatcher PDF. Both buttons disabled when no tickets
+              are assigned (haulTickets.length === 0). */}
+          <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
+            <Btn variant="primary"
+              onClick={generateFinalInvoicePdf}
+              disabled={haulTickets.length === 0}
+              title={haulTickets.length === 0 ? 'Assign at least one ticket to this job to generate an invoice.' : 'Generate the final invoice from every assigned ticket'}>
+              Generate Final Invoice
+            </Btn>
+            <div style={{ position: 'relative' }}>
+              <Btn variant="secondary"
+                onClick={() => setSettlementMenuOpen(v => !v)}
+                disabled={dispatchersForHaul.length === 0}
+                title={dispatchersForHaul.length === 0
+                  ? 'Assign at least one ticket with a Contractor / Dispatcher to generate a settlement statement.'
+                  : 'Generate a per-dispatcher settlement statement for this job'}>
+                Generate Settlement Statement <span aria-hidden="true" style={{ marginLeft: 4, fontSize: 9 }}>▾</span>
+              </Btn>
+              {settlementMenuOpen && dispatchersForHaul.length > 0 && (
+                <div style={{
+                  position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                  minWidth: 240, zIndex: 100,
+                  background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm,
+                  boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                  padding: S[1],
+                }}>
+                  <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, padding: '6px 10px 4px' }}>
+                    Pick a dispatcher
+                  </div>
+                  {dispatchersForHaul.map(d => {
+                    const dTickets = ticketsByHauler.get(d.id) || [];
+                    return (
+                      <button key={d.id}
+                        type="button"
+                        onClick={() => generateSettlementPdf(d.id)}
+                        style={{
+                          width: '100%', textAlign: 'left',
+                          background: 'transparent', border: 'none', cursor: 'pointer',
+                          padding: '8px 10px', borderRadius: R.sm,
+                          color: C.ink, fontFamily: F.body, fontSize: 13,
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2],
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = C.surfaceHi; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+                        <span style={{ fontWeight: 600 }}>{d.name}</span>
+                        <span style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>{dTickets.length} ticket{dTickets.length === 1 ? '' : 's'}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
+        {pdfFlash && (
+          <div style={{
+            ...T.caption, fontWeight: 700, letterSpacing: 0.3,
+            padding: '8px 14px', marginBottom: S[3], borderRadius: R.sm,
+            background: pdfFlash.kind === 'error' ? C.warnSoft : pdfFlash.kind === 'ok' ? C.accentSoft : C.surfaceHi,
+            color: pdfFlash.kind === 'error' ? C.warn : pdfFlash.kind === 'ok' ? C.accent : C.inkDim,
+            border: '1px solid ' + (pdfFlash.kind === 'error' ? C.warn : pdfFlash.kind === 'ok' ? C.accent : C.ruleHi),
+          }}>{pdfFlash.text}</div>
+        )}
         {invoicesForHaul.length === 0 ? (
           <div style={{ ...T.bodySm, color: C.inkDim, padding: S[4], textAlign: 'center', background: C.surfaceHi, borderRadius: R.md }}>
-            No invoices yet for this haul request. Generate an interim invoice to bill the contractor for delivered CY to date, or a final invoice to close out the haul.
+            No invoices yet for this job.{' '}
+            {haulTickets.length === 0
+              ? 'Assign at least one ticket above to enable the Final Invoice button.'
+              : 'Generate a final invoice to close out the job; rolls up every assigned ticket into one PDF.'}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
