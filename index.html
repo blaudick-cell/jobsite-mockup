@@ -1734,6 +1734,9 @@ const DB_STORAGE_KEY = 'jse_db_v1';
 //   driver_sessions.haul_id     TEXT FK → haul_requests(id)
 //   haul_requests.assigned_hauler_id TEXT FK → haulers(id)
 //   haul_assigned_trucks (haul_id, truck_id) join table + assigned_at
+//     ⤷ DROPPED 2026-06-01 (stabilization batch). The e-ticket pivot
+//       (commit 7894e42) moved assignments onto driver_sessions.haul_id
+//       and this join table sat unread. No code refs remained.
 // All new columns nullable; no existing rows touched. JS code that reads
 // these columns falls back to null gracefully, so sessions started before
 // the migration shipped continue to render.
