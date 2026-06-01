@@ -12932,6 +12932,63 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
     }
   }
 
+  // 2026-06-01: Delete-from-drawer. Mirrors the cascade-delete path the
+  // Dispatch tab's card-level trash icon uses (FKs on truck_events,
+  // event_photos, issue_reports all ON DELETE CASCADE so a single
+  // DELETE on driver_sessions purges every child row). Activity-feed
+  // type is `session.deleted_from_drawer` so audits can distinguish
+  // drawer-initiated deletions from card-initiated ones.
+  const [deleteInFlight, setDeleteInFlight] = React.useState(false);
+  async function deleteFromDrawer() {
+    const sess = drawerBucket && drawerBucket.session;
+    if (!sess) return;
+    if (!_sb.ready || !_sb.client) {
+      setAdminFlash({ text: 'Supabase client not ready — can\'t delete', kind: 'error' });
+      setTimeout(() => setAdminFlash(null), 6000);
+      return;
+    }
+    const startedClock = (() => {
+      try {
+        return new Date(sess.started_at).toLocaleString('en-US', {
+          timeZone: 'America/Denver', month: 'short', day: 'numeric',
+          hour: 'numeric', minute: '2-digit',
+        });
+      } catch (e) { return sess.started_at || 'unknown'; }
+    })();
+    const driverLabel = sess.driver_name || 'driver';
+    const msg = `Delete session for ${driverLabel}, started ${startedClock}?\n\nThis removes the session and all its events, photos, and issues. Cannot be undone.`;
+    if (!window.confirm(msg)) return;
+    setDeleteInFlight(true);
+    try {
+      const { error } = await _sb.client.from('driver_sessions').delete().eq('id', sess.id);
+      if (error) throw new Error('driver_sessions delete: ' + (error.message || error));
+      setDb(prev => appendActivity(prev, {
+        type: 'session.deleted_from_drawer',
+        actorRole: 'admin', actorId: null,
+        summary: `Admin deleted driver session for ${driverLabel} (started ${startedClock} MT) from session drawer`,
+        refId: null,
+      }));
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
+      }
+      setAdminFlash({
+        text: 'Session deleted for ' + driverLabel + '.',
+        kind: 'ok',
+      });
+      // Auto-close once the delete + activity log settle.
+      setTimeout(() => { setAdminFlash(null); onClose && onClose(); }, 800);
+    } catch (e) {
+      console.warn('[DriverSessionDrawer] deleteFromDrawer', e);
+      setAdminFlash({
+        text: 'Delete failed — ' + String((e && e.message) || e),
+        kind: 'error',
+      });
+      setTimeout(() => setAdminFlash(null), 6000);
+    } finally {
+      setDeleteInFlight(false);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────
   // Nothing requested → render nothing (parent controls open/close
   // via sessionId/truckId being set or null).
@@ -13008,6 +13065,30 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                   fontWeight: 700, letterSpacing: 0.5, textTransform: 'uppercase',
                   cursor: 'pointer', whiteSpace: 'nowrap',
                 }}>End shift</button>
+            )}
+            {/* 2026-06-01: Delete button. Sits just left of Close in the
+                sticky header so it's always reachable on mobile + desktop.
+                Muted ghost-button chrome with red-tinted glyph + label so
+                the destructive intent reads without dominating the bar. */}
+            {sess && (
+              <button
+                type="button"
+                onClick={deleteFromDrawer}
+                disabled={deleteInFlight}
+                aria-label="Delete session"
+                title="Delete session (cascades to events, photos, issues)"
+                className="jse-drawer-delete-btn"
+                style={{
+                  background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.warn,
+                  padding: '6px 10px', borderRadius: R.pill, fontFamily: F.mono, fontSize: 11,
+                  fontWeight: 700, letterSpacing: 0.5, cursor: deleteInFlight ? 'wait' : 'pointer',
+                  opacity: deleteInFlight ? 0.6 : 1,
+                  display: 'inline-flex', alignItems: 'center', gap: 4,
+                  whiteSpace: 'nowrap',
+                }}>
+                <span aria-hidden="true" style={{ fontSize: 12, lineHeight: 1 }}>🗑</span>
+                <span className="jse-drawer-delete-label">{deleteInFlight ? 'Deleting…' : 'Delete'}</span>
+              </button>
             )}
             <button onClick={onClose} aria-label="Close" className="jse-close-btn" style={{
               background: 'transparent', border: `1px solid ${C.ruleHi}`, color: C.inkDim,
