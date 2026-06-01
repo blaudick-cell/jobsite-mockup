@@ -10554,9 +10554,12 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
       </div>
 
-      {/* Trucks under this hauler — moved to top of the page, inline-editable, with Edit/Remove. */}
+      {/* Fleet — every truck registered to this hauler. Inline-editable;
+          Edit/Remove per row; "+ Add truck" routes to the new-truck wizard
+          which writes hauler_id into the trucks table (Supabase column +
+          camelCase JS field both populated). */}
       <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
-        <Label>Trucks under this hauler</Label>
+        <Label>Fleet</Label>
         <span style={{ ...T.bodySm, color: C.inkDim }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} · click any value to edit · rate is a per-truck default; assigning to a haul still lets you override per-haul</span>
       </div>
       <Card padding={0} style={{ marginBottom: S[6] }}>
@@ -10609,6 +10612,38 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </table>
         )}
       </Card>
+
+      {/* 2026-06-01 (v21 trucking integration): live driver sessions
+          scoped to this hauler. Reads driver_sessions WHERE hauler_id =
+          this hauler's id via DriverActivityTable. Two sections — active
+          on top, full history below — both render with the same shared
+          card layout used on the Dispatch tab + Dispatch Overview. */}
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+        <Label>Active driver sessions</Label>
+        <span style={{ ...T.bodySm, color: C.inkDim }}>Currently clocked in for {hauler.name}</span>
+      </div>
+      <div style={{ marginBottom: S[6] }}>
+        <DriverActivityTable
+          db={db}
+          navigate={navigate}
+          activeOnly
+          filterByHaulerId={hauler.id}
+          emptyText={`No drivers on shift for ${hauler.name} right now. Sessions surface here as drivers clock in with this hauler assigned.`}
+        />
+      </div>
+
+      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
+        <Label>Session history</Label>
+        <span style={{ ...T.bodySm, color: C.inkDim }}>Every session ever assigned to {hauler.name}</span>
+      </div>
+      <div style={{ marginBottom: S[6] }}>
+        <DriverActivityTable
+          db={db}
+          navigate={navigate}
+          filterByHaulerId={hauler.id}
+          emptyText={`No completed sessions yet for ${hauler.name}. Past shifts appear here once they end.`}
+        />
+      </div>
 
       {/* Attachments — W-9, Insurance, MSA, Other + user-defined custom categories.
           Real uploads write to Supabase Storage bucket 'hauler-documents'. */}
@@ -13330,7 +13365,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
 // Status uses the same 8h green/red threshold the dispatch-live table
 // uses — sessions over 8h pick up a soft-red tint on the row so dispatchers
 // can see at a glance who has been running too long.
-function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false, showFilterPills = false, viewAllHref = null }) {
+function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly = false, showCapacitySummary = false, showFilterPills = false, viewAllHref = null, filterByHaulerId = null, filterByHaulId = null, emptyText = null }) {
   const ownLive = useDriverSessionsLive();
   const live = liveProp || ownLive;
   const isMobile = useIsMobile();
@@ -13357,8 +13392,18 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
 
   // Newest-first ordering: started_at desc. unstarted/no-started sessions
   // sink to the bottom.
+  // 2026-06-01: scope filters (filterByHaulerId / filterByHaulId) narrow
+  // the bucket list to sessions belonging to a specific hauler or haul.
+  // Used by AdminHaulerDetail + AdminHaulRequestDetail to render "active
+  // sessions on this hauler / haul" without forking a second card layout.
   const rows = React.useMemo(() => {
     let buckets = (live.buckets || []).slice();
+    if (filterByHaulerId) {
+      buckets = buckets.filter(b => b.session.hauler_id === filterByHaulerId);
+    }
+    if (filterByHaulId) {
+      buckets = buckets.filter(b => b.session.haul_id === filterByHaulId);
+    }
     if (effectiveFilter === 'on_shift') {
       buckets = buckets.filter(b => !b.session.ended_at);
     } else if (effectiveFilter === 'off_shift') {
@@ -13366,7 +13411,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     }
     buckets.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
     return maxRows ? buckets.slice(0, maxRows) : buckets;
-  }, [live.buckets, maxRows, effectiveFilter]);
+  }, [live.buckets, maxRows, effectiveFilter, filterByHaulerId, filterByHaulId]);
 
   // Capacity summary aggregates — used when `showCapacitySummary` is on
   // (Hauling Overview embed). Mirrors the figures from the original
@@ -13430,9 +13475,9 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                           : et || '—';
 
   const sectionLabel = activeOnly ? 'Active drivers (newest first)' : 'Driver activity (newest first)';
-  const emptyMessage = activeOnly
+  const emptyMessage = emptyText || (activeOnly
     ? 'No drivers on shift right now. Sessions surface here as drivers clock in.'
-    : 'No driver sessions yet. The first widget clock-in will appear here.';
+    : 'No driver sessions yet. The first widget clock-in will appear here.');
 
   // Per-row computed data — shared between desktop table and mobile
   // card stack. Pulled out so the render path is single-source.
