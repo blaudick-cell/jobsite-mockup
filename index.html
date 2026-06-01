@@ -4,11 +4,23 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Jobsite Exchange</title>
-  <meta name="description" content="Admin / Contractor / Dispatcher dashboards for hourly trucking — Jobsite Exchange." />
-  <meta property="og:title" content="Jobsite Exchange — Role Dashboards" />
-  <meta property="og:description" content="Hierarchy: Projects → Hauls → Haulers → Trucks." />
+  <title>Jobsite Exchange - Dispatch</title>
+  <meta name="description" content="Dispatch & Hauling Operations." />
+  <!-- 2026-06-01: Open Graph + Twitter Card meta refreshed with the new
+       branded share image (excavator + dump truck, picked by Robert).
+       Replaces the stale "Hierarchy: Projects → Hauls → Haulers → Trucks"
+       description flagged in the stabilization regression audit
+       (outputs/regression-audit-2026-06-01.md). Source image is portrait
+       1290×2796 — link-preview clients will center-crop. -->
   <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://dispatch.jobsiteexchange.com/" />
+  <meta property="og:title" content="Jobsite Exchange - Dispatch" />
+  <meta property="og:description" content="Dispatch & Hauling Operations." />
+  <meta property="og:image" content="https://dispatch.jobsiteexchange.com/share-image.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Jobsite Exchange - Dispatch" />
+  <meta name="twitter:description" content="Dispatch & Hauling Operations." />
+  <meta name="twitter:image" content="https://dispatch.jobsiteexchange.com/share-image.png" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cpath d='M32 4 L56 18 L56 46 L32 60 L8 46 L8 18 Z' fill='%23B3E635'/%3E%3Ctext x='32' y='44' text-anchor='middle' font-family='sans-serif' font-size='34' font-weight='800' fill='%230A0A0A'%3EJ%3C/text%3E%3C/svg%3E" />
   <!-- Supabase JS v2 UMD — exposes window.supabase.createClient. Used by the
        cloud-sync layer in BLOCK 1b for read (Phase 2) + write/Realtime (Phase 3).
