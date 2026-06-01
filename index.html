@@ -12417,6 +12417,10 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
   const [editingField, setEditingField] = React.useState(null);
   const [editDraft, setEditDraft] = React.useState('');
   const [fieldFlash, setFieldFlash] = React.useState({});
+  // 2026-05-31 (End-time popover): tap-on-End opens this; user picks
+  // "Use last activity" (snaps to last non-end_shift event) or
+  // "Pick manually" (opens native datetime picker via MetaField).
+  const [endPopoverOpen, setEndPopoverOpen] = React.useState(false);
   // To save a `started_at` / `ended_at` value coming from a
   // <input type="datetime-local"> we have to convert local-MT back to
   // an ISO timestamp. The widget writes ISO; if we preserved local-MT
@@ -13227,29 +13231,41 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                     buttons inside the OS sheet. */}
                 {(() => {
                   const evList = drawerBucket.events;
-                  const lastEv = evList.length > 0 ? evList[evList.length - 1] : null;
+                  // 2026-06-01 (popover refactor): the "last activity" suggestion
+                  // explicitly EXCLUDES end_shift events. Robert"s common case
+                  // is "driver forgot to clock out and an end_shift event was
+                  // synthesized later" — recommending the end_shift timestamp
+                  // back to him is useless. Walk events newest-first, pick the
+                  // first non-end_shift event with a coordinate-bearing
+                  // timestamp.
+                  const lastMeaningfulEv = (() => {
+                    for (let i = evList.length - 1; i >= 0; i--) {
+                      const e = evList[i];
+                      if (e && e.event_at && e.event_type !== 'end_shift') return e;
+                    }
+                    return null;
+                  })();
                   const applyEventTimestamp = (fieldKey, fieldLabel, ev) => {
                     if (!ev || !ev.event_at) return;
                     const currentValue = sess[fieldKey];
                     if (currentValue === ev.event_at) return;
                     saveSessionField(fieldKey, ev.event_at, currentValue, fieldLabel);
                   };
-                  const showEndQuick = lastEv && lastEv.event_at && lastEv.event_at !== sess.ended_at;
-                  // Chip styling — primary affordance, not a footnote.
-                  // Same accent-soft + accent border as the company chip
-                  // on driver cards so dispatchers recognize "this is the
-                  // one-tap fix" without thinking.
-                  const quickChipStyle = {
-                    display: 'inline-flex', alignItems: 'center', gap: 6,
-                    background: C.accentSoft, color: C.accent,
-                    border: `1px solid ${C.accent}`,
-                    borderRadius: R.pill,
-                    padding: '5px 12px',
-                    fontFamily: F.mono, fontSize: 11.5, fontWeight: 700,
-                    letterSpacing: 0.3,
-                    cursor: 'pointer', outline: 'none',
-                    whiteSpace: 'nowrap',
-                    marginTop: 4,
+                  const isEditingEnd = editingField === 'ended_at';
+                  const popoverStyle = {
+                    position: 'absolute', top: 'calc(100% + 4px)', right: 0,
+                    background: C.surfaceHi, border: `1px solid ${C.ruleHi}`,
+                    borderRadius: R.sm, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                    minWidth: 240, zIndex: 60, padding: 4,
+                    display: 'flex', flexDirection: 'column', gap: 2,
+                  };
+                  const popoverItemStyle = {
+                    ...T.caption, fontFamily: F.body, fontWeight: 600, fontSize: 11.5,
+                    padding: '8px 12px', textAlign: 'left',
+                    background: 'transparent', color: C.ink,
+                    border: 'none', cursor: 'pointer', outline: 'none',
+                    width: '100%', whiteSpace: 'nowrap',
+                    borderRadius: R.sm, lineHeight: 1.4,
                   };
                   return (
                     <>
@@ -13267,26 +13283,74 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                         <span style={labelStyle}>Shift</span>
                         <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
                       </div>
-                      <div style={rowStyle}>
+                      <div style={{ ...rowStyle, position: 'relative' }}>
                         <span style={labelStyle}>End</span>
                         <span style={{ ...valueStyle, color: endedDt ? C.ink : C.inkFaint, fontFamily: endedDt ? F.mono : 'inherit', fontStyle: endedDt ? 'normal' : 'italic' }}>
-                          <MetaField fieldKey="ended_at" fieldLabel="end time"
-                            value={sess.ended_at}
-                            displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
-                            type="datetime" />
+                          {/* When user picked "Pick manually" or already in datetime-local edit, show MetaField. Otherwise show a clickable display that opens the popover. */}
+                          {isEditingEnd ? (
+                            <MetaField fieldKey="ended_at" fieldLabel="end time"
+                              value={sess.ended_at}
+                              displayValue={endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}
+                              type="datetime" />
+                          ) : (
+                            <span
+                              role="button" tabIndex={0}
+                              onClick={(e) => { e.stopPropagation(); setEndPopoverOpen(v => !v); }}
+                              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEndPopoverOpen(v => !v); } }}
+                              title="Edit end time"
+                              style={{
+                                cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+                                padding: '1px 4px', borderRadius: 3,
+                              }}>
+                              <span>{endedDt ? `${fmtClock(sess.ended_at)} MT` : 'Still active'}</span>
+                              <span aria-hidden="true" style={{ ...T.micro, color: C.inkFaint, opacity: 0.6 }}>✎</span>
+                            </span>
+                          )}
                         </span>
+                        {endPopoverOpen && !isEditingEnd && (
+                          <>
+                            <div onClick={() => setEndPopoverOpen(false)}
+                              style={{ position: 'fixed', inset: 0, zIndex: 55 }} />
+                            <div role="menu" style={popoverStyle}>
+                              {lastMeaningfulEv ? (
+                                <button type="button" role="menuitem"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEndPopoverOpen(false);
+                                    applyEventTimestamp('ended_at', 'end time', lastMeaningfulEv);
+                                  }}
+                                  onMouseEnter={(e) => { e.currentTarget.style.background = C.surface; }}
+                                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                                  style={popoverItemStyle}>
+                                  <span style={{ color: C.accent, fontWeight: 700 }}>Use last activity</span>
+                                  <span style={{ display: 'block', color: C.inkDim, fontFamily: F.mono, fontSize: 10.5, marginTop: 2 }}>
+                                    {fmtClock(lastMeaningfulEv.event_at)} {fmtMtDate(lastMeaningfulEv.event_at)} ({eventLabel(lastMeaningfulEv.event_type)})
+                                  </span>
+                                </button>
+                              ) : (
+                                <div style={{ ...popoverItemStyle, color: C.inkFaint, cursor: 'default' }}>
+                                  No prior activity to snap to
+                                </div>
+                              )}
+                              <button type="button" role="menuitem"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEndPopoverOpen(false);
+                                  setEditDraft(datetimeLocalFromIso(sess.ended_at));
+                                  setEditingField('ended_at');
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.background = C.surface; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                                style={popoverItemStyle}>
+                                <span style={{ color: C.ink }}>Pick manually</span>
+                                <span style={{ display: 'block', color: C.inkFaint, fontSize: 10.5, marginTop: 2 }}>
+                                  Open the date + time picker
+                                </span>
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </div>
-                      {showEndQuick && (
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: S[2] }}>
-                          <button type="button"
-                            onClick={() => applyEventTimestamp('ended_at', 'end time', lastEv)}
-                            title="Snap end time to the most recent event"
-                            style={quickChipStyle}>
-                            <span aria-hidden="true">↻</span>
-                            <span>Set to last activity · {fmtClock(lastEv.event_at)} {fmtMtDate(lastEv.event_at)} ({eventLabel(lastEv.event_type)})</span>
-                          </button>
-                        </div>
-                      )}
                     </>
                   );
                 })()}
