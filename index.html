@@ -13837,8 +13837,11 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
         {/* 2026-05-31: Hauling Overview embed gets the same All /
             On Shift / Off Shift pill row used on the Dispatch tab.
             Single-select, compact, sits inline with the section
-            label. Default 'On Shift' preserves what the dispatcher
-            sees today. */}
+            label. Default 'all' to match the Dispatch tab default
+            so dispatchers see the same slice in both surfaces.
+            2026-06-01: "View all in Dispatch →" link moved inline
+            with the filter cluster (was below the cards). Stays
+            visible without scrolling. */}
         {showFilterPills && (() => {
           const onShiftCount = (live.buckets || []).filter(b => b.session && !b.session.ended_at).length;
           const offShiftCount = (live.buckets || []).filter(b => b.session && b.session.ended_at).length;
@@ -13853,19 +13856,39 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
             cursor: 'pointer', outline: 'none', fontSize: 10,
           });
           return (
-            <div style={{
-              display: 'inline-flex', gap: 4, padding: 2,
-              background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
-            }}>
-              <button type="button" onClick={() => setLocalFilter('on_shift')} style={pill(localFilter === 'on_shift')}>
-                On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
-              </button>
-              <button type="button" onClick={() => setLocalFilter('off_shift')} style={pill(localFilter === 'off_shift')}>
-                Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
-              </button>
-              <button type="button" onClick={() => setLocalFilter('all')} style={pill(localFilter === 'all')}>
-                All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
-              </button>
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+              <div style={{
+                display: 'inline-flex', gap: 4, padding: 2,
+                background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
+              }}>
+                <button type="button" onClick={() => setLocalFilter('on_shift')} style={pill(localFilter === 'on_shift')}>
+                  On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
+                </button>
+                <button type="button" onClick={() => setLocalFilter('off_shift')} style={pill(localFilter === 'off_shift')}>
+                  Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
+                </button>
+                <button type="button" onClick={() => setLocalFilter('all')} style={pill(localFilter === 'all')}>
+                  All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+                </button>
+              </div>
+              {viewAllHref && (
+                <a
+                  href={'#' + viewAllHref + '?filter=' + effectiveFilter}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    navigate(viewAllHref + '?filter=' + effectiveFilter);
+                  }}
+                  style={{
+                    ...T.caption, color: C.inkDim,
+                    textDecoration: 'none', cursor: 'pointer',
+                    display: 'inline-flex', alignItems: 'center', gap: 4,
+                    padding: '4px 8px', borderRadius: R.sm,
+                    fontSize: 11.5,
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; }}
+                >View all in Dispatch <span aria-hidden="true">→</span></a>
+              )}
             </div>
           );
         })()}
@@ -13888,195 +13911,33 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
             {emptyMessage}
           </div>
         </Card>
-      ) : isMobile ? (
-        /* 2026-05-31 (Mobile dispatch redesign): tight card per row.
-           4px left status strip, large name, single-line meta (company
-           · truck · CY/load), 3-col metrics row (shift / CY today /
-           loads X/Y), one-line footer ("Last: …"). Tap → drawer. */
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: S[5] }}>
-          {decoratedRows.map(({ b, sess, truckType, cyPerLoad, cyToday, hourlyRate, dollarsToday }) => {
-            const status = computeDriverStatus(b, issuesArr);
-            const companyMetaLine = [
-              sess.company || '— unassigned',
-              truckTypeShortLabel(truckType),
-              `${cyPerLoad} CY/load`,
-            ].join(' • ');
-            // 2026-05-31: first-pickup + first-dropoff addresses.
-            // Same shape as ActiveTruckCard so figures agree across views.
-            const firstPickup  = b.events.find(e => e.event_type === 'pickup_load')  || null;
-            const firstDropoff = b.events.find(e => e.event_type === 'dropoff_load') || null;
-            const fmtEventLocation = (ev) => {
-              if (!ev) return null;
-              if (ev.address && String(ev.address).trim()) return formatAddressCompact(ev.address);
-              if (ev.latitude != null && ev.longitude != null) {
-                return Number(ev.latitude).toFixed(4) + ', ' + Number(ev.longitude).toFixed(4);
-              }
-              return '— no location';
-            };
-            const addressLineStyle = {
-              ...T.caption, color: C.inkDim, fontSize: 11, marginTop: 2,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            };
-            const addressLabelStyle = {
-              fontFamily: F.mono, color: C.inkFaint, fontSize: 10.5,
-              letterSpacing: 0.3,
-            };
-            return (
-              <div
-                key={sess.id}
-                onClick={() => setDrawerSessionId(sess.id)}
-                style={{
-                  cursor: 'pointer',
-                  background: C.surface,
-                  border: `1px solid ${C.rule}`,
-                  borderLeft: `4px solid ${status.strip}`,
-                  borderRadius: R.md,
-                  padding: '10px 14px',
-                }}>
-                {/* Top row: driver name (large, left) + status pill (right) */}
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                  <div style={{
-                    ...T.body,
-                    fontFamily: F.display,
-                    fontSize: 16, fontWeight: 700,
-                    color: C.ink, lineHeight: 1.15,
-                    letterSpacing: -0.2,
-                    minWidth: 0,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}
-                  </div>
-                  <span style={{
-                    padding: '2px 8px', borderRadius: R.pill,
-                    background: status.soft, color: status.color,
-                    border: `1px solid ${status.color}`,
-                    fontFamily: F.mono, fontSize: 9.5,
-                    fontWeight: 700, letterSpacing: 0.5,
-                    textTransform: 'uppercase', flexShrink: 0,
-                    lineHeight: 1.4,
-                  }}>{status.label}</span>
-                </div>
-
-                {/* Company • Truck • CY/load — single line meta */}
-                <div style={{
-                  ...T.caption, color: C.inkDim, marginTop: 3,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  fontSize: 11.5,
-                }}>{companyMetaLine}</div>
-
-                {/* First pickup + first drop-off addresses. */}
-                {firstPickup && (
-                  <div style={addressLineStyle}>
-                    <span style={addressLabelStyle}>Pickup:</span>{' '}
-                    <span>{fmtEventLocation(firstPickup)}</span>
-                  </div>
-                )}
-                {firstDropoff && (
-                  <div style={addressLineStyle}>
-                    <span style={addressLabelStyle}>Drop-off:</span>{' '}
-                    <span>{fmtEventLocation(firstDropoff)}</span>
-                  </div>
-                )}
-
-                {/* 2026-05-31: 3-col primary metric row. Hours + $ today
-                    are the two BIG tiles (matching weight). CY + loads
-                    demoted to a smaller right-column row. Rate sits
-                    muted under the $ today figure. */}
-                <div style={{
-                  display: 'grid', gridTemplateColumns: '1fr 1fr 1fr',
-                  gap: 8, marginTop: 8,
-                  fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
-                  color: C.ink,
-                }}>
-                  <span style={{ fontSize: 18, fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-                  <span style={{ textAlign: 'center' }}>
-                    <span style={{ fontSize: 18, fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
-                    <span style={{ display: 'block', color: C.inkFaint, fontWeight: 400, fontSize: 10, marginTop: 1 }}>${hourlyRate}/hr</span>
-                  </span>
-                  <span style={{ textAlign: 'right', fontSize: 11.5, color: C.inkDim, alignSelf: 'center', lineHeight: 1.4 }}>
-                    <span style={{ color: C.ink, fontWeight: 700 }}>{cyToday}</span> CY
-                    <span style={{ color: C.inkFaint }}>{' · '}</span>
-                    <span style={{ color: C.ink, fontWeight: 700 }}>{b.pickupCount}/{b.dropCount}</span> loads
-                  </span>
-                </div>
-
-                {/* Last event footer */}
-                <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontSize: 11 }}>
-                  {compactLastEv(b.lastEvent)}
-                </div>
-              </div>
-            );
-          })}
-        </div>
       ) : (
-        <Card padding={0} style={{ marginBottom: S[5] }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr>
-                <Th>Status</Th>
-                <Th>Driver</Th>
-                <Th>Company</Th>
-                <Th>Truck Type</Th>
-                <Th align="right">$/hr</Th>
-                <Th align="right">CY/Load</Th>
-                <Th>Start (MT)</Th>
-                <Th align="right">Shift</Th>
-                <Th align="right">$ Today</Th>
-                <Th align="right">Pickups</Th>
-                <Th align="right">Drop-offs</Th>
-                <Th align="right">CY (Today)</Th>
-                <Th>Last Event</Th>
-              </tr>
-            </thead>
-            <tbody>
-              {decoratedRows.map(({ b, sess, truckType, cyPerLoad, isOver8h, cyToday, lastEvStr, statusColor, statusSoft, statusLabel, hourlyRate, dollarsToday }) => (
-                <Tr key={sess.id}
-                    onClick={() => setDrawerSessionId(sess.id)}
-                    style={isOver8h ? { background: 'rgba(239,68,68,0.06)' } : null}>
-                  <Td>
-                    <Pill color={statusColor} soft={statusSoft}>{statusLabel}</Pill>
-                  </Td>
-                  <Td>{sess.driver_name || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                  <Td>{sess.company || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                  <Td><span style={{ fontFamily: F.mono, color: C.inkDim }}>{truckType || '—'}</span></Td>
-                  <Td align="right" mono>${hourlyRate}</Td>
-                  <Td align="right" mono>{cyPerLoad || <span style={{ color: C.inkFaint }}>—</span>}</Td>
-                  <Td mono>{fmtClock(sess.started_at)}</Td>
-                  <Td align="right" mono style={{ fontWeight: 700 }}>{fmtElapsed(sess.started_at, sess.ended_at)}</Td>
-                  <Td align="right" mono style={{ fontWeight: 700, color: C.accent }}>{fmtUsd0(dollarsToday)}</Td>
-                  <Td align="right" mono>{b.pickupCount}</Td>
-                  <Td align="right" mono>{b.dropCount}</Td>
-                  <Td align="right" mono>{cyToday}</Td>
-                  <Td><span style={{ ...T.caption, color: C.inkDim }}>{lastEvStr}</span></Td>
-                </Tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-      )}
-
-      {/* 2026-05-31: "View all in Dispatch →" footer link. Renders
-          only when caller passes viewAllHref (Hauling Overview
-          embed). Navigates to the Dispatch tab with the current
-          filter as a query string so the user lands on the same
-          slice they were looking at here. */}
-      {viewAllHref && (
-        <div style={{ textAlign: 'right', marginTop: -S[3], marginBottom: S[4] }}>
-          <a
-            href={'#' + viewAllHref + '?filter=' + effectiveFilter}
-            onClick={(e) => {
-              e.preventDefault();
-              navigate(viewAllHref + '?filter=' + effectiveFilter);
-            }}
-            style={{
-              ...T.caption, color: C.inkDim,
-              textDecoration: 'none', cursor: 'pointer',
-              display: 'inline-flex', alignItems: 'center', gap: 4,
-              padding: '4px 8px', borderRadius: R.sm,
-            }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = C.accent; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = C.inkDim; }}
-          >View all in Dispatch <span aria-hidden="true">→</span></a>
+        /* 2026-06-01: unified ActiveTruckCard render — same component
+           used on the Dispatch tab. Single grid for mobile + desktop;
+           auto-fill at 320px so wider viewports get 2-3 columns. No
+           edit/delete props passed — Hauling Overview is read-only
+           (those actions live on Dispatch where they belong). The
+           previous bespoke mobile-card + desktop-table forks are
+           gone; one card render to maintain. */
+        <div className="jse-active-trucks-grid" style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gap: S[2],
+          marginBottom: S[5],
+        }}>
+          {rows.map(b => (
+            <ActiveTruckCard
+              key={b.session.id}
+              b={b}
+              trucksById={trucksById}
+              live={live}
+              onOpenDrawer={() => setDrawerSessionId(b.session.id)}
+              fmtClock={fmtClock}
+              fmtElapsed={fmtElapsed}
+              eventLabel={eventLabel}
+              eventColor={(et) => C.inkDim}
+            />
+          ))}
         </div>
       )}
 
