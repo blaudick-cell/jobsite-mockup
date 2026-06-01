@@ -3274,7 +3274,11 @@ const SB_FIELDS_JS = {
   invoices:     ['id','haulerId','projectId','haulRequestId','number','periodStart','periodEnd','issuedDate','billTo','status','createdAt','sentAt','paidAt','paymentRef','lineItems','loadCount','totalCY','amount','notes'],
   // 2026-05-25: `projectId` removed — Dispatch dropped the haul_requests.project_id
   // column post-backfill. SELECT 400'd on "column does not exist" until removed.
-  haulRequests: ['id','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
+  // 2026-06-01 (v21 trucking integration): assignedHaulerId added — the
+  // formal "primary hauler on this haul" pointer. matchedHaulerId stays
+  // for legacy back-compat (the matched-by-truck flow); assigned_hauler_id
+  // is what new dispatcher-driven workflows write to.
+  haulRequests: ['id','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','assignedHaulerId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
 };
 
@@ -8085,6 +8089,228 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   );
 }
 
+// 2026-06-01 (v21 trucking integration): inline component on
+// AdminHaulRequestDetail that surfaces the new formal assignment fields
+// (haul_requests.assigned_hauler_id + haul_assigned_trucks join table)
+// alongside a live "sessions on this haul" panel powered by
+// DriverActivityTable's filterByHaulId prop. Mounts directly between
+// the route mini-map and the legacy Assignments section.
+function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
+  const live = useDriverSessionsLive();
+  const [assigned, setAssigned] = React.useState([]);   // rows from haul_assigned_trucks
+  const [assignedLoading, setAssignedLoading] = React.useState(true);
+  const [assignedErr, setAssignedErr] = React.useState(null);
+
+  const refetchAssigned = React.useCallback(async () => {
+    if (!_sb || !_sb.ready || !_sb.client) return;
+    setAssignedErr(null);
+    try {
+      const { data, error } = await _sb.client.from('haul_assigned_trucks')
+        .select('haul_id, truck_id, assigned_at')
+        .eq('haul_id', req.id);
+      if (error) throw error;
+      setAssigned(data || []);
+    } catch (e) {
+      setAssignedErr(e && e.message ? e.message : 'load failed');
+    } finally {
+      setAssignedLoading(false);
+    }
+  }, [req.id]);
+
+  React.useEffect(() => { refetchAssigned(); }, [refetchAssigned]);
+
+  const assignedTruckIds = new Set(assigned.map(r => r.truck_id));
+
+  // Trucks available to attach to this haul:
+  // - prefer the trucks owned by the assigned hauler (cascade narrowing)
+  // - if no hauler is assigned yet, show every truck so a dispatcher can
+  //   still attach something quickly
+  const pickableTrucks = React.useMemo(() => {
+    const list = (db.trucks || []).filter(t => !assignedTruckIds.has(t.id));
+    if (!req.assignedHaulerId) return list;
+    return list.filter(t => t.haulerId === req.assignedHaulerId);
+  }, [db.trucks, assignedTruckIds, req.assignedHaulerId]);
+
+  const addTruck = async (truckId) => {
+    if (!truckId || assignedTruckIds.has(truckId)) return;
+    try {
+      const { error } = await _sb.client.from('haul_assigned_trucks')
+        .insert({ haul_id: req.id, truck_id: truckId });
+      if (error) throw error;
+      await refetchAssigned();
+    } catch (e) {
+      setAssignedErr(e && e.message ? e.message : 'add failed');
+    }
+  };
+
+  const removeTruck = async (truckId) => {
+    try {
+      const { error } = await _sb.client.from('haul_assigned_trucks')
+        .delete()
+        .eq('haul_id', req.id)
+        .eq('truck_id', truckId);
+      if (error) throw error;
+      await refetchAssigned();
+    } catch (e) {
+      setAssignedErr(e && e.message ? e.message : 'remove failed');
+    }
+  };
+
+  // Progress totals from sessions WHERE haul_id = req.id. Walks every
+  // bucket the live hook surfaced and tallies CY hauled (per-truck
+  // CY/load × pickup count), $ billed (sessionDollarsToday), and hours
+  // (computeShiftHours).
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
+  const progress = React.useMemo(() => {
+    const scoped = (live.buckets || []).filter(b => b.session && b.session.haul_id === req.id);
+    let cy = 0, dollars = 0, hours = 0, count = 0;
+    for (const b of scoped) {
+      const truckType = b.session.truck_type;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+      cy += cyPerLoad * (b.pickupCount || 0);
+      dollars += sessionDollarsToday(b.session, trucksById);
+      const { currentShiftSeconds } = computeShiftHours(b.session);
+      hours += (currentShiftSeconds || 0) / 3600;
+      count += 1;
+    }
+    return { cy, dollars, hours, count };
+  }, [live.buckets, req.id, trucksById]);
+
+  const selectStyle = { ...T.bodySm, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '6px 10px', borderRadius: R.sm, fontFamily: F.body, minWidth: 220 };
+
+  return (
+    <>
+      <Card padding={S[4]} style={{ marginBottom: S[4] }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[3] }}>
+          <div>
+            <Label>Trucking</Label>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+              Formal hauler + truck assignment. Drives the sessions panel + progress totals below.
+            </div>
+          </div>
+        </div>
+
+        {/* Assigned hauler */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3], flexWrap: 'wrap' }}>
+          <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 130 }}>Assigned hauler</span>
+          <select value={req.assignedHaulerId || ''}
+            onChange={(e) => {
+              const nextId = e.target.value || null;
+              updateReq(r => ({ ...r, assignedHaulerId: nextId }));
+            }}
+            style={selectStyle}>
+            <option value="">— Unassigned —</option>
+            {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
+              <option key={h.id} value={h.id}>{h.name}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Assigned trucks */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[3], flexWrap: 'wrap' }}>
+          <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 130, paddingTop: 6 }}>Assigned trucks</span>
+          <div style={{ flex: 1, minWidth: 240 }}>
+            {assignedLoading ? (
+              <div style={{ ...T.bodySm, color: C.inkFaint }}>Loading…</div>
+            ) : assigned.length === 0 ? (
+              <div style={{ ...T.bodySm, color: C.inkFaint, marginBottom: S[2] }}>No trucks attached yet.</div>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2], marginBottom: S[2] }}>
+                {assigned.map(row => {
+                  const t = trucksById.get(row.truck_id);
+                  const hauler = t && t.haulerId ? (db.haulers || []).find(h => h.id === t.haulerId) : null;
+                  return (
+                    <span key={row.truck_id} style={{
+                      ...T.caption, display: 'inline-flex', alignItems: 'center', gap: 6,
+                      padding: '4px 8px 4px 10px', borderRadius: R.pill,
+                      background: C.accentSoft, color: C.accent, border: `1px solid ${C.accent}`,
+                      fontFamily: F.mono, letterSpacing: 0.3,
+                    }}>
+                      #{t ? t.plate : row.truck_id}
+                      {hauler && <span style={{ color: C.inkDim, fontFamily: F.body, fontWeight: 400, marginLeft: 2 }}>{hauler.name}</span>}
+                      <button type="button" onClick={() => removeTruck(row.truck_id)}
+                        aria-label="Remove truck"
+                        style={{ background: 'transparent', border: 'none', color: C.accent, cursor: 'pointer', padding: 0, fontSize: 14, lineHeight: 1 }}>×</button>
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+            {pickableTrucks.length > 0 ? (
+              <select value=""
+                onChange={(e) => { if (e.target.value) addTruck(e.target.value); }}
+                style={selectStyle}>
+                <option value="">+ Add truck…</option>
+                {pickableTrucks.slice().sort((a, b) => String(a.plate || '').localeCompare(String(b.plate || ''))).map(t => {
+                  const hauler = t.haulerId ? (db.haulers || []).find(h => h.id === t.haulerId) : null;
+                  return (
+                    <option key={t.id} value={t.id}>
+                      #{t.plate}{hauler ? ` — ${hauler.name}` : ''}
+                    </option>
+                  );
+                })}
+              </select>
+            ) : (
+              <div style={{ ...T.caption, color: C.inkFaint }}>
+                {req.assignedHaulerId
+                  ? 'No more trucks under this hauler — add trucks on the hauler detail page.'
+                  : 'No trucks left to attach.'}
+              </div>
+            )}
+            {assignedErr && (
+              <div style={{ ...T.caption, color: C.warn, marginTop: 6 }}>Error: {assignedErr}</div>
+            )}
+          </div>
+        </div>
+
+        {/* Progress totals */}
+        <div style={{
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3],
+          paddingTop: S[3], borderTop: `1px solid ${C.rule}`,
+        }}>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Sessions</div>
+            <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink }}>{progress.count}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>CY hauled</div>
+            <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink }}>{progress.cy.toLocaleString()}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>$ billed</div>
+            <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.accent }}>${progress.dollars.toLocaleString()}</div>
+          </div>
+          <div>
+            <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Hours</div>
+            <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink }}>{progress.hours.toFixed(1)}</div>
+          </div>
+        </div>
+      </Card>
+
+      {/* Sessions on this haul */}
+      <div style={{ marginBottom: S[3] }}>
+        <Label>Sessions on this haul</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+          Live + ended driver sessions whose haul_id matches.
+        </div>
+      </div>
+      <div style={{ marginBottom: S[5] }}>
+        <DriverActivityTable
+          db={db}
+          navigate={navigate}
+          live={live}
+          filterByHaulId={req.id}
+          emptyText="No driver sessions on this haul yet. Sessions appear here once a driver clocks in with this haul assigned."
+        />
+      </div>
+    </>
+  );
+}
+
 function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const requests = db.haulRequests || [];
   const req = requests.find(r => r.id === requestId);
@@ -9023,6 +9249,15 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
 
       {/* Route preview — mini-map + drive time + tandem throughput estimate */}
       <HaulRouteMiniMap db={db} setDb={setDb} pickupAddress={pickup.address} dropoffAddress={dropoff.address} />
+
+      {/* 2026-06-01 (v21 trucking integration): formal hauler + truck
+          assignment via haul_requests.assigned_hauler_id + the
+          haul_assigned_trucks join table. The legacy assignments[]
+          block below still drives day-row + load-entry workflows;
+          this section layers the new dispatcher-driven pointers on
+          top. Sessions on this haul + progress totals pull from
+          driver_sessions WHERE haul_id = req.id, via DriverActivityTable. */}
+      <HaulTruckingIntegration req={req} db={db} setDb={setDb} navigate={navigate} updateReq={updateReq} />
 
       {/* Assignments — multi-truck, multi-day per-truck loads with completion donuts */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
