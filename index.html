@@ -8094,6 +8094,78 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
   );
 }
 
+// 2026-06-01: rollup stats strip for the Contractor / Dispatcher detail
+// page. Active count + total CY today + total $ today + total hours
+// today, all computed from driver_sessions WHERE hauler_id = this hauler
+// via the live hook. Today = local MT calendar day. Stats update in
+// realtime as cards on Dispatch reassign sessions to / away from this
+// hauler — same data path as the job-detail progress totals.
+function HaulerRollupStats({ hauler, db }) {
+  const live = useDriverSessionsLive();
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
+  const stats = React.useMemo(() => {
+    const buckets = (live.buckets || []).filter(b => b.session && b.session.hauler_id === hauler.id);
+    let startOfDayUtcMs = 0;
+    try {
+      const nowMt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }));
+      const startOfDayMt = new Date(nowMt.getFullYear(), nowMt.getMonth(), nowMt.getDate());
+      const offsetMin = (nowMt.getTime() - Date.now()) / 60000;
+      startOfDayUtcMs = startOfDayMt.getTime() - offsetMin * 60000;
+    } catch (_) {}
+    let active = 0, cyToday = 0, dollarsToday = 0, hoursToday = 0;
+    for (const b of buckets) {
+      const sess = b.session;
+      if (!sess.ended_at) active += 1;
+      const startMs = sess.started_at ? new Date(sess.started_at).getTime() : NaN;
+      if (!Number.isFinite(startMs) || startMs < startOfDayUtcMs) continue;
+      const truckType = sess.truck_type;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[truckType] || 0;
+      cyToday += cyPerLoad * (b.pickupCount || 0);
+      dollarsToday += sessionDollarsToday(sess, trucksById);
+      const { currentShiftSeconds } = computeShiftHours(sess);
+      hoursToday += (currentShiftSeconds || 0) / 3600;
+    }
+    return { active, cyToday, dollarsToday, hoursToday, total: buckets.length };
+  }, [live.buckets, hauler.id, trucksById]);
+  return (
+    <Card padding={S[4]} style={{ marginBottom: S[4] }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[3] }}>
+        <div>
+          <Label>Today</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+            Rollup across every driver session assigned to {hauler.name} since local-MT midnight. Updates in realtime as dispatchers reassign sessions.
+          </div>
+        </div>
+        <div style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>
+          {stats.total} total session{stats.total === 1 ? '' : 's'} on record
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3] }}>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Active</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: stats.active > 0 ? C.ok : C.inkDim }}>{stats.active}</div>
+        </div>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>CY today</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.ink }}>{stats.cyToday.toLocaleString()}</div>
+        </div>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>$ today</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.accent }}>${stats.dollarsToday.toLocaleString()}</div>
+        </div>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Hours today</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.ink }}>{stats.hoursToday.toFixed(1)}</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 // 2026-06-01 (v21 trucking integration): inline component on
 // AdminHaulRequestDetail that surfaces the new formal assignment fields
 // (haul_requests.assigned_hauler_id + haul_assigned_trucks join table)
@@ -10852,6 +10924,15 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </table>
         )}
       </Card>
+
+      {/* 2026-06-01 (rename batch): rollup stats above the live
+          sessions section, computed from the same live.buckets filtered
+          by hauler_id. Active count = sessions with no ended_at;
+          totals walk every session ever assigned to this hauler. The
+          data path mirrors C4's HaulTruckingIntegration progress so
+          card-level assignments flow through to these tiles in
+          realtime. */}
+      <HaulerRollupStats hauler={hauler} db={db} />
 
       {/* 2026-06-01 (v21 trucking integration): live driver sessions
           scoped to this hauler. Reads driver_sessions WHERE hauler_id =
@@ -14143,6 +14224,49 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
     }
   }
 
+  // 2026-06-01: saveHaulerFromCard writes both hauler_id (FK) and company
+  // (legacy display column) in one PATCH. Picking "" / null clears both.
+  async function saveHaulerFromCard(nextHaulerId) {
+    const next = nextHaulerId || null;
+    const prev = sess.hauler_id || null;
+    if (next === prev) return;
+    setCompanyFlash('saving');
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes').eq('id', sess.id).single();
+      if (cur.error) throw cur.error;
+      const curNotes = (cur.data && cur.data.dispatcher_notes) || '';
+      const stamp = new Date().toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+      const prevHauler = prev ? ((db.haulers || []).find(h => h.id === prev) || {}).name : null;
+      const nextHauler = next ? ((db.haulers || []).find(h => h.id === next) || {}).name : null;
+      const auditLine = `Admin assigned contractor / dispatcher at ${stamp} MT: '${prevHauler || '—'}' → '${nextHauler || '—'}'`;
+      const appendedNotes = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
+      const upd = await _sb.client.from('driver_sessions')
+        .update({
+          hauler_id: next,
+          company: nextHauler || null,
+          dispatcher_notes: appendedNotes,
+        })
+        .eq('id', sess.id).select().single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
+      }
+      setCompanyFlash('saved');
+      setTimeout(() => setCompanyFlash(null), 1800);
+    } catch (e) {
+      console.warn('[ActiveTruckCard] saveHaulerFromCard', e);
+      setCompanyFlash('error');
+      setTimeout(() => setCompanyFlash(null), 3000);
+    }
+  }
+
   // 2026-06-01 (v21 trucking integration): saveHaul writes driver_sessions.haul_id
   // and emits an audit line into dispatcher_notes. Setting the field to
   // null detaches the session from any haul.
@@ -14313,39 +14437,30 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
           ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}>
-          <span onClick={(e) => { e.stopPropagation(); }}>
-            {!companyEditing ? (
-              <span
-                role="button" tabIndex={0}
-                onClick={(e) => { e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
-                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); } }}
-                title={sess.company ? 'Change contractor / dispatcher' : 'Assign contractor / dispatcher'}
-                style={haulerInlineStyle}>
-                {haulerDisplay}
-                <span aria-hidden="true" style={{ opacity: 0.5, marginLeft: 3, fontSize: 9 }}>✎</span>
-                {flashColor && <span style={{ color: flashColor, marginLeft: 3 }}>{flashLabel}</span>}
-              </span>
-            ) : (
-              <>
-                <input autoFocus list={datalistId} value={companyDraft}
-                  onChange={(e) => setCompanyDraft(e.target.value)}
-                  onBlur={saveCompany}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
-                    else if (e.key === 'Enter') { e.currentTarget.blur(); }
-                  }}
-                  placeholder="Contractor / Dispatcher"
-                  style={{
-                    background: C.surface, color: C.ink,
-                    border: `1px solid ${C.accent}`, borderRadius: 3,
-                    padding: '1px 6px', fontFamily: F.body, fontSize: 11.5,
-                    outline: 'none', minWidth: 100, maxWidth: 200,
-                  }} />
-                <datalist id={datalistId}>
-                  {knownCompanies.map(c => <option key={c} value={c} />)}
-                </datalist>
-              </>
-            )}
+          {/* 2026-06-01: Contractor / Dispatcher chip is now a real <select>
+              dropdown so it pairs visually with the Job ▾ chip and Robert's
+              spec ("Each driver session card has two dropdowns") is met.
+              Picking a hauler writes both hauler_id (FK) AND company text
+              (legacy display) in one PATCH. Click bubble stopped so the
+              card-open-drawer doesn't fire while the picker is open. */}
+          <span onClick={(e) => e.stopPropagation()}>
+            <select value={sess.hauler_id || ''}
+              onChange={(e) => saveHaulerFromCard(e.target.value || null)}
+              title={sess.hauler_id ? `Assigned to: ${haulerDisplay}` : 'Assign contractor / dispatcher'}
+              style={{
+                ...T.caption, fontFamily: F.body, letterSpacing: 0.3,
+                background: sess.hauler_id ? C.accentSoft : 'transparent',
+                color: sess.hauler_id ? C.accent : C.inkFaint,
+                border: `1px solid ${sess.hauler_id ? C.accent : C.ruleHi}`,
+                borderRadius: R.sm, padding: '1px 6px', cursor: 'pointer',
+                fontSize: 11.5, outline: 'none', fontWeight: 700, maxWidth: 200,
+              }}>
+              <option value="">Contractor / Dispatcher ▾</option>
+              {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
+                <option key={h.id} value={h.id}>{h.name}</option>
+              ))}
+            </select>
+            {flashColor && <span style={{ color: flashColor, marginLeft: 3 }}>{flashLabel}</span>}
           </span>
           <span style={{ color: C.inkFaint, margin: '0 6px' }}>•</span>
           {truckTypeShort(truckType || sess.truck_type)}
