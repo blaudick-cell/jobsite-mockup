@@ -13632,13 +13632,14 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   // to thread props through.
   const [drawerSessionId, setDrawerSessionId] = React.useState(null);
 
-  // 2026-05-31: when `showFilterPills` is on (Hauling Overview embed),
+  // 2026-05-31: when `showFilterPills` is on (Dispatch Overview embed),
   // the component owns a local filter state matching the Dispatch tab
-  // (All / On Shift / Off Shift). Default 'on_shift' preserves the
-  // original activeOnly behaviour. The `activeOnly` prop is now a
+  // (All / On Shift / Off Shift). 2026-06-01: default flipped to 'all'
+  // for consistency with the Dispatch tab default — dispatchers see
+  // the same slice in both surfaces. The `activeOnly` prop is a
   // back-compat shortcut that auto-pins the local filter to 'on_shift'
   // without exposing the pills.
-  const [localFilter, setLocalFilter] = React.useState('on_shift');
+  const [localFilter, setLocalFilter] = React.useState('all');
   const effectiveFilter = showFilterPills ? localFilter : (activeOnly ? 'on_shift' : 'all');
 
   // Newest-first ordering: started_at desc. unstarted/no-started sessions
@@ -13838,14 +13839,14 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
                 display: 'inline-flex', gap: 4, padding: 2,
                 background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill,
               }}>
+                <button type="button" onClick={() => setLocalFilter('all')} style={pill(localFilter === 'all')}>
+                  All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
+                </button>
                 <button type="button" onClick={() => setLocalFilter('on_shift')} style={pill(localFilter === 'on_shift')}>
                   On Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{onShiftCount}</span>
                 </button>
                 <button type="button" onClick={() => setLocalFilter('off_shift')} style={pill(localFilter === 'off_shift')}>
                   Off Shift <span style={{ opacity: 0.6, marginLeft: 4 }}>{offShiftCount}</span>
-                </button>
-                <button type="button" onClick={() => setLocalFilter('all')} style={pill(localFilter === 'all')}>
-                  All <span style={{ opacity: 0.6, marginLeft: 4 }}>{totalCount}</span>
                 </button>
               </div>
               {viewAllHref && (
