@@ -4287,9 +4287,13 @@ function useDriverSessionsLive() {
 
   // Force-refetch handle for components that just wrote to the DB and
   // don't want to wait for Realtime to broadcast back. Safe to call any
-  // time after mount; no-op before the effect runs.
+  // time after mount; no-op before the effect runs. Returns the fetchAll
+  // promise so callers can await the full re-sync (used by save paths
+  // to ensure the UI doesn't flip out of edit mode until local state
+  // matches DB canonically).
   const refetch = React.useCallback(() => {
-    if (fetchAllRef.current) fetchAllRef.current();
+    if (fetchAllRef.current) return fetchAllRef.current();
+    return Promise.resolve();
   }, []);
   // Read-after-write hook: caller passes the DB-confirmed full row
   // returned from .update(...).select().single() (or .insert(...).select()
@@ -12491,8 +12495,20 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         .select()
         .single();
       if (upd.error) throw upd.error;
-      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
-        live.applyRowPatch('driver_sessions', upd.data);
+      // Apply the confirmed row to local state immediately. If RLS or
+      // any edge case returns null data despite no error, log so we
+      // can spot it — without applyRowPatch the UI would otherwise
+      // appear to "revert" because state stays at pre-edit values.
+      if (live && typeof live.applyRowPatch === 'function') {
+        if (upd.data) live.applyRowPatch('driver_sessions', upd.data);
+        else console.warn('[saveSessionField] upd.data null after successful PATCH — falling back to refetch');
+      }
+      // Defense-in-depth: pull the full DB state again and await it so
+      // the UI only flips out of edit mode AFTER live state is canonical.
+      // Catches any case where applyRowPatch missed (null data, wrong
+      // table targeting, stale buckets memo etc).
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) { /* refetch failure is non-fatal — applyRowPatch already covered the row */ }
       }
       setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saved' }));
       setEditingField(null);
@@ -12650,6 +12666,9 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         if (upd.error) throw upd.error;
         if (live && typeof live.applyRowPatch === 'function' && upd.data) {
           live.applyRowPatch('truck_events', upd.data);
+        }
+        if (live && typeof live.refetch === 'function') {
+          try { await live.refetch(); } catch (_) {}
         }
         setLocalAddress(next || null);
         setFlash('saved');
@@ -12837,9 +12856,18 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
     setNoteStatus('Saving…');
     try {
       if (!_sb.ready || !_sb.client) throw new Error('Supabase client not ready');
-      const { error } = await _sb.client.from('driver_sessions')
-        .update({ dispatcher_notes: txt }).eq('id', drawerBucket.session.id);
-      if (error) throw error;
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ dispatcher_notes: txt })
+        .eq('id', drawerBucket.session.id)
+        .select()
+        .single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
+      }
       const stamp = new Date().toLocaleTimeString('en-US', {
         timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
       });
@@ -12873,6 +12901,9 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
       if (upd.error) throw new Error('issue_reports update: ' + (upd.error.message || upd.error));
       if (live && typeof live.applyRowPatch === 'function' && upd.data) {
         live.applyRowPatch('issue_reports', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
       }
       // Admin Activity Feed log (only if parent wired setDb through).
       if (typeof setDb === 'function' && drawerBucket) {
@@ -12938,6 +12969,9 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
       if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
       if (live && typeof live.applyRowPatch === 'function' && upd.data) {
         live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
       }
       setAdminFlash({
         text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
@@ -14099,6 +14133,9 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
       if (upd.error) throw upd.error;
       if (live && typeof live.applyRowPatch === 'function' && upd.data) {
         live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
       }
       setCompanyFlash('saved');
       setCompanyEditing(false);
