@@ -7540,16 +7540,23 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       return projects.find(p => p.id === id) || null;
     } catch (e) { return null; }
   })();
-  const [contractorName, setContractorName] = useState(preselectedProject ? (preselectedProject.gc || '') : '');
-  const [projectLabel, setProjectLabel]     = useState(preselectedProject ? (preselectedProject.name || '') : '');
-  // 2026-05-25: materials are free-text. Seed with the legacy-code label so
-  // the input renders 'Clean Fill' instead of 'CF'.
-  const [materialCode, setMaterialCode] = useState(materialLabel('CF'));
+  // 2026-06-01 (form simplification): only Contractor / Dispatcher, Job name,
+  // Material, and Volume are required. Everything else (pickup / dropoff /
+  // dates / site access / notes / free-text contractor) lives under
+  // "Optional details ▾" and submits as null/empty if left blank. The legacy
+  // "Requested at" time field is dropped — readers fall back to '08:00'
+  // when haul_request.requestedAt is missing (already the convention).
+  const [assignedHaulerId, setAssignedHaulerId] = useState('');
+  // Job name (formerly "Project label") — the human-readable label for the haul.
+  const [projectLabel, setProjectLabel] = useState(preselectedProject ? (preselectedProject.name || '') : '');
+  // Material — proper select dropdown sourced from the MATERIALS const.
+  // Stored as the code ("CF", "TS", …) on the row; display goes through
+  // materialLabel() everywhere.
+  const [materialCode, setMaterialCode] = useState('CF');
   const [volumeCY, setVolumeCY] = useState('');
-  const [requestedAt, setRequestedAt] = useState(() => {
-    const now = new Date();
-    return String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-  });
+  // Optional: contractor free-text (separate from assigned hauler — captures
+  // the GC the job is FOR, not the hauler doing the haul).
+  const [contractorName, setContractorName] = useState(preselectedProject ? (preselectedProject.gc || '') : '');
   const [pickup, setPickup] = useState({
     name: '',
     address: preselectedProject ? (preselectedProject.pickupLocation || '') : '',
@@ -7558,44 +7565,41 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
     name: '',
     address: preselectedProject ? (preselectedProject.dumpLocation || '') : '',
   });
-  const [timing, setTiming] = useState({ startDate: TODAY_ISO, endDate: '' });
+  const [timing, setTiming] = useState({ startDate: '', endDate: '' });
   const [loadingSite, setLoadingSite] = useState({ notes: '', equipment: '' });
   const [dumpingSite, setDumpingSite] = useState({ notes: '', equipment: '' });
   const [notes, setNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [optionalOpen, setOptionalOpen] = useState(false);
 
   const volumeNum = parseFloat(volumeCY);
+  // 2026-06-01: only the four required fields gate submission.
   const valid =
+    !!assignedHaulerId &&
+    !!(projectLabel || '').trim() &&
     !!materialCode &&
-    Number.isFinite(volumeNum) && volumeNum > 0 &&
-    !!(pickup.address || '').trim() &&
-    !!(dropoff.address || '').trim() &&
-    !!timing.startDate;
+    Number.isFinite(volumeNum) && volumeNum > 0;
 
   const submit = async () => {
     if (!valid || submitting) return;
     setSubmitting(true);
     setSubmitError('');
-    // Resolve both addresses (cache first, then cascade). Refuse to create
-    // the request if either won't resolve — the mini-map would render
-    // blank and OSRM couldn't route.
+
+    // 2026-06-01: optional address geocode. If the dispatcher entered
+    // addresses we try to resolve them so the mini-map + OSRM route
+    // render later; if either fails we save the row anyway (the detail
+    // page handles missing/unresolvable addresses gracefully). Empty
+    // addresses skip geocoding entirely.
     const cache = db.geocode || {};
-    const ensureGeocode = async (addr) => {
-      const c = cache[addr];
+    const maybeGeocode = async (addr) => {
+      const a = (addr || '').trim();
+      if (!a) return null;
+      const c = cache[a];
       if (c && isFinite(c.lat) && isFinite(c.lng)) return c;
-      return await geocodeAddress(addr);
+      try { return await geocodeAddress(a); } catch (_) { return null; }
     };
-    const [pGeo, dGeo] = await Promise.all([ensureGeocode(pickup.address), ensureGeocode(dropoff.address)]);
-    if (!pGeo || !dGeo) {
-      setSubmitting(false);
-      setSubmitError(
-        !pGeo && !dGeo ? "Couldn't resolve either address. Pick suggestions from the dropdowns or check spelling."
-        : !pGeo ? "Couldn't resolve the pickup address. Pick a suggestion from the dropdown."
-        : "Couldn't resolve the dropoff address. Pick a suggestion from the dropdown."
-      );
-      return;
-    }
+    const [pGeo, dGeo] = await Promise.all([maybeGeocode(pickup.address), maybeGeocode(dropoff.address)]);
 
     const newId = 'hreq-' + Math.random().toString(36).substring(2, 7);
     const matLabel = (MATERIALS.find(m => m.code === materialCode) || {}).label || materialCode;
@@ -7606,7 +7610,10 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       projectLabel: (projectLabel || '').trim(),
       materialCode,
       volumeCY: volumeNum,
-      requestedAt,
+      // 2026-06-01: assignedHaulerId is the formal FK driving every read
+      // path (contractor-detail rollups, session-card cascade narrowing).
+      // matchedHaulerId stays for legacy back-compat.
+      assignedHaulerId,
       status: 'pending',
       matchedHaulerId: null,
       matchedTruckId: null,
@@ -7616,7 +7623,7 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       assignments: [],
       pickupLocation:  { name: pickup.name || '',  address: pickup.address || '' },
       dropoffLocation: { name: dropoff.name || '', address: dropoff.address || '' },
-      timing:          { startDate: timing.startDate, endDate: timing.endDate || '' },
+      timing:          { startDate: timing.startDate || '', endDate: timing.endDate || '' },
       siteAccess: {
         loading: { notes: loadingSite.notes || '', equipment: loadingSite.equipment || '' },
         dumping: { notes: dumpingSite.notes || '', equipment: dumpingSite.equipment || '' },
@@ -7624,24 +7631,28 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
     };
 
     try {
+      const haulerName = ((db.haulers || []).find(h => h.id === assignedHaulerId) || {}).name || 'Unassigned';
+      const nextGeocode = { ...(db.geocode || {}) };
+      if (pGeo && pickup.address) nextGeocode[pickup.address] = pGeo;
+      if (dGeo && dropoff.address) nextGeocode[dropoff.address] = dGeo;
       setDb(prev => appendActivity(
         {
           ...prev,
           haulRequests: [...(prev.haulRequests || []), newReq],
-          geocode: { ...(prev.geocode || {}), [pickup.address]: pGeo, [dropoff.address]: dGeo },
+          geocode: nextGeocode,
         },
         {
           type: 'haul_request.created',
           actorRole: 'admin',
           actorId: null,
-          summary: 'Admin created new haul ' + newId.slice(5) + ' (' + volumeNum + ' CY ' + matLabel + ')',
+          summary: 'Admin created new job ' + ((projectLabel || '').trim() || newId.slice(5)) + ' (' + volumeNum + ' CY ' + matLabel + ' for ' + haulerName + ')',
           refId: newId,
         }
       ));
-      navigate('/admin/requests/' + newId);
+      navigate('/admin/jobs/' + newId);
     } catch (e) {
       setSubmitting(false);
-      setSubmitError('Failed to create haul: ' + (e && e.message ? e.message : 'unknown error'));
+      setSubmitError('Failed to create job: ' + (e && e.message ? e.message : 'unknown error'));
     }
   };
 
@@ -7656,37 +7667,28 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       onCancel={() => navigate('/admin')}
       onSubmit={submit}
       submitDisabled={!valid || submitting}
-      submitLabel={submitting ? 'Creating…' : 'Create haul'}
+      submitLabel={submitting ? 'Creating…' : 'Create job'}
       crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch Overview', to: '/admin' }, { label: 'New job' }]}
       eyebrow="New job"
       title="Create a new job"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
-        {/* 2026-05-25: flat-Hauls unwind. Contractor + project label are now
-            free-text on the haul (no Project dropdown). Autocomplete suggests
-            from existing haul-request values and from db.projects.gc/name as a
-            convenience — picking a suggestion still leaves it as free text. */}
+        {/* 2026-06-01 (simplified form): only Contractor / Dispatcher,
+            Job name, Material, and Volume are required. Everything else
+            sits under "Optional details ▾" below and submits as
+            null/empty if left blank. Red asterisk marks required fields. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Contractor</div>
-            <input
-              list="new-haul-contractor-list"
-              value={contractorName}
-              onChange={e => setContractorName(e.target.value)}
-              placeholder="e.g. Acme Construction"
-              style={fInputStyle} />
-            <datalist id="new-haul-contractor-list">
-              {(() => {
-                const set = new Set();
-                (db.haulRequests || []).forEach(r => { if (r && r.contractorName) set.add(r.contractorName); });
-                (db.projects || []).forEach(p => { if (p && p.gc) set.add(p.gc); });
-                return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
-                  .map(s => <option key={s} value={s} />);
-              })()}
-            </datalist>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Contractor / Dispatcher <span style={{ color: C.warn }}>*</span></div>
+            <select value={assignedHaulerId} onChange={e => setAssignedHaulerId(e.target.value)} style={fInputStyle}>
+              <option value="">— Select —</option>
+              {(db.haulers || []).slice()
+                .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+                .map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
+            </select>
           </div>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Project label</div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Job name <span style={{ color: C.warn }}>*</span></div>
             <input
               list="new-haul-project-label-list"
               value={projectLabel}
@@ -7707,110 +7709,128 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Material</div>
-            {/* 2026-05-25: free-text material with autocomplete from existing
-                haul request values. Same shape as EditableMaterial — pick a
-                suggestion or type a new label outright. */}
-            <input
-              list="new-haul-req-material-list"
-              value={materialCode}
-              onChange={e => setMaterialCode(e.target.value)}
-              placeholder="e.g. Clean Fill, Topsoil…"
-              style={fInputStyle} />
-            <datalist id="new-haul-req-material-list">
-              {(() => {
-                const raw = (db && Array.isArray(db.haulRequests))
-                  ? db.haulRequests.map(r => r && r.materialCode).filter(s => s != null && String(s).trim() !== '')
-                  : [];
-                const set = new Set(raw.map(s => materialLabel(s)));
-                return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
-                  .map(s => <option key={s} value={s} />);
-              })()}
-            </datalist>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Material <span style={{ color: C.warn }}>*</span></div>
+            <select value={materialCode} onChange={e => setMaterialCode(e.target.value)} style={fInputStyle}>
+              {MATERIALS.map(m => <option key={m.code} value={m.code}>{m.label}</option>)}
+            </select>
           </div>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Volume (CY)</div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Volume (CY) <span style={{ color: C.warn }}>*</span></div>
             <input type="number" min="1" step="1" value={volumeCY} onChange={e => setVolumeCY(e.target.value)} placeholder="e.g., 24" style={fInputStyle} />
           </div>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Requested at</div>
-            <input type="time" value={requestedAt} onChange={e => setRequestedAt(e.target.value)} style={fInputStyle} />
-          </div>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Pickup location</Label>
-            <input value={pickup.name}
-              onChange={e => setPickup(p => ({ ...p, name: e.target.value }))}
-              placeholder="Site or yard name"
-              style={{ ...fInputStyle, marginBottom: S[2] }} />
-            <AddressAutocomplete
-              value={pickup.address}
-              db={db} setDb={setDb}
-              placeholder="Start typing a street address…"
-              alwaysEditing={true}
-              inputStyle={aaInputStyle}
-              onSave={(v) => { setPickup(p => ({ ...p, address: v })); }}
-            />
-          </div>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Dropoff location</Label>
-            <input value={dropoff.name}
-              onChange={e => setDropoff(d => ({ ...d, name: e.target.value }))}
-              placeholder="Site or yard name"
-              style={{ ...fInputStyle, marginBottom: S[2] }} />
-            <AddressAutocomplete
-              value={dropoff.address}
-              db={db} setDb={setDb}
-              placeholder="Start typing a street address…"
-              alwaysEditing={true}
-              inputStyle={aaInputStyle}
-              onSave={(v) => { setDropoff(d => ({ ...d, address: v })); }}
-            />
-          </div>
+        {/* Optional details — collapsed by default. Click the chevron row
+            to expand. Submit works fine with the section closed and all
+            fields blank. */}
+        <div style={{ marginTop: S[2] }}>
+          <button type="button" onClick={() => setOptionalOpen(v => !v)}
+            style={{
+              display: 'inline-flex', alignItems: 'center', gap: S[2],
+              background: 'transparent', border: 'none', color: C.inkDim, cursor: 'pointer',
+              padding: 0, fontFamily: F.body, fontSize: 13, fontWeight: 600,
+            }}>
+            <span aria-hidden="true" style={{ display: 'inline-block', transform: optionalOpen ? 'rotate(90deg)' : 'none', transition: 'transform 120ms ease' }}>▸</span>
+            Optional details
+          </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Start date</div>
-            <input type="date" value={timing.startDate} onChange={e => setTiming(t => ({ ...t, startDate: e.target.value }))} style={fInputStyle} />
-          </div>
-          <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>End date (optional)</div>
-            <input type="date" value={timing.endDate} onChange={e => setTiming(t => ({ ...t, endDate: e.target.value }))} min={timing.startDate || undefined} style={fInputStyle} />
-          </div>
-        </div>
+        {optionalOpen && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: S[4], paddingLeft: S[3], borderLeft: `2px solid ${C.rule}` }}>
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Contractor (GC) <span style={{ color: C.inkFaint, fontWeight: 400 }}>optional</span></div>
+              <input
+                list="new-haul-contractor-list"
+                value={contractorName}
+                onChange={e => setContractorName(e.target.value)}
+                placeholder="e.g. Acme Construction"
+                style={fInputStyle} />
+              <datalist id="new-haul-contractor-list">
+                {(() => {
+                  const set = new Set();
+                  (db.haulRequests || []).forEach(r => { if (r && r.contractorName) set.add(r.contractorName); });
+                  (db.projects || []).forEach(p => { if (p && p.gc) set.add(p.gc); });
+                  return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)))
+                    .map(s => <option key={s} value={s} />);
+                })()}
+              </datalist>
+            </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Site access — loading</Label>
-            <textarea value={loadingSite.notes}
-              onChange={e => setLoadingSite(s => ({ ...s, notes: e.target.value }))}
-              placeholder="Loading site notes…" rows={2}
-              style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
-            <input value={loadingSite.equipment}
-              onChange={e => setLoadingSite(s => ({ ...s, equipment: e.target.value }))}
-              placeholder="Equipment / loader…" style={fInputStyle} />
-          </div>
-          <div>
-            <Label style={{ marginBottom: S[2] }}>Site access — dumping</Label>
-            <textarea value={dumpingSite.notes}
-              onChange={e => setDumpingSite(s => ({ ...s, notes: e.target.value }))}
-              placeholder="Dump site notes…" rows={2}
-              style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
-            <input value={dumpingSite.equipment}
-              onChange={e => setDumpingSite(s => ({ ...s, equipment: e.target.value }))}
-              placeholder="Equipment / spotter…" style={fInputStyle} />
-          </div>
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Pickup location</Label>
+                <input value={pickup.name}
+                  onChange={e => setPickup(p => ({ ...p, name: e.target.value }))}
+                  placeholder="Site or yard name"
+                  style={{ ...fInputStyle, marginBottom: S[2] }} />
+                <AddressAutocomplete
+                  value={pickup.address}
+                  db={db} setDb={setDb}
+                  placeholder="Start typing a street address…"
+                  alwaysEditing={true}
+                  inputStyle={aaInputStyle}
+                  onSave={(v) => { setPickup(p => ({ ...p, address: v })); }}
+                />
+              </div>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Dropoff location</Label>
+                <input value={dropoff.name}
+                  onChange={e => setDropoff(d => ({ ...d, name: e.target.value }))}
+                  placeholder="Site or yard name"
+                  style={{ ...fInputStyle, marginBottom: S[2] }} />
+                <AddressAutocomplete
+                  value={dropoff.address}
+                  db={db} setDb={setDb}
+                  placeholder="Start typing a street address…"
+                  alwaysEditing={true}
+                  inputStyle={aaInputStyle}
+                  onSave={(v) => { setDropoff(d => ({ ...d, address: v })); }}
+                />
+              </div>
+            </div>
 
-        <div>
-          <div style={{ ...T.caption, marginBottom: 4 }}>Notes (optional)</div>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)}
-            placeholder="Anything dispatch should know…" rows={2}
-            style={{ ...fInputStyle, resize: 'vertical' }} />
-        </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
+              <div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>Start date</div>
+                <input type="date" value={timing.startDate} onChange={e => setTiming(t => ({ ...t, startDate: e.target.value }))} style={fInputStyle} />
+              </div>
+              <div>
+                <div style={{ ...T.caption, marginBottom: 4 }}>End date</div>
+                <input type="date" value={timing.endDate} onChange={e => setTiming(t => ({ ...t, endDate: e.target.value }))} min={timing.startDate || undefined} style={fInputStyle} />
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[4] }}>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Site access — loading</Label>
+                <textarea value={loadingSite.notes}
+                  onChange={e => setLoadingSite(s => ({ ...s, notes: e.target.value }))}
+                  placeholder="Loading site notes…" rows={2}
+                  style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
+                <input value={loadingSite.equipment}
+                  onChange={e => setLoadingSite(s => ({ ...s, equipment: e.target.value }))}
+                  placeholder="Equipment / loader…" style={fInputStyle} />
+              </div>
+              <div>
+                <Label style={{ marginBottom: S[2] }}>Site access — dumping</Label>
+                <textarea value={dumpingSite.notes}
+                  onChange={e => setDumpingSite(s => ({ ...s, notes: e.target.value }))}
+                  placeholder="Dump site notes…" rows={2}
+                  style={{ ...fInputStyle, marginBottom: S[2], resize: 'vertical' }} />
+                <input value={dumpingSite.equipment}
+                  onChange={e => setDumpingSite(s => ({ ...s, equipment: e.target.value }))}
+                  placeholder="Equipment / spotter…" style={fInputStyle} />
+              </div>
+            </div>
+
+            <div>
+              <div style={{ ...T.caption, marginBottom: 4 }}>Notes</div>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)}
+                placeholder="Anything dispatch should know…" rows={2}
+                style={{ ...fInputStyle, resize: 'vertical' }} />
+            </div>
+          </div>
+        )}
 
         {submitError && (
           <div style={{ ...T.bodySm, color: C.warn, padding: S[3], background: C.warnSoft, border: '1px solid ' + C.warn, borderRadius: R.sm }}>
