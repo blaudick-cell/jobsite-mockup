@@ -4291,6 +4291,54 @@ function useDriverSessionsLive() {
   const refetch = React.useCallback(() => {
     if (fetchAllRef.current) fetchAllRef.current();
   }, []);
+  // Read-after-write hook: caller passes the DB-confirmed full row
+  // returned from .update(...).select().single() (or .insert(...).select()
+  // or similar) and we merge it into local state immediately. Fixes the
+  // user-visible "saved then reverts" UX where the optimistic-flash
+  // disappears before the debounced Realtime refetch lands — by the time
+  // the refetch hits, local state already shows the new value, so the
+  // refetch is a no-op visually. Also prevents the dispatcher_notes audit
+  // race (two rapid edits losing each other's audit lines) because each
+  // edit"s post-save apply refreshes the local sess.dispatcher_notes
+  // before the next edit reads it.
+  const applyRowPatch = React.useCallback((table, fullRow) => {
+    if (!fullRow || !fullRow.id) return;
+    setState(prev => {
+      if (table === 'driver_sessions') {
+        let found = false;
+        const next = prev.sessions.map(s => {
+          if (s.id === fullRow.id) { found = true; return fullRow; }
+          return s;
+        });
+        return { ...prev, sessions: found ? next : [fullRow, ...prev.sessions] };
+      }
+      if (table === 'truck_events') {
+        let found = false;
+        const next = prev.events.map(e => {
+          if (e.id === fullRow.id) { found = true; return fullRow; }
+          return e;
+        });
+        return { ...prev, events: found ? next : [...prev.events, fullRow] };
+      }
+      if (table === 'issue_reports') {
+        let found = false;
+        const next = prev.issues.map(i => {
+          if (i.id === fullRow.id) { found = true; return fullRow; }
+          return i;
+        });
+        return { ...prev, issues: found ? next : [fullRow, ...prev.issues] };
+      }
+      if (table === 'event_photos') {
+        let found = false;
+        const next = prev.photos.map(p => {
+          if (p.id === fullRow.id) { found = true; return fullRow; }
+          return p;
+        });
+        return { ...prev, photos: found ? next : [...prev.photos, fullRow] };
+      }
+      return prev;
+    });
+  }, []);
 
   // Aggregated views. Memoized on the raw arrays so React doesn't re-derive
   // every render. Each session is paired with its events + a derived
@@ -4322,6 +4370,7 @@ function useDriverSessionsLive() {
     issues: state.issues,
     buckets,
     refetch,
+    applyRowPatch,
   };
 }
 
@@ -12414,15 +12463,37 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
     setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saving' }));
     try {
       if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      // Read-current-notes-first guard: race-proofing the dispatcher_notes
+      // audit append. Local sess.dispatcher_notes may be stale (a recent
+      // edit"s audit line hasn"t round-tripped yet); reading from the DB
+      // immediately before computing appendedNotes guarantees we won"t
+      // overwrite a concurrent audit line with a stale base.
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes')
+        .eq('id', sess.id)
+        .single();
+      if (cur.error) throw cur.error;
+      const currentNotes = (cur.data && cur.data.dispatcher_notes) || '';
       const displayOld = (prevValue == null || prevValue === '') ? '—' : String(prevValue);
       const displayNew = (newValue == null || newValue === '') ? '—' : String(newValue);
       const auditLine = `Admin edited ${fieldLabel} at ${fmtClock(new Date().toISOString())} MT: '${displayOld}' → '${displayNew}'`;
-      const appendedNotes = sess.dispatcher_notes
-        ? (sess.dispatcher_notes + '\n\n' + auditLine)
-        : auditLine;
+      const appendedNotes = currentNotes ? (currentNotes + '\n\n' + auditLine) : auditLine;
       const patch = { [fieldKey]: newValue, dispatcher_notes: appendedNotes };
-      const { error } = await _sb.client.from('driver_sessions').update(patch).eq('id', sess.id);
-      if (error) throw error;
+      // Read-after-write: .select().single() returns the row Supabase
+      // actually wrote, which we push into live state so the UI shows the
+      // confirmed value immediately. Was: bare .update(...).eq(...) with
+      // no select — local state had to wait for the debounced Realtime
+      // refetch (1-3s on mobile), during which the displayValue rendered
+      // the STALE sess.<fieldKey> and looked like the save reverted.
+      const upd = await _sb.client.from('driver_sessions')
+        .update(patch)
+        .eq('id', sess.id)
+        .select()
+        .single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
       setFieldFlash(prev => ({ ...prev, [fieldKey]: 'saved' }));
       setEditingField(null);
       setTimeout(() => {
@@ -12550,10 +12621,14 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         // future improved geocoder pass can re-run if needed.
         try {
           if (_sb && _sb.ready && _sb.client) {
-            await _sb.client.from('truck_events')
+            const upd = await _sb.client.from('truck_events')
               .update({ address: label })
-              .eq('id', event.id);
-            if (live && typeof live.refetch === 'function') live.refetch();
+              .eq('id', event.id)
+              .select()
+              .single();
+            if (!upd.error && upd.data && live && typeof live.applyRowPatch === 'function') {
+              live.applyRowPatch('truck_events', upd.data);
+            }
           }
         } catch (_) { /* network or RLS — leave localAddress as-is */ }
       })();
@@ -12571,12 +12646,14 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
       try {
         if (!_sb || !_sb.ready || !_sb.client) throw new Error('Supabase not ready');
         const patch = { address: next || null, address_manually_set: true };
-        const { error } = await _sb.client.from('truck_events').update(patch).eq('id', event.id);
-        if (error) throw error;
+        const upd = await _sb.client.from('truck_events').update(patch).eq('id', event.id).select().single();
+        if (upd.error) throw upd.error;
+        if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+          live.applyRowPatch('truck_events', upd.data);
+        }
         setLocalAddress(next || null);
         setFlash('saved');
         setEditing(false);
-        if (live && typeof live.refetch === 'function') live.refetch();
         setTimeout(() => setFlash(null), 1500);
       } catch (e) {
         console.warn('[EventAddressLine] save failed', e);
@@ -12791,9 +12868,12 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
         resolved_by: 'Admin',
       };
       if (note && note.trim()) patch.resolution_note = note.trim();
-      const { error } = await _sb.client.from('issue_reports')
-        .update(patch).eq('id', issue.id);
-      if (error) throw new Error('issue_reports update: ' + (error.message || error));
+      const upd = await _sb.client.from('issue_reports')
+        .update(patch).eq('id', issue.id).select().single();
+      if (upd.error) throw new Error('issue_reports update: ' + (upd.error.message || upd.error));
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('issue_reports', upd.data);
+      }
       // Admin Activity Feed log (only if parent wired setDb through).
       if (typeof setDb === 'function' && drawerBucket) {
         const driverName = drawerBucket.session.driver_name || 'driver';
@@ -12806,7 +12886,6 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
           refId: null,
         }));
       }
-      if (live && typeof live.refetch === 'function') live.refetch();
     } catch (e) {
       console.warn('[DriverSessionDrawer] resolveIssue', e);
     } finally {
@@ -12832,26 +12911,34 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
       ? (session.dispatcher_notes + '\n\n' + auditLine)
       : auditLine;
     try {
+      // Re-read dispatcher_notes from DB right before composing the
+      // audit line to dodge the stale-base race.
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes')
+        .eq('id', session.id)
+        .single();
+      if (cur.error) throw new Error('driver_sessions read: ' + (cur.error.message || cur.error));
+      const curNotes = (cur.data && cur.data.dispatcher_notes) || '';
+      const freshAppended = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
       const evRes = await _sb.client.from('truck_events').insert({
         session_id: session.id,
         event_type: 'end_shift',
         event_at: nowIso,
         latitude: null, longitude: null, photo_url: null,
-      });
+      }).select().single();
       if (evRes.error) throw new Error('truck_events insert: ' + (evRes.error.message || evRes.error));
+      if (live && typeof live.applyRowPatch === 'function' && evRes.data) {
+        live.applyRowPatch('truck_events', evRes.data);
+      }
       const upd = await _sb.client.from('driver_sessions')
-        .update({ ended_at: nowIso, dispatcher_notes: appendedNotes })
-        .eq('id', session.id);
+        .update({ ended_at: nowIso, dispatcher_notes: freshAppended })
+        .eq('id', session.id)
+        .select()
+        .single();
       if (upd.error) throw new Error('driver_sessions update: ' + (upd.error.message || upd.error));
-      // 2026-05-31 (End-Shift fix): force-refetch the live state instead
-      // of waiting for the Realtime broadcast. The supabase_realtime
-      // publication just got driver_sessions / truck_events added —
-      // existing clients may still be on stale subscriptions until they
-      // reconnect, and even after reconnect the broadcast roundtrip is
-      // 1-2s. The clicking user expects instant feedback. live.refetch()
-      // pulls the row with the new ended_at + the new end_shift event in
-      // a single round-trip.
-      if (live && typeof live.refetch === 'function') live.refetch();
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
       setAdminFlash({
         text: 'Shift ended for ' + (session.driver_name || 'driver') + '. Dispatcher notes updated.',
         kind: 'ok',
@@ -13991,17 +14078,28 @@ function ActiveTruckCard({ b, trucksById, live, onOpenDrawer, onEdit, onDelete, 
     setCompanyFlash('saving');
     try {
       if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      // Re-read dispatcher_notes right before computing appendedNotes
+      // to avoid clobbering a concurrent audit line from another tab/edit.
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes')
+        .eq('id', sess.id)
+        .single();
+      if (cur.error) throw cur.error;
+      const curNotes = (cur.data && cur.data.dispatcher_notes) || '';
       const stamp = new Date().toLocaleTimeString('en-US', {
         timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
       });
       const auditLine = `Admin edited company at ${stamp} MT: '${prev || '—'}' → '${next || '—'}'`;
-      const appendedNotes = sess.dispatcher_notes
-        ? sess.dispatcher_notes + '\n\n' + auditLine
-        : auditLine;
-      const { error } = await _sb.client.from('driver_sessions')
+      const appendedNotes = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
+      const upd = await _sb.client.from('driver_sessions')
         .update({ company: next, dispatcher_notes: appendedNotes })
-        .eq('id', sess.id);
-      if (error) throw error;
+        .eq('id', sess.id)
+        .select()
+        .single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
       setCompanyFlash('saved');
       setCompanyEditing(false);
       setTimeout(() => setCompanyFlash(null), 1800);
