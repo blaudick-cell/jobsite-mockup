@@ -5,7 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Jobsite Exchange</title>
-  <meta name="description" content="Admin / Hauler dashboards for hourly hauling — Jobsite Exchange." />
+  <meta name="description" content="Admin / Contractor / Dispatcher dashboards for hourly trucking — Jobsite Exchange." />
   <meta property="og:title" content="Jobsite Exchange — Role Dashboards" />
   <meta property="og:description" content="Hierarchy: Projects → Hauls → Haulers → Trucks." />
   <meta property="og:type" content="website" />
@@ -2289,7 +2289,7 @@ function haulerName(state, id) {
 }
 function projectName(state, id) {
   const p = state && state.projects ? state.projects.find(x => x.id === id) : null;
-  return p ? p.name : 'a haul';
+  return p ? p.name : 'a job';
 }
 function truckPlate(state, id) {
   const t = state && state.trucks ? state.trucks.find(x => x.id === id) : null;
@@ -2335,7 +2335,7 @@ function rateForAssignment(assignment, truck) {
 // record and used for refIds, URLs, and refId-prefix routing — only the
 // user-visible chrome switches to this name.
 function haulRequestLabel(state, req) {
-  if (!req) return 'Haul Request';
+  if (!req) return 'Job';
   const proj = state && state.projects ? state.projects.find(p => p.id === req.projectId) : null;
   const matName = materialLabel(req.materialCode);
   if (proj) return `${proj.name} · ${req.volumeCY} CY ${matName}`;
@@ -4488,13 +4488,13 @@ function Landing({ navigate }) {
   ];
   const steps = [
     { n: '01', title: 'Plan',     body: 'Create hauls, set the materials, assign haulers and trucks in a quick wizard.' },
-    { n: '02', title: 'Dispatch', body: 'Haulers accept hauls and dispatch their trucks. Loads + hours roll up live.' },
+    { n: '02', title: 'Dispatch', body: 'Contractors / dispatchers accept jobs and dispatch their trucks. Loads + hours roll up live.' },
     { n: '03', title: 'Track',    body: 'Loads, hours, and KPIs roll up to a live dashboard. No re-entry, no daily-recap meetings.' },
   ];
   const pillars = [
     { Icon: EyeIcon,   title: 'Real-time visibility',       body: 'Loads logged in the field land on the admin dashboard the moment they happen.' },
     { Icon: FlowIcon,  title: 'One workflow across roles',  body: 'Admin and hauler views share the same data model — no double entry.' },
-    { Icon: PhoneIcon, title: 'Mobile-first for the field', body: "Hauler shell works on a phone in a work glove. Big tap targets, no menus to dig through." },
+    { Icon: PhoneIcon, title: 'Mobile-first for the field', body: "Contractor / dispatcher shell works on a phone in a work glove. Big tap targets, no menus to dig through." },
     { Icon: BoltIcon,  title: 'Zero setup',                 body: 'Open the URL and start assigning work. Demo data persists locally; reset anytime.' },
   ];
   const sectionShell = {
@@ -5967,7 +5967,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
               el.setAttribute('tabindex', '0');
               el.style.cssText = 'cursor:pointer;min-width:240px;max-width:300px;padding:10px 12px;background:#141414;border-radius:8px;border:1px solid #2A2A2A;color:#fff;font-family:Inter,sans-serif;line-height:1.35;';
               const escape = (s) => (s || '').toString().replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
-              const heading = proj ? proj.name : (req ? ('Haul ' + req.id) : 'Haul Request');
+              const heading = proj ? proj.name : (req ? ('Haul ' + req.id) : 'Job');
               const subhead = proj ? proj.gc : '';
               el.innerHTML = ''
                 + '<div style="font-size:13px;font-weight:700;color:#fff;letter-spacing:-0.2px;">' + escape(heading) + '</div>'
@@ -5976,7 +5976,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
                 +   '<span style="display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;background:' + pillSoft + ';color:' + pillColor + ';font-family:JetBrains Mono,monospace;font-size:10px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;line-height:1.1;">' + pillLabel + '</span>'
                 +   '<span style="font-size:13px;font-weight:600;color:#fff;">' + escape(qtyStr) + '</span>'
                 + '</div>'
-                + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open haul request &rsaquo;</div>';
+                + '<div style="font-size:10px;color:#5A5A5A;margin-top:8px;font-family:JetBrains Mono,monospace;letter-spacing:0.5px;text-transform:uppercase;">Open job &rsaquo;</div>';
               // v24: navigate to the SPECIFIC haul request page.
               const target = reqId ? ('/admin/requests/' + reqId) : (projId ? ('/admin/requests?projectId=' + projId) : '/admin');
               el.addEventListener('click', (clickEv) => {
@@ -6037,7 +6037,7 @@ function LiveOperationsTileMap({ db, setDb, navigate, FallbackMap }) {
           {/* PRIMARY (left): Hauls / Drivers segmented toggle */}
           <div style={{ display: 'inline-flex', gap: 4, padding: 2, background: C.surface, border: `1px solid ${C.rule}`, borderRadius: R.pill }}>
             <button type="button" onClick={() => setMapMode('drivers')} style={segBtn(mapMode === 'drivers')}>Active Drivers</button>
-            <button type="button" onClick={() => setMapMode('hauls')} style={segBtn(mapMode === 'hauls')}>Haul Requests</button>
+            <button type="button" onClick={() => setMapMode('hauls')} style={segBtn(mapMode === 'hauls')}>Jobs</button>
           </div>
           {/* SECONDARY (right): tiny "live ops" label + context-aware
               counter. Counter switches its content based on mapMode —
@@ -6114,7 +6114,7 @@ function HaulProjectRedirect({ projectId, navigate }) {
   }, [projectId, navigate]);
   return (
     <div style={{ padding: S[6], maxWidth: 600, margin: '60px auto', textAlign: 'center', color: C.inkDim }}>
-      Redirecting to haul requests…
+      Redirecting to jobs…
     </div>
   );
 }
@@ -6184,9 +6184,9 @@ function AdminNewHauler({ db, setDb, navigate }) {
       nextDisabled={nextDisabled}
       submitDisabled={!detailsValid}
       submitLabel="Create hauler"
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New hauler' }]}
-      eyebrow="New hauler"
-      title="Add a hauler to your network"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Contractors / Dispatchers', to: '/admin/haulers' }, { label: 'New contractor / dispatcher' }]}
+      eyebrow="New contractor / dispatcher"
+      title="Add a contractor / dispatcher to your network"
     >
       {step === 1 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
@@ -6357,7 +6357,7 @@ function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
       nextDisabled={nextDisabled}
       submitDisabled={!detailsValid}
       submitLabel="Create truck"
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers', to: '/admin/haulers' }, { label: 'New truck' }]}
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Contractors / Dispatchers', to: '/admin/haulers' }, { label: 'New truck' }]}
       eyebrow="New truck"
       title="Add a truck to your fleet"
     >
@@ -6414,7 +6414,7 @@ function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
             </select>
           </div>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Hauler</div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Contractor / Dispatcher</div>
             <select value={haulerId} onChange={e => setHaulerId(e.target.value)} style={inputStyle}>
               <option value="">— Leave unassigned —</option>
               {db.haulers.map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
@@ -6447,7 +6447,7 @@ function AdminNewTruck({ db, setDb, navigate, prefillHaulerId }) {
                 </div>
               </div>
               <div>
-                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Hauler</div>
+                <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.8, marginBottom: 4 }}>Contractor / Dispatcher</div>
                 <div style={{ fontFamily: F.body, color: haulerId ? C.ink : C.inkDim }}>
                   {haulerId ? (db.haulers.find(o => o.id === haulerId) || {}).name : 'Unassigned'}
                 </div>
@@ -6882,7 +6882,7 @@ function AdminReports({ db, navigate }) {
         <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
         <EmptyState
           icon={<ProjectIcon size={40} />}
-          title="No hauls yet"
+          title="No jobs yet"
           body="Create one to start generating activity reports."
           action={<Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>}
         />
@@ -7009,7 +7009,7 @@ function AdminReports({ db, navigate }) {
 
       {/* C. Project status table */}
       <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Hauls</Label>
+        <Label color={C.accent}>Jobs</Label>
         <div style={{ flex: 1, height: 1, background: C.rule }} />
         <span style={{ ...T.monoSm, color: C.inkDim }}>{sortedRows.length}</span>
       </div>
@@ -7019,7 +7019,7 @@ function AdminReports({ db, navigate }) {
             <tr>
               <SortTh label="Haul" k="name" />
               <SortTh label="Status" k="status" />
-              <SortTh label="Haulers" k="haulers" align="right" />
+              <SortTh label="Contractors / Dispatchers" k="haulers" align="right" />
               <SortTh label="Trucks" k="trucks" align="right" />
               <SortTh label={loadsColLabel} k="loadsInRange" align="right" />
               <SortTh label={priorColLabel} k={isTodayPreset ? 'loadsPrior' : 'avgPerDay'} align="right" />
@@ -7278,7 +7278,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.filter(r => r.id !== req.id) },
       { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
-        summary: `Admin deleted haul request ${label}`, refId: req.id }
+        summary: `Admin deleted job ${label}`, refId: req.id }
     ));
   };
 
@@ -7308,7 +7308,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
         <button
           onClick={(ev) => { ev.stopPropagation(); deleteRequestFromList(e.r); }}
           aria-label={`Delete haul request ${haulRequestLabel(db, e.r) || e.r.id}`}
-          title="Delete haul request"
+          title="Delete job"
           style={{
             position: 'absolute', top: S[2], right: S[2],
             background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
@@ -7657,9 +7657,9 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
       onSubmit={submit}
       submitDisabled={!valid || submitting}
       submitLabel={submitting ? 'Creating…' : 'Create haul'}
-      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch Overview', to: '/admin' }, { label: 'New haul' }]}
-      eyebrow="New haul"
-      title="Create a new haul"
+      crumbs={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch Overview', to: '/admin' }, { label: 'New job' }]}
+      eyebrow="New job"
+      title="Create a new job"
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: S[4] }}>
         {/* 2026-05-25: flat-Hauls unwind. Contractor + project label are now
@@ -8097,7 +8097,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
 // 2026-06-01 (v21 trucking integration): inline component on
 // AdminHaulRequestDetail that surfaces the new formal assignment fields
 // (haul_requests.assigned_hauler_id + haul_assigned_trucks join table)
-// alongside a live "sessions on this haul" panel powered by
+// alongside a live "sessions on this job" panel powered by
 // DriverActivityTable's filterByHaulId prop. Mounts directly between
 // the route mini-map and the legacy Assignments section.
 function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
@@ -8199,9 +8199,9 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
           </div>
         </div>
 
-        {/* Assigned hauler */}
+        {/* Assigned Contractor / Dispatcher */}
         <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3], flexWrap: 'wrap' }}>
-          <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 130 }}>Assigned hauler</span>
+          <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 130 }}>Assigned Contractor / Dispatcher</span>
           <select value={req.assignedHaulerId || ''}
             onChange={(e) => {
               const nextId = e.target.value || null;
@@ -8296,9 +8296,9 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
         </div>
       </Card>
 
-      {/* Sessions on this haul */}
+      {/* Sessions on this job */}
       <div style={{ marginBottom: S[3] }}>
-        <Label>Sessions on this haul</Label>
+        <Label>Sessions on this job</Label>
         <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
           Live + ended driver sessions whose haul_id matches.
         </div>
@@ -8309,7 +8309,7 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
           navigate={navigate}
           live={live}
           filterByHaulId={req.id}
-          emptyText="No driver sessions on this haul yet. Sessions appear here once a driver clocks in with this haul assigned."
+          emptyText="No driver sessions on this job yet. Sessions appear here once a driver clocks in with this haul assigned."
         />
       </div>
     </>
@@ -8430,7 +8430,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.filter(r => r.id !== req.id) },
       { type: 'haul_request.deleted', actorRole: 'admin', actorId: null,
-        summary: `Admin deleted haul request ${haulRequestLabel(db, req)}`, refId: req.id }
+        summary: `Admin deleted job ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
     navigate('/admin');
   };
@@ -8486,7 +8486,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         type: 'haulRequest.truckAdded',
         actorRole: 'admin',
         actorId: null,
-        summary: `Admin added truck #${assignedTruck ? assignedTruck.plate : '?'} (${assignedHauler ? assignedHauler.name : 'unknown hauler'}) to ${haulRequestLabel(db, req)}`,
+        summary: `Admin added truck #${assignedTruck ? assignedTruck.plate : '?'} (${assignedHauler ? assignedHauler.name : 'unknown contractor / dispatcher'}) to ${haulRequestLabel(db, req)}`,
         refId: req.id,
       }
     ));
@@ -9260,7 +9260,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           haul_assigned_trucks join table. The legacy assignments[]
           block below still drives day-row + load-entry workflows;
           this section layers the new dispatcher-driven pointers on
-          top. Sessions on this haul + progress totals pull from
+          top. Sessions on this job + progress totals pull from
           driver_sessions WHERE haul_id = req.id, via DriverActivityTable. */}
       <HaulTruckingIntegration req={req} db={db} setDb={setDb} navigate={navigate} updateReq={updateReq} />
 
@@ -9434,7 +9434,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                           background: C.warnSoft, color: C.warn, fontWeight: 700, letterSpacing: 0.4,
                         }}>{t.type}</span>
                       ) : null}
-                      <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this haul" style={{
+                      <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this job" style={{
                         marginLeft: 'auto',
                         background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
                         width: 28, height: 28, borderRadius: R.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
@@ -9975,7 +9975,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     {lines.length === 0 ? (
                       <tr>
                         <td colSpan="5" style={{ ...T.bodySm, textAlign: 'center', padding: S[4], color: C.inkDim }}>
-                          No hours logged for this hauler on this haul yet.
+                          No hours logged for this hauler on this job yet.
                         </td>
                       </tr>
                     ) : lines.map(li => (
@@ -10176,7 +10176,7 @@ function AdminHaulers({ db, setDb, navigate }) {
   }
   const trucksAvailable = Math.max(0, realTrucks.length - trucksActiveAll);
   const kpis = [
-    { label: 'Haulers',          value: enriched.length,                tone: C.ink },
+    { label: 'Contractors / Dispatchers',          value: enriched.length,                tone: C.ink },
     { label: 'Available now',    value: trucksAvailable,                tone: C.accent, sub: 'idle' },
     { label: 'Trucks active',    value: trucksActiveAll,                tone: C.ok,     sub: 'on shift' },
     { label: 'Loads today',      value: loadsToday,                     tone: C.accent },
@@ -10417,18 +10417,18 @@ function AdminHaulers({ db, setDb, navigate }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Haulers' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Contractors / Dispatchers' }]} navigate={navigate} />
 
       {/* === Header / ops summary bar === */}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[4], gap: S[3], flexWrap: 'wrap' }}>
         <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler operations</Label>
+          <Label color={C.accent} style={{ marginBottom: 6 }}>Contractor / dispatcher operations</Label>
           <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Fleet network · contractor command</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Pre-qualified hauling partners, their fleets, and real-time dispatch readiness.</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Pre-qualified contractor / dispatcher partners, their fleets, and real-time dispatch readiness.</div>
         </div>
         <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap' }}>
           <Btn variant="secondary" size="sm" onClick={() => navigate('/admin/dispatch')}>Dispatch board</Btn>
-          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ Add hauler</Btn>
+          <Btn variant="primary" size="sm" onClick={() => navigate('/admin/haulers/new')}>+ Add contractor / dispatcher</Btn>
         </div>
       </div>
 
@@ -10574,7 +10574,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     const refLine = [
       truckCount    && `${truckCount} truck${truckCount === 1 ? '' : 's'}`,
       invoiceCount  && `${invoiceCount} invoice${invoiceCount === 1 ? '' : 's'}`,
-      matchedCount  && `${matchedCount} matched haul request${matchedCount === 1 ? '' : 's'}`,
+      matchedCount  && `${matchedCount} matched job${matchedCount === 1 ? '' : 's'}`,
       assignedCount && `${assignedCount} haul request${assignedCount === 1 ? '' : 's'} with assignments`,
     ].filter(Boolean).join(', ');
     const msg = refLine
@@ -10731,7 +10731,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
         { label: 'Admin', to: '/admin' },
-        { label: 'Haulers', to: '/admin/haulers' },
+        { label: 'Contractors / Dispatchers', to: '/admin/haulers' },
         { label: hauler.name },
       ]} navigate={navigate} />
 
@@ -10770,7 +10770,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5], flexWrap: 'wrap' }}>
           <Avatar name={hauler.name} size={56} color={C.accent} logo={hauler.logo} />
           <div style={{ flex: 1, minWidth: 240 }}>
-            <Label color={C.accent}>Hauler</Label>
+            <Label color={C.accent}>Contractor / Dispatcher</Label>
             <h1 style={{ fontFamily: F.display, fontSize: 32, fontWeight: 700, letterSpacing: -1, margin: '4px 0 0', color: C.ink }}>{hauler.name}</h1>
             <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, fontFamily: F.mono }}>
               {hauler.phone} <span style={{ color: C.inkFaint }}>·</span> {hauler.email}
@@ -10788,7 +10788,7 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[6] }}>
-        <Card padding={S[4]}><Stat label="Hauls" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul request` : 'assigned'} /></Card>
+        <Card padding={S[4]}><Stat label="Jobs" value={Math.max(haulsCount, projects.length)} sub={haulsCount > projects.length ? `${haulsCount - projects.length} via haul request` : 'assigned'} /></Card>
         <Card padding={S[4]}><Stat label="Trucks" value={trucks.length} sub={`${trucks.filter(t => db.hours.some(h => h.truckId === t.id && h.status === 'open')).length} active now`} /></Card>
         <Card padding={S[4]}><Stat label="Loads" value={totalLoadsCount} sub={`${totalCYDelivered.toLocaleString()} CY delivered`} /></Card>
         <Card padding={S[4]}><Stat label="Total revenue" value={fmtMoney(totalRevenue)} sub={`${fmtHours(totalHours)} hrs billed`} /></Card>
@@ -11602,7 +11602,7 @@ function AdminPayments({ db, setDb, navigate, hash }) {
             <thead>
               <tr>
                 <Th>Invoice</Th>
-                <Th>Hauler</Th>
+                <Th>Contractor / Dispatcher</Th>
                 <Th>Period</Th>
                 <Th align="right">Hours</Th>
                 <Th align="right">Loads</Th>
@@ -13716,7 +13716,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   // 2026-06-01: scope filters (filterByHaulerId / filterByHaulId) narrow
   // the bucket list to sessions belonging to a specific hauler or haul.
   // Used by AdminHaulerDetail + AdminHaulRequestDetail to render "active
-  // sessions on this hauler / haul" without forking a second card layout.
+  // sessions on this jober / haul" without forking a second card layout.
   const rows = React.useMemo(() => {
     let buckets = (live.buckets || []).slice();
     if (filterByHaulerId) {
@@ -14319,7 +14319,7 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 role="button" tabIndex={0}
                 onClick={(e) => { e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); }}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); setCompanyDraft(sess.company || ''); setCompanyEditing(true); } }}
-                title={sess.company ? 'Change hauler' : 'Assign hauler'}
+                title={sess.company ? 'Change contractor / dispatcher' : 'Assign contractor / dispatcher'}
                 style={haulerInlineStyle}>
                 {haulerDisplay}
                 <span aria-hidden="true" style={{ opacity: 0.5, marginLeft: 3, fontSize: 9 }}>✎</span>
@@ -14334,7 +14334,7 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                     if (e.key === 'Escape') { setCompanyEditing(false); setCompanyFlash(null); }
                     else if (e.key === 'Enter') { e.currentTarget.blur(); }
                   }}
-                  placeholder="Hauler"
+                  placeholder="Contractor / Dispatcher"
                   style={{
                     background: C.surface, color: C.ink,
                     border: `1px solid ${C.accent}`, borderRadius: 3,
@@ -14365,7 +14365,7 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
           <span onClick={(e) => e.stopPropagation()}>
             <select value={sess.haul_id || ''}
               onChange={(e) => saveHaul(e.target.value || null)}
-              title={currentHaulLabel ? `Assigned to haul: ${currentHaulLabel}` : 'Assign to a haul'}
+              title={currentHaulLabel ? `Assigned to job: ${currentHaulLabel}` : 'Assign to a job'}
               style={{
                 ...T.caption, fontFamily: F.mono, letterSpacing: 0.3,
                 background: sess.haul_id ? C.accentSoft : 'transparent',
@@ -14374,7 +14374,7 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 borderRadius: R.sm, padding: '1px 6px', cursor: 'pointer',
                 fontSize: 10.5, outline: 'none',
               }}>
-              <option value="">Haul ▾</option>
+              <option value="">Job ▾</option>
               {pickableHauls.map(r => (
                 <option key={r.id} value={r.id}>
                   {(r.projectLabel || r.id) + (r.contractorName ? ` · ${r.contractorName}` : '')}
@@ -15357,7 +15357,7 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
           <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
           <Card padding={0} className="jse-bench-trucks-table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
-              <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Hauler</Th><Th>Haul</Th><Th></Th></tr></thead>
+              <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Contractor / Dispatcher</Th><Th>Haul</Th><Th></Th></tr></thead>
               <tbody>
                 {benchedTrucks.map(t => {
                   const h = db.haulers.find(x => x.id === t.haulerId);
@@ -15703,7 +15703,7 @@ function AdminActivity({ db, setDb, navigate }) {
         ts: e.timestamp,
         actorRole: e.actorRole || 'admin',
         actorName: e.actorRole === 'hauler' && e.actorId
-          ? ((db.haulers.find(h => h.id === e.actorId) || {}).name || 'Hauler')
+          ? ((db.haulers.find(h => h.id === e.actorId) || {}).name || 'Contractor / Dispatcher')
           : (e.actorRole === 'admin' ? 'Admin User'
           : (e.actorRole === 'driver' ? 'Truck operator'
           : 'System')),
@@ -15870,7 +15870,7 @@ const BACKUP_TABLES = [
   { sb: 'meta',          pk: 'key',         label: 'Meta',          jsKey: null /* not in SB_TABLES */ },
   { sb: 'materials',     pk: 'code',        label: 'Materials',     jsKey: null },
   { sb: 'rates',         pk: 'truck_type',  label: 'Rates',         jsKey: null },
-  { sb: 'haulers',       pk: 'id',          label: 'Haulers',       jsKey: 'haulers' },
+  { sb: 'haulers',       pk: 'id',          label: 'Contractors / Dispatchers',       jsKey: 'haulers' },
   { sb: 'projects',      pk: 'id',          label: 'Projects',      jsKey: 'projects' },
   // 2026-05-30 Series E: `drivers` table retired (jsKey null + table
   // removed from backup roster). Supabase `drivers` table can be DROPPED
@@ -16300,6 +16300,10 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const parts = (hash || '').split('/').filter(Boolean);
   const onOverview = parts.length === 1 && parts[0] === 'admin';
   const onRequests = parts[1] === 'requests';
+  // 2026-06-01: new canonical "/admin/jobs/*" slug for the entity formerly
+  // called Hauls. The legacy /admin/requests/* slug still resolves via the
+  // AdminShell route table — both highlight the Jobs sidebar entry.
+  const onJobs     = parts[1] === 'jobs';
   const onActivity = parts[1] === 'activity';
   const onReporting = parts[1] === 'reporting';
   const onLiveStats = parts[1] === 'reports';
@@ -16310,7 +16314,7 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
   const onActiveTrucks = parts[1] === 'dispatch' || (parts[1] === 'trucks' && parts[2] === 'active');
   // Reports section covers both /admin/reporting AND /admin/reports (live stats sublink)
   const onReportsAny = onReporting || onLiveStats;
-  // "Haulers" section is active for the new /admin/haulers/* routes AND for the
+  // "Contractors / Dispatchers" section is active for the new /admin/haulers/* routes AND for the
   // legacy /admin/p/:projId/o/:opId path which still drills into a hauler-on-project.
   const onHaulers  = parts[1] === 'haulers' || (parts[1] === 'p' && parts[3] === 'o');
 
@@ -16377,32 +16381,44 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
       <Item
         icon={<ProjectIcon size={20} />}
         label="Dispatch Overview"
-        active={onOverview || onRequests}
+        active={onOverview}
         badge={pendingCount}
         onClick={() => go('/admin')}
       />
-      {/* 2026-05-30: "Haul Requests" tab removed — it duplicated
-          Hauling Overview (which is the same AdminHaulRequests
-          component reachable from /admin). The pendingCount badge
-          relocates onto Hauling Overview so the visual cue stays.
-          /admin/requests routes still resolve in AdminShell so any
-          bookmarked detail-page links keep working; they're just no
-          longer the way users land on the list. */}
+      {/* 2026-06-01: trucking nav order locked per Robert spec —
+          Dispatch / Jobs / Contractors-Dispatchers sit together as
+          one cluster. Activity moves below the trucking cluster so
+          the operational verbs lead. Old "/admin/requests" path
+          still resolves through AdminShell routing; new canonical
+          slug is "/admin/jobs". */}
+      <Item
+        icon={<ActiveTruckIcon size={20} />}
+        label="Dispatch"
+        active={onActiveTrucks}
+        onClick={() => go('/admin/dispatch')}
+      />
+      <Item
+        icon={<HaulRequestIcon size={20} />}
+        label="Jobs"
+        active={onRequests || onJobs}
+        badge={pendingCount}
+        onClick={() => go('/admin/jobs')}
+      />
+      <Item
+        icon={<HaulerIcon size={20} />}
+        label="Contractors / Dispatchers"
+        active={onHaulers}
+        expandable
+        expanded={haulersExpanded}
+        onToggleExpand={() => setHaulersExpanded(v => !v)}
+        onClick={() => go('/admin/haulers')}
+      />
       <Item
         icon={<ActivityIcon size={20} />}
         label="Activity"
         active={onActivity}
         badge={unreadCount}
         onClick={() => go('/admin/activity')}
-      />
-      <Item
-        icon={<HaulerIcon size={20} />}
-        label="Haulers"
-        active={onHaulers}
-        expandable
-        expanded={haulersExpanded}
-        onToggleExpand={() => setHaulersExpanded(v => !v)}
-        onClick={() => go('/admin/haulers')}
       />
       {haulersExpanded && (
         <div style={{ marginLeft: S[5], display: 'flex', flexDirection: 'column', gap: 2, marginBottom: S[2] }}>
@@ -16422,15 +16438,12 @@ function AdminSidebar({ db, navigate, hash, onNavigate, variant = 'sidebar', hau
           }}
             onMouseEnter={e => { e.currentTarget.style.background = C.surfaceHi; }}
             onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
-          >+ Add hauler</button>
+          >+ Add contractor / dispatcher</button>
         </div>
       )}
-      <Item
-        icon={<ActiveTruckIcon size={20} />}
-        label="Dispatch"
-        active={onActiveTrucks}
-        onClick={() => go('/admin/dispatch')}
-      />
+      {/* 2026-06-01: legacy Dispatch nav-row removed from its old
+          slot below Contractors / Dispatchers — relocated to the top
+          of the trucking cluster (above Jobs). */}
       <Item
         icon={<ReportingIcon size={20} />}
         label="Reports"
@@ -16521,9 +16534,13 @@ function AdminShell({ db, setDb, navigate, hash }) {
               old bookmarks / external references keep working. */}
           {parts.length === 2 && parts[1] === 'dispatch' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 3 && parts[1] === 'trucks' && parts[2] === 'active' && <AdminActiveTrucks db={db} setDb={setDb} navigate={navigate} />}
-          {parts.length === 2 && parts[1] === 'requests' && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-          {parts.length === 3 && parts[1] === 'requests' && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
-          {parts.length === 3 && parts[1] === 'requests' && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
+          {/* 2026-06-01: canonical Jobs slug is `/admin/jobs/*`. The
+              old `/admin/requests/*` paths still resolve (preserved
+              for any deep links / bookmarks) and both map to the
+              same AdminHaulRequests* components. */}
+          {parts.length === 2 && (parts[1] === 'requests' || parts[1] === 'jobs') && <AdminHaulRequests db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+          {parts.length === 3 && (parts[1] === 'requests' || parts[1] === 'jobs') && parts[2] === 'new' && <AdminHaulRequestCreate db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+          {parts.length === 3 && (parts[1] === 'requests' || parts[1] === 'jobs') && parts[2] !== 'new' && <AdminHaulRequestDetail db={db} setDb={setDb} navigate={navigate} requestId={parts[2]} />}
           {parts.length === 2 && parts[1] === 'activity' && <AdminActivity db={db} setDb={setDb} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'backup' && <AdminBackup db={db} navigate={navigate} />}
           {parts.length === 2 && parts[1] === 'haulers' && <AdminHaulers db={db} setDb={setDb} navigate={navigate} />}
@@ -16554,7 +16571,7 @@ function HaulerLanding({ db, navigate }) {
   });
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Hauler' }, { label: 'Pick a hauler' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Contractor / Dispatcher' }, { label: 'Pick a hauler' }]} navigate={navigate} />
       <div style={{ marginBottom: S[5] }}>
         <Label color={C.accent} style={{ marginBottom: 6 }}>Hauler view</Label>
         <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Pick a hauler</h1>
@@ -16580,7 +16597,7 @@ function HaulerLanding({ db, navigate }) {
             </div>
             <div style={{ display: 'flex', gap: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
               <div style={{ flex: 1 }}>
-                <Label style={{ marginBottom: S[1] }}>Hauls</Label>
+                <Label style={{ marginBottom: S[1] }}>Jobs</Label>
                 <div style={{ ...T.statValue, fontWeight: 700, color: C.accent, lineHeight: 1 }}>{op.projectCount}</div>
               </div>
               <div style={{ flex: 1 }}>
@@ -16764,7 +16781,7 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
   return (
     <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
       <Crumbs items={[
-        { label: 'Hauler', to: '/hauler' },
+        { label: 'Contractor / Dispatcher', to: '/hauler' },
         { label: op.name },
       ]} navigate={navigate} />
       <div style={{ display: 'flex', alignItems: 'center', gap: S[4], marginBottom: S[5] }}>
@@ -16807,7 +16824,7 @@ function HaulerHome({ haulerId, db, setDb, navigate }) {
               <Card key={req.id} style={{ borderLeft: `3px solid ${C.warn}` }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: S[3], gap: S[2] }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Haul request'}</div>
+                    <div style={{ ...T.h4, fontWeight: 700, letterSpacing: -0.3, color: C.ink }}>{proj ? proj.name : 'Job'}</div>
                     <div style={{ ...T.caption, marginTop: S[1] }}>{proj ? proj.gc : ''}</div>
                   </div>
                   <Pill color={C.accent} soft={C.accentSoft}>{matLabel}</Pill>
@@ -17050,7 +17067,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
         { label: op.name },
       ]
     : [
-        { label: 'Hauler', to: '/hauler' },
+        { label: 'Contractor / Dispatcher', to: '/hauler' },
         { label: op.name, to: `/hauler/o/${haulerId}` },
         { label: project.name },
       ];
@@ -17085,7 +17102,7 @@ function HaulerProject({ haulerId, projectId, db, setDb, navigate, viewer = 'hau
           </thead>
           <tbody>
             {trucks.length === 0 && (
-              <tr><td colSpan={7} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this haul yet.</td></tr>
+              <tr><td colSpan={7} style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks assigned to you on this job yet.</td></tr>
             )}
             {trucks.map(t => {
               const hr = hours.find(h => h.truckId === t.id);
@@ -17237,7 +17254,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
         { label: `Truck #${truck.plate}` },
       ]
     : [
-        { label: 'Hauler', to: '/hauler' },
+        { label: 'Contractor / Dispatcher', to: '/hauler' },
         { label: op.name, to: `/hauler/o/${haulerId}` },
         { label: project.name, to: `/hauler/o/${haulerId}/p/${projectId}` },
         { label: `Truck #${truck.plate}` },
@@ -17387,7 +17404,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                       <select
                         value={dayCurrentReqId || ''}
                         onChange={e => setDayHaulReq(date, e.target.value)}
-                        title={dayReqIds.size > 1 ? 'Loads on this day belong to multiple haul requests — picking one cascades.' : 'Assign every load + hours row on this day to a haul request'}
+                        title={dayReqIds.size > 1 ? 'Loads on this day belong to multiple jobs — picking one cascades.' : 'Assign every load + hours row on this day to a job'}
                         style={{ ...T.caption, fontFamily: F.mono, color: C.accent, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 6px', cursor: 'pointer', maxWidth: 240 }}
                       >
                         <option value="">{dayReqIds.size > 1 ? '— mixed —' : '— none —'}</option>
@@ -17444,7 +17461,7 @@ function HaulerTruckView({ haulerId, projectId, truckId, db, setDb, navigate, vi
                     <select
                       value={l.haulRequestId || ''}
                       onChange={e => updateLoadHaulReq(l.id, e.target.value)}
-                      title="Link this load to a haul request"
+                      title="Link this load to a job"
                       style={{ ...T.caption, fontFamily: F.mono, color: l.haulRequestId ? C.accent : C.inkDim, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.xs, padding: '2px 4px', cursor: 'pointer', maxWidth: 160, width: '100%', boxSizing: 'border-box' }}
                     >
                       <option value="">— none —</option>
@@ -17741,7 +17758,7 @@ function AddTruckForm({ onAdd, onCancel }) {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 2fr auto', gap: S[3], alignItems: 'flex-end' }}>
         <div><div style={{ ...T.caption, marginBottom: S[1] }}>Plate</div><input value={plate} onChange={e => setPlate(e.target.value)} placeholder="e.g. 419" style={inputStyle} /></div>
         <div><div style={{ ...T.caption, marginBottom: S[1] }}>Type</div><select value={type} onChange={e => setType(e.target.value)} style={inputStyle}>{TRUCK_TYPES.map(t => <option key={t.code} value={t.code}>{t.label}</option>)}</select></div>
-        <div><div style={{ ...T.caption, marginBottom: S[1] }}>Hauler</div><input value={hauler} onChange={e => setHauler(e.target.value)} placeholder="Hauler company" style={inputStyle} /></div>
+        <div><div style={{ ...T.caption, marginBottom: S[1] }}>Contractor / Dispatcher</div><input value={hauler} onChange={e => setHauler(e.target.value)} placeholder="Contractor / dispatcher company" style={inputStyle} /></div>
         <div style={{ display: 'flex', gap: S[2] }}>
           <Btn variant="ghost" onClick={onCancel}>Cancel</Btn>
           <Btn onClick={() => { if (plate && hauler) onAdd({ plate, type, hauler }); }} disabled={!plate || !hauler}>Add truck</Btn>
@@ -18058,7 +18075,7 @@ function HaulerShell({ db, setDb, navigate, hash }) {
   }
   return (
     <div>
-      <Topbar navigate={navigate} role="Hauler" current={current} right={<ChromeMenu navigate={navigate} />} />
+      <Topbar navigate={navigate} role="Contractor / Dispatcher" current={current} right={<ChromeMenu navigate={navigate} />} />
       {parts.length === 1 && <HaulerLanding db={db} navigate={navigate} />}
       {parts.length === 3 && parts[1] === 'o' && <HaulerHome haulerId={parts[2]} db={db} setDb={setDb} navigate={navigate} />}
       {parts.length === 5 && parts[3] === 'p' && <HaulerProject haulerId={parts[2]} projectId={parts[4]} db={db} setDb={setDb} navigate={navigate} />}
@@ -18374,20 +18391,20 @@ function App() {
     else if (h.startsWith('/admin/trucks/new')) title = 'JSE — New truck';
     // 2026-05-25: /admin/new (AdminNewProject) is gone — no title handler needed.
     else if (h.startsWith('/admin/activity')) title = 'JSE — Activity';
-    else if (h.startsWith('/admin/requests')) {
+    else if (h.startsWith('/admin/requests') || h.startsWith('/admin/jobs')) {
       if (parts[2] && db && db.haulRequests) {
         const r = db.haulRequests.find(x => x.id === parts[2]);
-        title = r ? `JSE — ${haulRequestLabel(db, r)}` : 'JSE — Haul Requests';
+        title = r ? `JSE — ${haulRequestLabel(db, r)}` : 'JSE — Jobs';
       } else {
-        title = 'JSE — Haul Requests';
+        title = 'JSE — Jobs';
       }
     }
     else if (h.startsWith('/admin/haulers')) {
       if (parts[2] && db && db.haulers) {
         const op = db.haulers.find(o => o.id === parts[2]);
-        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Haulers';
+        title = op ? `JSE — Contractor / Dispatcher — ${op.name}` : 'JSE — Contractors / Dispatchers';
       } else {
-        title = 'JSE — Haulers';
+        title = 'JSE — Contractors / Dispatchers';
       }
     }
     else if (parts[0] === 'admin' && parts[1] === 'p' && parts[2]) {
@@ -18406,12 +18423,12 @@ function App() {
       const op = db && db.haulers ? db.haulers.find(o => o.id === parts[2]) : null;
       if (op && parts[3] === 'p' && parts[4]) {
         const proj = db.projects.find(p => p.id === parts[4]);
-        title = proj ? `JSE — Hauler — ${op.name} / ${proj.name}` : `JSE — Hauler — ${op.name}`;
+        title = proj ? `JSE — Contractor / Dispatcher — ${op.name} / ${proj.name}` : `JSE — Contractor / Dispatcher — ${op.name}`;
       } else {
-        title = op ? `JSE — Hauler — ${op.name}` : 'JSE — Hauler';
+        title = op ? `JSE — Contractor / Dispatcher — ${op.name}` : 'JSE — Contractor / Dispatcher';
       }
     }
-    else if (h.startsWith('/hauler')) title = 'JSE — Hauler';
+    else if (h.startsWith('/hauler')) title = 'JSE — Contractor / Dispatcher';
     document.title = title;
   }, [hash, db]);
   const route = (hash || '/').split('/')[1] || '';
