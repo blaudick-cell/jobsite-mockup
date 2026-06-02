@@ -9777,15 +9777,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, letterSpacing: -0.4 }}
                 ariaLabel="Edit job name" />
             </div>
-            {/* Favorite / star — visual affordance only (commit-scope is layout;
-                follow-up wires the haul_requests.favorite column). */}
-            <button type="button"
-              aria-label="Favorite (coming soon)"
-              title="Favorite — not yet wired"
-              style={{
-                background: 'transparent', border: 'none', cursor: 'default',
-                color: C.inkFaint, padding: 4, fontSize: 18, lineHeight: 1, opacity: 0.55,
-              }}>☆</button>
           </div>
           {isEditing && (
             <div style={{ ...T.caption, color: C.inkDim, marginRight: S[3], flex: '0 0 auto', alignSelf: 'center' }}>Tap to edit · Done keeps · Cancel rolls back</div>
