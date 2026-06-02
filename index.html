@@ -530,9 +530,9 @@
       /* Hauler grouping section headers stack tightly. */
       .jse-active-trucks-group-header { gap: 6px !important; }
 
-      /* Bench-trucks table (AdminActiveTrucks) — let it horizontal-
-         scroll instead of breaking the layout. */
-      .jse-bench-trucks-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      /* 2026-06-02: jse-bench-trucks-table-wrap removed along with the
+         deleted Benched-trucks table on AdminActiveTrucks. No remaining
+         consumer for the class. */
 
       /* Active Trucks card grid: ensure single column. The
          repeat(auto-fill, minmax(320px, 1fr)) already does this since
@@ -15611,18 +15611,14 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   // "Idle" = a truck whose admin-assigned driverId exists but no active
   // session right now. Useful so dispatch can see "this truck is staffed
   // but the driver hasn't clocked on yet today."
-  const trucksWithActiveSession = React.useMemo(() => {
-    const s = new Set();
-    for (const b of activeBuckets) {
-      if (b.session.matched_truck_id) s.add(b.session.matched_truck_id);
-    }
-    return s;
-  }, [activeBuckets]);
-  const idleTrucks = allTrucks.filter(t => t.driverId && !trucksWithActiveSession.has(t.id));
-  const benchedTrucks = allTrucks.filter(t => !t.driverId);
-
-  const activeCount = activeBuckets.length;
-  const idleCount   = idleTrucks.length;
+  // 2026-06-02 (bench-trucks delete): the trucksWithActiveSession /
+  // idleTrucks / benchedTrucks / activeCount / idleCount derivations
+  // here all served the now-deleted "Benched trucks · no driver assigned"
+  // table at the bottom of this page. Removed entirely — no other
+  // surface consumed them. trucksById (built from allTrucks above) is
+  // the only remaining truck-side derivation, and it stays because
+  // ActiveTruckCard / DriverSessionDrawer / dispatch exports look up
+  // sess.matched_truck_id against it for plate / type / rate display.
 
   // Drawer state: which session is open + which event to scroll to (when
   // a card thumbnail is clicked). The shared DriverSessionDrawer owns
@@ -16076,34 +16072,15 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
         );
       })()}
 
-      {benchedTrucks.length > 0 && (
-        <div style={{ marginTop: S[6] }}>
-          <div style={{ marginBottom: S[3] }}><Label>Benched trucks · no driver assigned</Label></div>
-          <Card padding={0} className="jse-bench-trucks-table-wrap">
-            <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 560 }}>
-              <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Contractor / Dispatcher</Th><Th>Haul</Th><Th></Th></tr></thead>
-              <tbody>
-                {benchedTrucks.map(t => {
-                  const h = db.haulers.find(x => x.id === t.haulerId);
-                  const p = db.projects.find(x => x.id === t.projectId);
-                  // 2026-05-25: rate lookup goes through DEFAULT_RATES (db.rates retired).
-                  const truckRate = t.ratePerHour != null ? t.ratePerHour : (DEFAULT_RATES[t.type] || 0);
-                  return (
-                    <Tr key={t.id}>
-                      <Td mono><span style={{ color: C.accent }}>#{t.plate}</span></Td>
-                      <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)">{t.type}</Pill></Td>
-                      <Td align="right" mono>${truckRate}/hr</Td>
-                      <Td>{h ? h.name : <span style={{ color: C.inkFaint }}>— unassigned</span>}</Td>
-                      <Td>{p ? p.name : <span style={{ color: C.inkFaint }}>— bench</span>}</Td>
-                      <Td align="right"><Btn variant="secondary" size="xs" onClick={() => navigate(h ? `/admin/haulers/${h.id}` : '/admin/haulers')}>Assign driver</Btn></Td>
-                    </Tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </Card>
-        </div>
-      )}
+      {/* 2026-06-02: Benched-trucks table deleted along with the rest of
+          the legacy Fleet UI. The contractor pages stopped exposing truck
+          management in 818e764; this Dispatch-tab section was the last
+          surface that surfaced "trucks without a driver" — a contractor-
+          side admin concept that doesn't fit the e-ticket-driven model
+          where drivers self-onboard via the widget and trucks rows are
+          populated organically. The trucks Supabase table stays (still
+          read for matched-truck-id display lookups across many surfaces);
+          only the UI is gone. */}
 
       {/* 2026-05-30 (Commit D): shared dispatcher-style drawer.
           Reuses the live hook above so we don't open a second
