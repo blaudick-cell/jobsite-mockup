@@ -8227,7 +8227,7 @@ function HaulRouteMiniMap({ db, setDb, pickupAddress, dropoffAddress }) {
       </div>
       {hasAddresses ? (
         <>
-          <div ref={containerRef} style={{ width: '100%', height: 300, borderRadius: R.md, overflow: 'hidden', background: C.surfaceHi, marginBottom: S[4] }} />
+          <div ref={containerRef} className="jse-job-route-map" style={{ width: '100%', height: 300, borderRadius: R.md, overflow: 'hidden', background: C.surfaceHi, marginBottom: S[4] }} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
             <div style={{ padding: S[3], borderRadius: R.sm, background: C.surfaceHi, border: `1px solid ${C.rule}` }}>
               <div style={{ ...T.caption, color: C.inkDim, marginBottom: 4, letterSpacing: 0.5, textTransform: 'uppercase' }}>Drive time</div>
@@ -9679,7 +9679,51 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
   const fmtMoneyInv = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+    <div className="jse-job-detail" style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      {/* 2026-06-02 (Job detail mobile-responsive pass): all rules below
+          are scoped to .jse-job-detail and fire at <=640px. Desktop layout
+          stays untouched. Stats row collapses 4-col → 2x2; invoice list
+          rows stack number/$/actions vertically; invoice action buttons
+          go full-width for thumb tap-targets; map height shrinks from
+          300 → 220px so the rest of the page stays reachable. */}
+      <style>{`
+        @media (max-width: 640px) {
+          .jse-job-detail { padding: 14px !important; }
+          .jse-job-detail .jse-job-stats-row {
+            grid-template-columns: 1fr 1fr !important;
+          }
+          .jse-job-detail .jse-job-route-map {
+            height: 220px !important;
+          }
+          .jse-job-detail .jse-job-invoice-buttons {
+            flex-direction: column !important;
+            align-items: stretch !important;
+            width: 100% !important;
+            flex-basis: 100% !important;
+          }
+          .jse-job-detail .jse-job-invoice-buttons > * {
+            width: 100% !important;
+          }
+          .jse-job-detail .jse-job-invoice-buttons button {
+            width: 100% !important;
+            min-height: 44px;
+          }
+          .jse-job-detail .jse-job-invoice-row {
+            grid-template-columns: 1fr !important;
+            row-gap: 6px !important;
+          }
+          .jse-job-detail .jse-job-invoice-row > * {
+            min-width: 0;
+          }
+          .jse-job-detail .jse-job-invoice-row button {
+            min-height: 40px;
+          }
+          .jse-job-detail .jse-job-site-address {
+            word-break: break-word;
+            line-height: 1.35;
+          }
+        }
+      `}</style>
       <Crumbs items={[
         { label: 'Admin', to: '/admin' },
         { label: 'Dispatch Overview', to: '/admin' },
@@ -9873,7 +9917,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             : (pickup.address  || pickup.name  || (project && project.address) || '—');
           if (siteAddr === '—') return null;
           return (
-            <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
+            <div className="jse-job-site-address" style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
               <span style={{ color: C.inkFaint, marginRight: 6 }} aria-hidden="true">📍</span>
               {siteAddr}
             </div>
@@ -9891,7 +9935,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           const remaining = Math.max(0, target - jobProgress.cyHauled);
           const donutColor = projectHaulType === 'HAS' ? '#185FA5' : C.accent;
           return (
-            <div style={{
+            <div className="jse-job-stats-row" style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
               gap: S[3], marginBottom: S[3],
@@ -10265,7 +10309,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               per Robert. Settlement Statement dropdown emits a
               per-dispatcher PDF. Both buttons disabled when no tickets
               are assigned (haulTickets.length === 0). */}
-          <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
+          <div className="jse-job-invoice-buttons" style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center', position: 'relative' }}>
             <Btn variant="primary"
               onClick={generateFinalInvoicePdf}
               disabled={haulTickets.length === 0}
@@ -10339,7 +10383,7 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
               const total = (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
               const kindLabel = inv.kind === 'final' ? 'Final' : inv.kind === 'interim' ? 'Interim' : (String(inv.number || '').startsWith('INV-FIN-') ? 'Final' : 'Interim');
               return (
-                <div key={inv.id} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: S[3], alignItems: 'center', padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
+                <div key={inv.id} className="jse-job-invoice-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto', gap: S[3], alignItems: 'center', padding: S[3], background: C.surfaceHi, borderRadius: R.md }}>
                   <div style={{ minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 2 }}>
                       <span style={{ ...T.body, fontWeight: 700, color: C.ink, fontFamily: F.mono }}>{inv.number}</span>
