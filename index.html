@@ -9309,12 +9309,21 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       });
       const afterTableY = doc.lastAutoTable.finalY + 16;
 
-      // Totals
+      // 2026-06-02: totals row label/value alignment fix. Was: label at
+      // pageW-220, value right-aligned at pageW-40 — left-edge of "$1,413"
+      // touched the right-edge of "Settlement amount" with zero gap, so
+      // the headline row read as a jumble. Now: label at pageW-360 leaves
+      // ~170px breathing room between label-end and value-start at any
+      // realistic dollar amount; fontSize-14 "$999,999.99" needs ~130px,
+      // so even six-figure totals fit comfortably without bleeding into
+      // the label.
+      const LABEL_X = pageW - 360;
+      const VALUE_X = pageW - 40;
       doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...JE_DARK);
-      doc.text('Total hours', pageW - 220, afterTableY); doc.text(totalHours.toFixed(2) + ' h', pageW - 40, afterTableY, { align: 'right' });
-      doc.text('Total CY',    pageW - 220, afterTableY + 16); doc.text(String(totalCY), pageW - 40, afterTableY + 16, { align: 'right' });
+      doc.text('Total hours', LABEL_X, afterTableY);      doc.text(totalHours.toFixed(2) + ' h', VALUE_X, afterTableY, { align: 'right' });
+      doc.text('Total CY',    LABEL_X, afterTableY + 16); doc.text(String(totalCY),               VALUE_X, afterTableY + 16, { align: 'right' });
       doc.setFontSize(14);
-      doc.text('Total due',   pageW - 220, afterTableY + 38); doc.text(fmtUsd(totalAmount), pageW - 40, afterTableY + 38, { align: 'right' });
+      doc.text('Total due',   LABEL_X, afterTableY + 38); doc.text(fmtUsd(totalAmount),           VALUE_X, afterTableY + 38, { align: 'right' });
 
       // Footer
       const pageH = doc.internal.pageSize.getHeight();
@@ -9404,11 +9413,17 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       });
       const afterTableY = doc.lastAutoTable.finalY + 16;
 
+      // 2026-06-02: totals row alignment — same fix as Final Invoice
+      // (line ~9313). Label anchored at pageW-360, value right-aligned
+      // at pageW-40, leaving ~170px gap so "Settlement amount" doesn't
+      // touch a 6-figure dollar value.
+      const LABEL_X = pageW - 360;
+      const VALUE_X = pageW - 40;
       doc.setFont(undefined, 'bold'); doc.setFontSize(11); doc.setTextColor(...JE_DARK);
-      doc.text('Total hours',     pageW - 220, afterTableY);      doc.text(totalHours.toFixed(2) + ' h', pageW - 40, afterTableY, { align: 'right' });
-      doc.text('Total CY',        pageW - 220, afterTableY + 16); doc.text(String(totalCY), pageW - 40, afterTableY + 16, { align: 'right' });
+      doc.text('Total hours',       LABEL_X, afterTableY);      doc.text(totalHours.toFixed(2) + ' h', VALUE_X, afterTableY, { align: 'right' });
+      doc.text('Total CY',          LABEL_X, afterTableY + 16); doc.text(String(totalCY),               VALUE_X, afterTableY + 16, { align: 'right' });
       doc.setFontSize(14);
-      doc.text('Settlement amount', pageW - 220, afterTableY + 38); doc.text(fmtUsd(totalAmount), pageW - 40, afterTableY + 38, { align: 'right' });
+      doc.text('Settlement amount', LABEL_X, afterTableY + 38); doc.text(fmtUsd(totalAmount),           VALUE_X, afterTableY + 38, { align: 'right' });
 
       const pageH = doc.internal.pageSize.getHeight();
       doc.setDrawColor(...JE_GREEN); doc.setLineWidth(1);
