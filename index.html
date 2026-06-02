@@ -2380,9 +2380,6 @@ function haulRequestLabel(state, req) {
   return `${req.volumeCY} CY ${matName}`;
 }
 
-// v22: HAS/NEEDS is the haul-direction signal (was on project.haulType only).
-// Derive from the project that owns the request. Falls back to 'NEEDS' so
-// the pill always renders and the toggle has a starting state.
 // 2026-05-30 Phase 4 C2.3: per-haul-request driver rollup helpers retired.
 // The replaced helpers (totalBilledHoursForRequest, deliveredCYForRequest,
 // dollarsForRequest, haulerRollupV31) all summed `db.loads` / `db.hours`
@@ -2391,50 +2388,11 @@ function haulRequestLabel(state, req) {
 // they're independent line items the contractor creates for tracking what
 // was ordered. We aggregate by driver / truck / hauler / day instead.
 //
-// Per-hauler rollup is the only one that survives in a mockup-internal form
-// (`haulerSimpleRollup` below): same shape, but the haulRequestId filter is
-// dropped in favor of a truckId-based scope. Per-request totals are no
-// longer computed anywhere; AdminHaulRequestDetail's progress dashboard +
-// AdminHaulRequests dispatch-board per-row CY/hours/$ chips were deleted in
-// the same commit.
-function haulerSimpleRollup(haulerId, db) {
-  const out = { haulsCount: 0, totalCY: 0, totalLoads: 0, totalHours: 0, totalRevenue: 0 };
-  if (!haulerId || !db) return out;
-  const myTruckIds = new Set((db.trucks || []).filter(t => t.haulerId === haulerId).map(t => t.id));
-  if (myTruckIds.size === 0) return out;
-  // haulsCount = distinct projects this hauler is assigned to via haul_requests.
-  // We still count haul-request assignments because the assignments themselves
-  // record contractor intent — they're not driver-data rollups.
-  const projectIds = new Set();
-  for (const r of (db.haulRequests || [])) {
-    if (Array.isArray(r.assignments) && r.assignments.some(a => a && a.haulerId === haulerId)) {
-      if (r.projectId) projectIds.add(r.projectId);
-    }
-  }
-  out.haulsCount = projectIds.size;
-  // Loads + CY: every load on this hauler's trucks counts, no per-haul filter.
-  for (const l of (db.loads || [])) {
-    if (!l || !myTruckIds.has(l.truckId)) continue;
-    out.totalLoads += 1;
-    out.totalCY += Number(l.cy) || 0;
-  }
-  // Hours + revenue: per-truck rate from truck.ratePerHour or DEFAULT_RATES.
-  // No per-haul assignment.ratePerHour override — those were a per-haul
-  // billing concept that no longer applies.
-  const truckById = new Map((db.trucks || []).map(t => [t.id, t]));
-  for (const h of (db.hours || [])) {
-    if (!h || !myTruckIds.has(h.truckId)) continue;
-    const truck = truckById.get(h.truckId);
-    const rate = truck && truck.ratePerHour != null
-      ? Number(truck.ratePerHour)
-      : (truck ? (DEFAULT_RATES[truck.type] || 0) : 0);
-    const hrs = calcHours(h.clockIn, h.breakMin || 0, h.clockOut);
-    out.totalHours += hrs;
-    out.totalRevenue += hrs * rate;
-  }
-  return out;
-}
-
+// 2026-06-02 (#2 migration completion): the last legacy-table consumer —
+// haulerSimpleRollup (summed db.loads + db.hours by hauler trucks) — was
+// deleted here. It had been orphan since commit 4a87a7b moved the
+// AdminHaulerDetail header stats onto <HaulerRollupStats /> reading
+// driver_sessions. Zero callers verified via grep before the delete.
 function assignedTruckCountForRequest(req) {
   if (!req || !Array.isArray(req.assignments)) return 0;
   const ids = new Set();
@@ -8277,12 +8235,27 @@ function HaulerRollupStats({ hauler, db }) {
       const offsetMin = (nowMt.getTime() - Date.now()) / 60000;
       startOfDayUtcMs = startOfDayMt.getTime() - offsetMin * 60000;
     } catch (_) {}
-    let active = 0, cyToday = 0, dollarsToday = 0;
+    let active = 0, cyToday = 0, dollarsToday = 0, loadsToday = 0;
     // 2026-06-01 (stabilization): "Trucks active" = distinct
     // matched_truck_id || truck_type for sessions where ended_at IS NULL.
     // Falls back to truck_type when a session has no matched_truck_id so
     // we still get a useful per-type spread for legacy / unmatched rows.
     const activeTruckKeys = new Set();
+    // 2026-06-02 (#2 migration completion): Loads today = sum of
+    // dropoff_load events today across this hauler's sessions. Walk
+    // truck_events filtered to (event_type === 'dropoff_load' AND
+    // session.hauler_id === hauler.id AND event_at >= startOfDayUtcMs).
+    // Pickup counts via b.pickupCount are intake-side; dropoff is the
+    // "load actually delivered" signal that matches the dispatcher's
+    // mental model.
+    const sessionIds = new Set(buckets.map(b => b.session.id));
+    for (const ev of (live.events || [])) {
+      if (!ev || ev.event_type !== 'dropoff_load') continue;
+      if (!sessionIds.has(ev.session_id)) continue;
+      const evMs = ev.event_at ? new Date(ev.event_at).getTime() : NaN;
+      if (!Number.isFinite(evMs) || evMs < startOfDayUtcMs) continue;
+      loadsToday += 1;
+    }
     for (const b of buckets) {
       const sess = b.session;
       if (!sess.ended_at) {
@@ -8296,8 +8269,8 @@ function HaulerRollupStats({ hauler, db }) {
       cyToday += cyPerLoad * (b.pickupCount || 0);
       dollarsToday += sessionDollarsToday(sess, trucksById);
     }
-    return { active, trucksActive: activeTruckKeys.size, cyToday, dollarsToday, total: buckets.length };
-  }, [live.buckets, hauler.id, trucksById]);
+    return { active, trucksActive: activeTruckKeys.size, loadsToday, cyToday, dollarsToday, total: buckets.length };
+  }, [live.buckets, live.events, hauler.id, trucksById]);
   return (
     <Card padding={S[4]} style={{ marginBottom: S[4] }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[3] }}>
@@ -8311,7 +8284,12 @@ function HaulerRollupStats({ hauler, db }) {
           {stats.total} total session{stats.total === 1 ? '' : 's'} on record
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3] }}>
+      {/* 2026-06-02 (#2 migration completion): 5-tile rollup. Auto-fit
+          collapses to 3+2 on tablet, 2x3 / 3x2 on mobile per viewport
+          width. Order: people / trucks / output / dollars — left-to-right
+          mirrors the operational mental model (who's working → what's
+          rolling → what's been delivered → what's billed). */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: S[3] }}>
         <div>
           <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Active sessions</div>
           <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: stats.active > 0 ? C.ok : C.inkDim }}>{stats.active}</div>
@@ -8319,6 +8297,10 @@ function HaulerRollupStats({ hauler, db }) {
         <div>
           <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Trucks active</div>
           <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: stats.trucksActive > 0 ? C.ok : C.inkDim }}>{stats.trucksActive}</div>
+        </div>
+        <div>
+          <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>Loads today</div>
+          <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: C.ink }}>{stats.loadsToday}</div>
         </div>
         <div>
           <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6 }}>CY today</div>
