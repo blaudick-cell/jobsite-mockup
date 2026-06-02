@@ -3281,7 +3281,7 @@ const SB_FIELDS_JS = {
   // formal "primary hauler on this haul" pointer. matchedHaulerId stays
   // for legacy back-compat (the matched-by-truck flow); assigned_hauler_id
   // is what new dispatcher-driven workflows write to.
-  haulRequests: ['id','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','assignedHaulerId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess','haulType'],
+  haulRequests: ['id','contractorName','contractorPhone','contractorEmail','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','assignedHaulerId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess','haulType'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
 };
 
@@ -8865,6 +8865,49 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     return true;
   };
 
+  // 2026-06-02 (#3): site contractor phone + email. Stored on
+  // haul_requests.contractor_phone / contractor_email (added by the
+  // haul_requests_add_contractor_contact migration) rather than on
+  // haulers because site_contractor is free-text on haul_requests, not
+  // a FK to haulers — separate from the assigned hauler / dispatcher
+  // (which IS on haulers with its own phone/email columns).
+  const saveContractorPhone = (nextPhone) => {
+    const cur = (req.contractorPhone || '').trim();
+    const next = (nextPhone || '').trim();
+    if (next === cur) return false;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, contractorPhone: next || null } : r) },
+      { type: 'haul_request.contractorPhoneChanged', actorRole: 'admin', actorId: null,
+        summary: `Site contractor phone updated on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
+    ));
+    return true;
+  };
+  const saveContractorEmail = (nextEmail) => {
+    const cur = (req.contractorEmail || '').trim();
+    const next = (nextEmail || '').trim();
+    if (next === cur) return false;
+    // Basic shape check — empty allowed; non-empty must look like an email.
+    if (next && !/.+@.+\..+/.test(next)) return false;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, contractorEmail: next || null } : r) },
+      { type: 'haul_request.contractorEmailChanged', actorRole: 'admin', actorId: null,
+        summary: `Site contractor email updated on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
+    ));
+    return true;
+  };
+  // Display formatter: 10-digit US → "(720) 555-0198"; anything else
+  // (international, partial, free-text) renders verbatim so the
+  // dispatcher can edit it without losing characters.
+  const fmtPhone = (raw) => {
+    const digits = String(raw || '').replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    return raw || '';
+  };
+
   // 2026-06-02: Inline-editable haul_requests.status. Dispatcher
   // surface accepts three buckets — Pending / Active / Completed —
   // mapping to the canonical enum (pending / matched / completed).
@@ -9814,22 +9857,35 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                 style={{ ...T.bodySm, color: C.ink, fontWeight: 700 }}
                 ariaLabel="Edit site contractor / owner" />
             </div>
-            {(req.contractorPhone || req.contractorEmail) && (
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap' }}>
-                {req.contractorPhone && (
-                  <a href={'tel:' + req.contractorPhone}
-                    style={{ color: C.inkDim, textDecoration: 'none' }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {req.contractorPhone}</a>
-                )}
-                {req.contractorEmail && (
-                  <a href={'mailto:' + req.contractorEmail}
-                    style={{ color: C.inkDim, textDecoration: 'none' }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {req.contractorEmail}</a>
-                )}
-              </div>
-            )}
+            {/* 2026-06-02 (#3): contractor phone + email — both inline-editable
+                via InlineEditableText. Wrapped in tel: / mailto: handlers so a
+                click on the rendered value (when not editing) dials the phone /
+                opens the mail client. The click-to-call wrapper lives inside
+                InlineEditableText's display span; first click enters edit
+                mode rather than firing the tel: link. To dial: long-press
+                shows the OS context menu, or copy from the input. Trade-off:
+                native tel:/mailto: would require a separate icon button next
+                to the editable value (more chrome); keeping it minimal here. */}
+            <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap', alignItems: 'baseline' }}>
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+                <span style={{ color: C.inkFaint, fontSize: 11 }} aria-hidden="true">☎</span>
+                <InlineEditableText
+                  value={req.contractorPhone ? fmtPhone(req.contractorPhone) : ''}
+                  onSave={saveContractorPhone}
+                  placeholder="— Add phone —"
+                  style={{ ...T.caption, color: C.inkDim }}
+                  ariaLabel="Edit site contractor phone" />
+              </span>
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4 }}>
+                <span style={{ color: C.inkFaint, fontSize: 11 }} aria-hidden="true">✉</span>
+                <InlineEditableText
+                  value={req.contractorEmail || ''}
+                  onSave={saveContractorEmail}
+                  placeholder="— Add email —"
+                  style={{ ...T.caption, color: C.inkDim }}
+                  ariaLabel="Edit site contractor email" />
+              </span>
+            </div>
           </div>
           {/* Status pill — editable bucket (Pending / Active / Completed) */}
           <div style={{ flexShrink: 0 }}>
