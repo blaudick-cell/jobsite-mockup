@@ -763,6 +763,16 @@ const MATERIALS = [
   { code: 'RR', label: 'Rip Rap' },
   { code: 'MU', label: 'Mulch' },
 ];
+// 2026-06-02: import vs export classification used by the marketplace
+// Job card donut (green for imports / blue for exports) + the
+// "Needs" / "Exports" verb that prefixes the material line.
+// Exports = material hauled AWAY from a site (spoils, demolished
+// concrete + asphalt, ripped-out rip-rap). Everything else defaults
+// to import (brought TO the site).
+const MATERIAL_EXPORT_CODES = new Set(['EX', 'CO', 'AC', 'RR']);
+function materialDirection(code) {
+  return MATERIAL_EXPORT_CODES.has(code) ? 'export' : 'import';
+}
 // =====================================================================
 // Helpers
 // =====================================================================
@@ -7211,6 +7221,25 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const isJobsList = parts.length >= 2 && (parts[1] === 'jobs' || parts[1] === 'requests');
   const isOverview = !isJobsList;
   const requests = db.haulRequests || [];
+  // 2026-06-02 (donut card): hook live driver_sessions so the
+  // DispatchRow donut can compute cyHauled per haul. Same hook the
+  // Dispatch tab uses — internal dedupe means mounting it here in
+  // addition to other surfaces doesn't open a second Realtime
+  // channel. cyByHaulId aggregates dropoff_load counts × the
+  // per-truck CY constant into a {haul_id: cyHauled} map; null
+  // haul_id sessions are skipped (not assigned to any job yet).
+  const live = useDriverSessionsLive();
+  const cyByHaulId = React.useMemo(() => {
+    const m = new Map();
+    for (const b of (live.buckets || [])) {
+      const s = b.session;
+      if (!s || !s.haul_id) continue;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[s.truck_type] || 0;
+      const dropN = b.dropCount || 0;
+      m.set(s.haul_id, (m.get(s.haul_id) || 0) + cyPerLoad * dropN);
+    }
+    return m;
+  }, [live.buckets]);
   // 2026-05-25: Projects entity dropped. The legacy `?projectId=` filter is
   // gone — hauls are flat. HaulProjectRedirect still strips a legacy
   // /admin/p/:projId URL into /admin/requests, but the filter pill itself
@@ -7247,6 +7276,11 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
       r, project, material,
       pickup: fmtLoc(r.pickupLocation) || (project ? project.address : ''),
       dropoff: fmtLoc(r.dropoffLocation) || (project ? project.address : ''),
+      // 2026-06-02 (donut card): cyHauled aggregated from live
+      // driver_sessions (haul_id = r.id); direction picks the donut
+      // color + the "Needs" / "Exports" verb prefix.
+      cyHauled: cyByHaulId.get(r.id) || 0,
+      direction: materialDirection(r.materialCode),
     };
   });
 
@@ -7292,21 +7326,24 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   };
 
   const DispatchRow = ({ e, last }) => {
-    // 2026-06-02 (marketplace hierarchy redesign): Project Name dominates.
-    // Old layout had a huge green HAS/NEEDS pill at fontSize 18 that
-    // out-shouted the project name; the redesign drops the pill in
-    // favour of a small "Needs"/"Has" prefix in the right column and
-    // promotes the project label to ~17px bold as the primary anchor.
-    // Type scale, top-to-bottom of priority:
-    //   17px bold  — Project name
-    //   13.5px     — Contractor / Company
-    //   13.5/14px  — Material line + Truck-count line (right col)
-    //   11px       — Address strip, muted (smallest)
-    const direction = haulTypeForReq(db, e.r);  // 'HAS' | 'NEEDS'
-    const verb = direction === 'NEEDS' ? 'Needs' : 'Has';
-    const trucksN = assignedTruckCountForRequest(e.r);
-    const trucksLabel = `${trucksN} ${trucksN === 1 ? 'Truck' : 'Trucks'} Assigned`;
+    // 2026-06-02 (marketplace hierarchy + donut card):
+    //   18px / 14px / 13px / 12px type scale, top → bottom of priority
+    //   Right column = 84px progress donut (green=import, blue=export)
+    //   showing cyHauled / job.volume with center % + X/Y CY label.
+    //   Replaces the old "N Trucks Assigned" line.
+    const isExport = e.direction === 'export';
+    const verb = isExport ? 'Exports' : 'Needs';
+    const target = Number(e.r.volumeCY) || 0;
+    const hauled = Number(e.cyHauled) || 0;
+    const pct = target > 0 ? Math.min(100, Math.round((hauled / target) * 100)) : 0;
+    const overTarget = target > 0 && hauled > target;
     const matLabel = e.material ? e.material.label : e.r.materialCode;
+    // SVG donut: r=34, stroke=10, circumference 2πr ≈ 213.6
+    const donutColor = isExport ? '#185FA5' : '#639922';
+    const donutBg = '#D3D1C7';
+    const CIRC = 213.6;
+    const dashOffset = target > 0 ? CIRC * (1 - pct / 100) : CIRC;
+    const caption = target > 0 ? (isExport ? 'CY EXPORTED' : 'CY IMPORTED') : null;
     return (
       <div
         onClick={() => navigate('/admin/requests/' + e.r.id)}
@@ -7367,21 +7404,57 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           </div>
         </div>
 
-        {/* RIGHT — Material (medium) / Truck count (small) */}
-        <div style={{ minWidth: 0 }}>
+        {/* RIGHT — Material line above, 84px progress donut below.
+            Donut color tracks import/export direction; center reads
+            percent + X/Y CY; caption beneath the donut says
+            "CY IMPORTED" or "CY EXPORTED". When the job has no
+            volumeCY target, the donut renders as a flat grey ring
+            with "—" in the center and the caption is suppressed. */}
+        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
           <div style={{
             ...T.bodySm, color: C.ink, fontWeight: 600, lineHeight: 1.3,
-            marginBottom: 4,
+            marginBottom: 2, textAlign: 'right',
           }}>
-            <span style={{ color: direction === 'NEEDS' ? C.accent : C.info, fontWeight: 700, marginRight: 6 }}>{verb}</span>
-            <span>{e.r.volumeCY || 0} CY {matLabel}</span>
+            <span style={{ color: isExport ? '#5AAEFF' : C.accent, fontWeight: 700, marginRight: 6 }}>{verb}</span>
+            <span>{target || 0} CY {matLabel}</span>
           </div>
-          <div style={{
-            ...T.bodySm, fontSize: 13,
-            color: trucksN === 0 ? C.warn : C.inkDim,
-            fontWeight: 600, lineHeight: 1.3,
-          }}>
-            {trucksLabel}
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+            <svg width="84" height="84" viewBox="0 0 84 84" aria-label={`${pct}% complete — ${hauled} of ${target || 0} CY`}>
+              <circle cx="42" cy="42" r="34" fill="none" stroke={donutBg} strokeWidth="10" />
+              {target > 0 && (
+                <circle cx="42" cy="42" r="34" fill="none"
+                  stroke={overTarget ? '#E24B4A' : donutColor}
+                  strokeWidth="10" strokeLinecap="round"
+                  strokeDasharray={CIRC}
+                  strokeDashoffset={dashOffset}
+                  transform="rotate(-90 42 42)" />
+              )}
+              <text x="42" y="40" textAnchor="middle"
+                style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, fill: C.ink }}>
+                {target > 0 ? `${pct}%` : '—'}
+              </text>
+              {target > 0 && (
+                <text x="42" y="56" textAnchor="middle"
+                  style={{ fontFamily: F.mono, fontSize: 10, fill: C.inkDim }}>
+                  {hauled}/{target}
+                </text>
+              )}
+            </svg>
+            {caption && (
+              <span style={{
+                fontFamily: F.mono, fontSize: 11, fontWeight: 700,
+                letterSpacing: 0.6, color: C.inkFaint, textTransform: 'uppercase',
+              }}>{caption}</span>
+            )}
+            {!caption && target === 0 && (
+              <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkFaint, letterSpacing: 0.4 }}>NO TARGET SET</span>
+            )}
+            {overTarget && (
+              <span style={{
+                fontFamily: F.mono, fontSize: 10, fontWeight: 700,
+                color: '#E24B4A', letterSpacing: 0.4,
+              }}>+{hauled - target} CY OVER</span>
+            )}
           </div>
         </div>
       </div>
