@@ -17022,6 +17022,53 @@ function AdminShell({ db, setDb, navigate, hash }) {
   const parts = pathOnly.split('/').filter(Boolean);
   const [haulersExpanded, setHaulersExpanded] = useState(false);
   const [reportsExpanded, setReportsExpanded] = useState(() => parts[1] === 'reports' || parts[1] === 'reporting');
+
+  // 2026-06-02 (reverse-geocode reliability): the EventAddressLine
+  // component is the ONLY place auto-geocoding fires — and it's mounted
+  // inside DriverSessionDrawer. If a dispatcher never opens the drawer
+  // for a given session, that session's truck_events sit with valid
+  // GPS coordinates but address = NULL forever. The 2026-06-01 audit
+  // turned up 3 such rows stuck since 2026-05-29.
+  //
+  // Root-cause fix: AdminShell-mounted backfill effect that scans
+  // truck_events for unaddressed rows + drains them through the same
+  // Nominatim queue. Runs on mount + every 5 minutes thereafter. The
+  // queue already rate-limits at 1.1s/req per Nominatim ToS so a 50-row
+  // batch takes ~55s and never hammers the upstream.
+  //
+  // Limit 50 per pass = a single mid-shift dispatcher load clears a day
+  // of stuck rows in under a minute. Subsequent passes pick up any new
+  // stragglers. `address_manually_set` filter respects dispatcher edits
+  // (a manual address never gets clobbered).
+  React.useEffect(() => {
+    let cancelled = false;
+    async function runBackfill() {
+      try {
+        if (!_sb || !_sb.ready || !_sb.client) return;
+        const sel = await _sb.client.from('truck_events')
+          .select('id, latitude, longitude, address, address_manually_set')
+          .not('latitude', 'is', null)
+          .not('longitude', 'is', null)
+          .is('address', null)
+          .or('address_manually_set.is.null,address_manually_set.eq.false')
+          .limit(50);
+        if (sel.error || !Array.isArray(sel.data) || sel.data.length === 0) return;
+        for (const row of sel.data) {
+          if (cancelled) return;
+          const label = await _reverseGeocodeQueue.geocode(row.latitude, row.longitude);
+          if (cancelled || !label) continue;
+          try {
+            await _sb.client.from('truck_events')
+              .update({ address: label })
+              .eq('id', row.id);
+          } catch (_) { /* swallow — next sweep retries */ }
+        }
+      } catch (_) { /* swallow — best-effort backfill */ }
+    }
+    runBackfill();
+    const id = setInterval(runBackfill, 5 * 60 * 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, []); // run-once-on-mount + interval; intentionally no deps
   const sidebarProps = { db, navigate, hash, haulersExpanded, setHaulersExpanded, reportsExpanded, setReportsExpanded };
   // Reset demo + Switch role live inside the ChromeMenu drawer now. The
   // mobile nav (AdminSidebar) is rendered as the drawer's `renderExtra` so
