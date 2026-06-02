@@ -9269,8 +9269,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       doc.text('Generated ' + generatedAtStr(), 40, pageH - 20);
       doc.text(JSE_INVOICE_ISSUER.name + ' · ' + JSE_INVOICE_ISSUER.email, pageW - 40, pageH - 20, { align: 'right' });
 
-      const filenameDate = today;
-      doc.save('final-invoice-' + (req.id || 'job') + '-' + filenameDate + '.pdf');
+      const filename = 'final-invoice-' + (req.id || 'job') + '-' + today + '.pdf';
+      doc.setProperties({ title: filename });
+      deliverBlob(doc.output('blob'), filename);
 
       setPdfFlash({ kind: 'ok', text: 'Final invoice ' + number + ' generated.' });
       setTimeout(() => setPdfFlash(null), 4000);
@@ -9362,7 +9363,9 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       doc.text(JSE_INVOICE_ISSUER.name + ' · ' + JSE_INVOICE_ISSUER.email, pageW - 40, pageH - 20, { align: 'right' });
 
       const slug = String(haulerName).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'dispatcher';
-      doc.save('settlement-' + slug + '-' + (req.id || 'job') + '-' + today + '.pdf');
+      const filename = 'settlement-' + slug + '-' + (req.id || 'job') + '-' + today + '.pdf';
+      doc.setProperties({ title: filename });
+      deliverBlob(doc.output('blob'), filename);
 
       setPdfFlash({ kind: 'ok', text: 'Settlement for ' + haulerName + ' generated.' });
       setSettlementMenuOpen(false);
@@ -15291,6 +15294,38 @@ function dispatchFilenameBase(filter) {
   return `dispatch-${f}-${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
+// 2026-06-01: Mobile-friendly file delivery. doc.save() and the
+// classic `<a download>` + blob URL pattern both fail silently on iOS
+// Safari — the `download` attribute is ignored, blob URLs sometimes
+// navigate the current tab, and PDFs never reach the user. Opening
+// the blob URL in a new tab works reliably across desktop + iOS + Android:
+// Safari renders the PDF inline with a Share → Save to Files button,
+// desktop opens a new tab the browser handles (Save, Print, etc.).
+//
+// Single code path on every device — trades desktop's auto-download UX
+// for working-everywhere reliability. Popup-blocked fallback uses
+// `<a target="_blank">` so the click is still treated as a user
+// gesture. Must be called synchronously inside a click handler.
+function deliverBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const win = window.open(url, '_blank');
+  if (!win) {
+    // Popup blocked — fall back to a synthetic anchor click. Some
+    // mobile browsers still fail here, but desktop typically opens a
+    // new tab the same way.
+    const a = document.createElement('a');
+    a.href = url;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    if (filename) a.download = filename;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { try { a.remove(); } catch (_) {} }, 0);
+  }
+  // Revoke after the new tab has time to load the resource. iOS Safari
+  // sometimes needs >30s when the user takes time to tap Share.
+  setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) {} }, 60_000);
+}
+
 function exportDispatchCSV(rows, filter) {
   const headers = ['Driver', 'Company', 'Truck Type', 'Truck #', 'Status',
     'Start Time', 'End Time', 'Shift Hours', 'Hourly Rate', '$ Today',
@@ -15305,12 +15340,7 @@ function exportDispatchCSV(rows, filter) {
     ].map(dispatchCsvEscape).join(','));
   }
   const blob = new Blob([lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${dispatchFilenameBase(filter)}.csv`;
-  document.body.appendChild(a); a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 0);
+  deliverBlob(blob, `${dispatchFilenameBase(filter)}.csv`);
 }
 
 // Lazy-load jsPDF + jsPDF-AutoTable from CDN. Cached on window so a
@@ -15520,7 +15550,9 @@ async function exportDispatchPDF(rows, filter) {
     },
   });
 
-  doc.save(`${dispatchFilenameBase(filter)}.pdf`);
+  const filename = `${dispatchFilenameBase(filter)}.pdf`;
+  doc.setProperties({ title: filename });
+  deliverBlob(doc.output('blob'), filename);
 }
 
 // =====================================================================
