@@ -1699,26 +1699,16 @@ const HAULERS_SEED = [
 // 2026-05-30 Phase 4 C2.1: driverId is now a free-text name string (the
 // dedicated drivers collection went away). Display sites read `truck.driverId`
 // directly. Bench trucks still carry null.
-const TRUCKS_SEED = [
-  { id: 'tk-447', plate: '447',   type: 'SD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'M. Ortega' },
-  { id: 'tk-212', plate: '212',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'RG', haulerId: 'op-005', driverId: 'J. Bui' },
-  { id: 'tk-088', plate: '88',    type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'D. Kowalski' },
-  { id: 'tk-092', plate: '92',    type: 'BD',  hauler: 'Dominguez',         projectId: 'RG', haulerId: 'op-001', driverId: 'R. Singh' },
-  { id: 'tk-301', plate: '301',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'A. Reyes' },
-  { id: 'tk-318', plate: '318',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'RG', haulerId: 'op-004', driverId: 'T. Hall' },
-  { id: 'tk-119', plate: '119',   type: 'ED',  hauler: 'J&C Trucking, LLC', projectId: 'RG', haulerId: 'op-006', driverId: 'C. Yoon' },
-  { id: 'tk-220', plate: '220',   type: 'SD',  hauler: 'Z&Z Hauling LLC',   projectId: 'RG', haulerId: 'op-002', driverId: 'M. Ortega' },
-  { id: 'tk-155', plate: '155',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'S. Park' },
-  { id: 'tk-156', plate: '156',   type: 'TAN', hauler: 'Z&Z Hauling LLC',   projectId: 'RR', haulerId: 'op-002', driverId: 'L. Velazquez' },
-  { id: 'tk-501', plate: '501',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'B. Tucker' },
-  { id: 'tk-502', plate: '502',   type: 'BD',  hauler: 'Dominguez',         projectId: 'GE', haulerId: 'op-001', driverId: 'F. Okafor' },
-  { id: 'tk-503', plate: '503',   type: 'SD',  hauler: 'Garcia Trucking',   projectId: 'GE', haulerId: 'op-005', driverId: 'S. Park' },
-  { id: 'tk-611', plate: '611',   type: 'ED',  hauler: 'OZ Trucking',       projectId: 'GE', haulerId: 'op-003', driverId: 'P. Larsen' },
-  { id: 'tk-612', plate: '612',   type: 'SD',  hauler: 'Tecos Trucking',    projectId: 'GE', haulerId: 'op-004', driverId: 'N. Cabrera' },
-  { id: 'tk-799', plate: '799',   type: 'TAN', hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
-  { id: 'tk-803', plate: '803',   type: 'SD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
-  { id: 'tk-812', plate: '812',   type: 'BD',  hauler: 'Bench (unassigned)',    projectId: null, haulerId: null,     driverId: null },
-];
+// 2026-06-01 (v3 contractor-page cleanup): TRUCKS_SEED emptied.
+// The legacy admin-side Fleet table that managed these rows has been
+// removed from AdminHaulerDetail; new trucks now flow in organically
+// from the driver widget's intake form (the truck-number field gets
+// matched against driver_sessions, and the trucks table is read for
+// display lookups via matched_truck_id but not edited from the
+// contractor page anymore). Empty seed = a fresh-localStorage boot
+// no longer re-creates the 18 demo trucks; existing Supabase rows
+// stay untouched since syncDbToCloud only upserts diffs from prev→next.
+const TRUCKS_SEED = [];
 
 // 2026-05-30 Phase 4 C2.1: DRIVERS_SEED removed. Driver identity lives on
 // `truck.driverId` as a free-text name string (admin assignment) and on
@@ -11401,7 +11391,6 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </div>
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
-            <Btn variant="primary"   size="sm" onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)}>+ Add truck</Btn>
             <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
           </div>
         </div>
@@ -11413,68 +11402,17 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           db.loads + db.hours (both purged in C2). */}
       <HaulerRollupStats hauler={hauler} db={db} />
 
-      {/* Fleet — every truck registered to this hauler. Inline-editable;
-          Edit/Remove per row; "+ Add truck" routes to the new-truck wizard
-          which writes hauler_id into the trucks table (Supabase column +
-          camelCase JS field both populated). */}
-      <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
-        <Label>Fleet</Label>
-        <span style={{ ...T.bodySm, color: C.inkDim }}>{trucks.length} truck{trucks.length === 1 ? '' : 's'} · click any value to edit · rate is a per-truck default; assigning to a haul still lets you override per-haul</span>
-      </div>
-      <Card padding={0} style={{ marginBottom: S[6] }}>
-        {trucks.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim}}>No trucks under this hauler.</div>
-        ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead><tr><Th>Truck #</Th><Th>Type</Th><Th align="right">Rate</Th><Th>Haul</Th><Th align="right"></Th></tr></thead>
-            <tbody>
-              {trucks.map(t => {
-                const project = db.projects.find(p => p.id === t.projectId);
-                // 2026-05-25: db.rates is deprecated. Display truck.ratePerHour
-                // with DEFAULT_RATES[type] as the floor. Editing writes back to
-                // the truck record (per-truck default); assignment.ratePerHour
-                // is edited inline on the haul detail page.
-                const effectiveTruckRate = (t.ratePerHour != null && Number.isFinite(Number(t.ratePerHour)))
-                  ? Number(t.ratePerHour)
-                  : (DEFAULT_RATES[t.type] != null ? DEFAULT_RATES[t.type] : 0);
-                return (
-                  <Tr key={t.id}>
-                    <Td mono><span style={{ color: C.accent }}>#<EditableText value={t.plate} onSave={(v) => updateTruck(t.id, { plate: v })} mono /></span></Td>
-                    <Td><Pill color={C.inkDim} soft="rgba(255,255,255,0.05)"><EditableSelect value={t.type} options={truckTypeOptions} onSave={(v) => updateTruck(t.id, { type: v })} /></Pill></Td>
-                    <Td align="right" mono>$<EditableText
-                      value={String(effectiveTruckRate)}
-                      onSave={(v) => {
-                        const cleaned = String(v == null ? '' : v).replace(/[^0-9.]/g, '');
-                        const n = parseFloat(cleaned);
-                        const next = (cleaned !== '' && Number.isFinite(n) && n > 0) ? n : null;
-                        if (next === t.ratePerHour) return;
-                        updateTruck(t.id, { ratePerHour: next });
-                      }}
-                      mono />/hr</Td>
-                    <Td>{project ? project.name : <span style={{ color: C.inkFaint }}>— Bench</span>}</Td>
-                    <Td align="right">
-                      <div style={{ display: 'inline-flex', gap: S[2] }}>
-                        <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); setDrawerTruckId(t.id); }} title="Open today's driver session">Session</Btn>
-                        <Btn variant="secondary" size="xs" onClick={(e) => { e.stopPropagation(); editTruck(t); }}>Edit</Btn>
-                        <Btn variant="danger" size="xs" onClick={(e) => { e.stopPropagation(); removeTruck(t.id); }}>Remove</Btn>
-                      </div>
-                    </Td>
-                  </Tr>
-                );
-              })}
-              <tr onClick={() => navigate(`/admin/trucks/new/for/${hauler.id}`)} style={{ cursor: 'pointer' }}
-                onMouseEnter={e => e.currentTarget.style.background = C.surfaceHi}
-                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
-                <td colSpan={5} style={{ ...T.bodySm, padding: '14px 14px', borderBottom: `1px solid ${C.rule}`, fontFamily: F.display, color: C.accent, fontWeight: 600, textAlign: 'center' }}>+ Add truck for {hauler.name}</td>
-              </tr>
-            </tbody>
-          </table>
-        )}
-      </Card>
-
-      {/* 2026-06-01 (stabilization): HaulerRollupStats now mounts in
-          the header position (above) — removed the duplicate from
-          this slot. Active driver sessions section follows directly. */}
+      {/* 2026-06-01 (v3 contractor-page cleanup): the legacy "Fleet"
+          table + "+ Add truck" inline rows have been removed from this
+          page. The contractor page is now exclusively driven by the
+          e-ticket flow — Active driver sessions + Session history
+          below tell the dispatcher everything they need. The trucks
+          table data + schema are preserved server-side because
+          driver_sessions.matched_truck_id is still looked up against
+          trucksById for plate/type/rate display across many surfaces
+          (Dispatch cards, drawer, exports). The driver widget
+          continues to read/write trucks rows via plate matching; only
+          this contractor-side admin UI is gone. */}
 
       {/* 2026-06-01 (v21 trucking integration): live driver sessions
           scoped to this hauler. Reads driver_sessions WHERE hauler_id =
