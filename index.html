@@ -8207,6 +8207,143 @@ function HaulerRollupStats({ hauler, db }) {
   );
 }
 
+// 2026-06-01: Self-contained inline-edit-on-blur component used by
+// AdminHaulRequestDetail (Job name) and HaulTruckingIntegration
+// (assigned contractor name). Mirrors the DriverSessionDrawer MetaField
+// pattern (click value → input → blur saves) but is self-contained:
+// each instance manages its own draft/flash state so callers only have
+// to pass {value, onSave}. onSave is async and signals errors by
+// returning a falsy value or throwing.
+//
+//   <InlineEditableText
+//     value={req.projectLabel}
+//     onSave={(next) => saveJobName(next, req.projectLabel)}
+//     placeholder="— Untitled —"
+//     ariaLabel="Edit job name"
+//     warning="Renames everywhere"  // optional
+//   />
+function InlineEditableText({ value, onSave, placeholder, style, ariaLabel, warning }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  // 'saving' | 'saved' | 'error' | null
+  const [flash, setFlash] = React.useState(null);
+
+  const startEdit = () => {
+    setDraft(value || '');
+    setEditing(true);
+  };
+
+  const commit = async () => {
+    const next = (draft || '').trim();
+    const cur  = (value || '').trim();
+    if (next === cur) { setEditing(false); return; }
+    if (!next) { setEditing(false); return; } // empty → cancel, don't clear
+    setFlash('saving');
+    try {
+      const ok = await onSave(next);
+      setFlash(ok === false ? 'error' : 'saved');
+    } catch (e) {
+      console.warn('[InlineEditableText] save failed:', e);
+      setFlash('error');
+    } finally {
+      setEditing(false);
+      setTimeout(() => setFlash(null), 1800);
+    }
+  };
+
+  const onKeyDown = (e) => {
+    if (e.key === 'Escape') { setEditing(false); }
+    else if (e.key === 'Enter') { e.currentTarget.blur(); }
+  };
+
+  const flashColor = flash === 'saving' ? C.inkDim
+                   : flash === 'saved'  ? C.ok
+                   : flash === 'error'  ? C.warn : null;
+  const flashLabel = flash === 'saving' ? '…' : flash === 'saved' ? '✓ Saved' : flash === 'error' ? '✗ Error' : '';
+
+  if (editing) {
+    return (
+      <span style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, width: '100%' }}>
+        <input autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={onKeyDown}
+          aria-label={ariaLabel || 'Edit'}
+          style={{
+            ...style,
+            background: C.surface, color: C.ink,
+            border: `1px solid ${C.accent}`, borderRadius: R.sm,
+            padding: '2px 6px', outline: 'none',
+          }} />
+        {warning && (
+          <span style={{ ...T.caption, color: C.warn, lineHeight: 1.3 }}>⚠ {warning}</span>
+        )}
+      </span>
+    );
+  }
+
+  const displayText = (value && String(value).trim()) || placeholder || '—';
+  return (
+    <span
+      role="button" tabIndex={0}
+      title={ariaLabel || 'Click to edit'}
+      onClick={startEdit}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startEdit(); } }}
+      className="jse-inline-edit"
+      style={{
+        cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '1px 4px', borderRadius: 3, maxWidth: '100%',
+        background: flash === 'saved' ? C.okSoft : flash === 'error' ? C.warnSoft : 'transparent',
+        transition: 'background 200ms ease-out',
+        ...style,
+      }}
+      onMouseEnter={e => { if (!flash) e.currentTarget.style.background = 'rgba(0,0,0,0.04)'; }}
+      onMouseLeave={e => { if (!flash) e.currentTarget.style.background = 'transparent'; }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>{displayText}</span>
+      <span aria-hidden="true" style={{ ...T.micro, color: C.inkFaint, opacity: 0.6, flexShrink: 0 }}>✎</span>
+      {flashColor && <span style={{ ...T.micro, color: flashColor, fontWeight: 700, flexShrink: 0 }}>{flashLabel}</span>}
+    </span>
+  );
+}
+
+// 2026-06-01: Self-contained child of HaulTruckingIntegration that
+// renders an inline-editable row for the currently-assigned contractor's
+// name. Renaming writes haulers[id].name → propagates everywhere that
+// contractor is referenced. Returns null when no contractor is assigned
+// (no hooks fire, no row rendered).
+function EditableContractorName({ req, db, setDb }) {
+  const haulerId = req && req.assignedHaulerId;
+  const h = haulerId ? (db.haulers || []).find(x => x.id === haulerId) : null;
+  if (!h) return null;
+  const saveHaulerName = (nextName) => {
+    const cur = (h.name || '').trim();
+    const next = (nextName || '').trim();
+    if (!next || next === cur) return false;
+    setDb(prev => appendActivity(
+      { ...prev, haulers: (prev.haulers || []).map(x => x.id === h.id ? { ...x, name: next } : x) },
+      { type: 'hauler.renamed', actorRole: 'admin', actorId: null,
+        summary: `Admin renamed contractor / dispatcher "${cur || '—'}" → "${next}"`, refId: h.id }
+    ));
+    return true;
+  };
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[3], marginBottom: S[4], flexWrap: 'wrap' }}>
+      <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 220 }}>Name</span>
+      <div style={{ flex: 1, minWidth: 240 }}>
+        <InlineEditableText
+          value={h.name || ''}
+          onSave={saveHaulerName}
+          placeholder="— Unnamed contractor —"
+          style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}
+          ariaLabel="Edit contractor / dispatcher name"
+          warning="Renames this contractor everywhere it appears." />
+      </div>
+    </div>
+  );
+}
+
 // 2026-06-01 (v21 trucking integration): inline component on
 // AdminHaulRequestDetail that surfaces the new formal assignment fields
 // (haul_requests.assigned_hauler_id + haul_assigned_trucks join table)
@@ -8303,7 +8440,7 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
         </div>
 
         {/* Assigned Contractor / Dispatcher */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4], flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[2], flexWrap: 'wrap' }}>
           <span style={{ ...T.bodySm, color: C.inkDim, minWidth: 220 }}>Assigned Contractor / Dispatcher</span>
           <select value={req.assignedHaulerId || ''}
             onChange={(e) => {
@@ -8317,6 +8454,12 @@ function HaulTruckingIntegration({ req, db, setDb, navigate, updateReq }) {
             ))}
           </select>
         </div>
+
+        {/* 2026-06-01: Inline-edit the assigned contractor / dispatcher's
+            name. Renaming writes haulers[id].name → propagates everywhere
+            the contractor appears. First-use warning under the input
+            makes the propagation explicit. */}
+        <EditableContractorName req={req} db={db} setDb={setDb} />
 
         {/* 2026-06-01 (model flip): Assigned tickets — driver_sessions
             with haul_id = this job. Each row is a compact ledger of the
@@ -8570,6 +8713,22 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       { type: 'haul_request.updated', actorRole: 'admin', actorId: null,
         summary: `Admin updated ${label} on ${haulRequestLabel(db, req)}`, refId: req.id }
     ));
+  };
+
+  // 2026-06-01: Inline edit of the job name (projectLabel). Returns true on
+  // accepted save / false on no-op (empty or unchanged) so the
+  // InlineEditableText flash settles on the right state. setDb auto-syncs
+  // the haul_requests row to Supabase via syncDbToCloud's diff path.
+  const saveJobName = (nextName) => {
+    const cur = (req.projectLabel || '').trim();
+    const next = (nextName || '').trim();
+    if (!next || next === cur) return false;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, projectLabel: next } : r) },
+      { type: 'haul_request.renamed', actorRole: 'admin', actorId: null,
+        summary: `Admin renamed job "${cur || '—'}" → "${next}"`, refId: req.id }
+    ));
+    return true;
   };
   // v22: HAS/NEEDS toggle. Direction lives on project.haulType (was on
   // project only -- req inherits). Flipping it from a haul-request page
@@ -9321,11 +9480,20 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
           gap: S[3], rowGap: S[3],
         }}>
-          {/* Project — falls back to req.projectLabel on flat hauls */}
+          {/* Job — inline-editable. Writes req.projectLabel (haul_requests.project_label).
+              Legacy `project.name` fallback retained for any flat haul that
+              still has a projectId pointer, but Projects-as-entity was
+              dropped 2026-05-25 so in practice this always edits the haul's
+              own free-text label. */}
           <div>
-            <Label color={C.inkDim}>Project</Label>
+            <Label color={C.inkDim}>Job</Label>
             <div style={{ marginTop: 4 }}>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project ? project.name : (req.projectLabel || '—')}</div>
+              <InlineEditableText
+                value={req.projectLabel || (project ? project.name : '')}
+                onSave={saveJobName}
+                placeholder="— Untitled job —"
+                style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}
+                ariaLabel="Edit job name" />
               <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{project ? (project.address || '—') : '—'}</div>
             </div>
           </div>
