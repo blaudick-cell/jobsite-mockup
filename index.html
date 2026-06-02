@@ -8857,6 +8857,32 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     return true;
   };
 
+  // 2026-06-02: site contractor / owner — the customer that owns the
+  // construction site (e.g. "Cowgirl Demolition"), distinct from the
+  // assigned hauler / dispatcher (e.g. "J&C Trucking" who does the
+  // actual hauling work). The two have always been separate columns:
+  //   • haul_requests.contractor_name  — site contractor / owner
+  //   • haul_requests.assigned_hauler_id — hauler / dispatcher
+  // Until this commit the Job edit page had a single "CONTRACTOR" tile
+  // bound to assigned_hauler_id, mislabeling the hauler as the
+  // contractor and leaving the actual contractor_name column with no
+  // editor (it was only set at job-creation time via the create form's
+  // free-text input + datalist suggest). Marketplace cards already
+  // read contractor_name correctly, so re-binding the tile to the
+  // existing column matches what the rest of the system displays.
+  const saveContractorName = (nextName) => {
+    const cur = (req.contractorName || '').trim();
+    const next = (nextName || '').trim();
+    if (next === cur) return false;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, contractorName: next || null } : r) },
+      { type: 'haul_request.contractorNameChanged', actorRole: 'admin', actorId: null,
+        summary: `Site contractor / owner: "${cur || '—'}" → "${next || '—'}" on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
+    ));
+    return true;
+  };
+
   // 2026-06-02: Inline-editable haul_requests.status. Dispatcher
   // surface accepts three buckets — Pending / Active / Completed —
   // mapping to the canonical enum (pending / matched / completed).
@@ -9701,59 +9727,31 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             </div>
           </div>
 
-          {/* Contractor — assigned-hauler dropdown. Same data path as the
-              Trucking-section dropdown (line ~8451): writes req.assignedHaulerId
-              and the legacy "Contractor / Dispatcher" pill on cards / lists
-              follows. Sorted alpha; "— Unassigned —" sits at the top. */}
+          {/* Site Contractor / Owner — bound to req.contractorName (the
+              SAME field the marketplace card reads as the second line under
+              the project name). Distinct from the assigned hauler / dispatcher
+              dropdown, which lives in the Trucking section below (line ~8568)
+              and writes req.assignedHaulerId. Two-column grid stays auto-fit
+              so this collapses cleanly on mobile. */}
           <div>
-            <Label color={C.inkDim}>Contractor</Label>
+            <Label color={C.inkDim}>Site Contractor / Owner</Label>
             <div style={{ marginTop: 4 }}>
-              <select
-                value={req.assignedHaulerId || ''}
-                onChange={(e) => saveAssignedHauler(e.target.value || null)}
-                aria-label="Assigned contractor / dispatcher"
-                style={{
-                  ...T.bodySm, fontWeight: 600,
-                  background: C.surface, color: C.ink,
-                  border: `1px solid ${C.ruleHi}`, borderRadius: R.sm,
-                  padding: '4px 8px', cursor: 'pointer',
-                  fontFamily: F.body, outline: 'none',
-                  maxWidth: '100%',
-                }}>
-                <option value="">— Unassigned —</option>
-                {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
-                  <option key={h.id} value={h.id}>{h.name}</option>
-                ))}
-              </select>
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-                {(() => {
-                  const h = req.assignedHaulerId ? (db.haulers || []).find(x => x.id === req.assignedHaulerId) : null;
-                  if (!h) return <span style={{ color: C.inkFaint }}>—</span>;
-                  return (
-                    <>
-                      {h.phone ? (
-                        <a href={'tel:' + h.phone}
-                          style={{ color: C.inkDim, textDecoration: 'none' }}
-                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {h.phone}</a>
-                      ) : null}
-                      {h.email ? (
-                        <a href={'mailto:' + h.email}
-                          style={{ color: C.inkDim, textDecoration: 'none' }}
-                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {h.email}</a>
-                      ) : null}
-                    </>
-                  );
-                })()}
+              <InlineEditableText
+                value={req.contractorName}
+                onSave={saveContractorName}
+                placeholder="— No contractor / owner set —"
+                style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}
+                ariaLabel="Edit site contractor / owner" />
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
+                Customer being invoiced for the haul
               </div>
             </div>
           </div>
 
           {/* v28: Hauler block removed from top metadata row — it duplicated
               info shown in the Assignments section below. Keeps the header
-              focused on Project + Contractor only, matching the operational
-              dispatch reference. */}
+              focused on Project + Site Contractor only; assigned hauler /
+              dispatcher edits live in the Trucking section's dropdown. */}
         </div>
 
         {/* ── v28-HAUL-HERO: title + route + progress + stat cards on left,
