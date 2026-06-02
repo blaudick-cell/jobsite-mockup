@@ -9302,6 +9302,54 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     return m;
   }, [haulTickets]);
 
+  // 2026-06-02 (Job detail redesign): four-stat aggregator over assigned
+  // tickets — feeds the 4-tile stat row at the top of the summary tile.
+  //   sessions  = haulTickets.length (one per session)
+  //   cyHauled  = Σ deliveredCY (cyPerLoad × pickupCount)
+  //   hoursSec  = Σ currentShiftSeconds (open shifts roll up live)
+  //   dollars   = Σ amount (hours × rate)
+  // The progress donut on the first tile divides cyHauled / req.volumeCY.
+  const jobProgress = React.useMemo(() => {
+    let cyHauled = 0, hoursSec = 0, dollars = 0;
+    for (const t of haulTickets) {
+      cyHauled += t.deliveredCY || 0;
+      hoursSec += (t.hours || 0) * 3600;
+      dollars  += t.amount || 0;
+    }
+    return { sessions: haulTickets.length, cyHauled, hoursSec, dollars };
+  }, [haulTickets]);
+
+  // 2026-06-02 (Job detail redesign): pickable tickets = sessions with
+  // haul_id IS NULL. Cascade-narrow on assignedHaulerId when set so the
+  // contractor's tickets surface first. Was inside HaulTruckingIntegration
+  // — lifted up here because the new "Driver Activity / Tickets" section
+  // mounts at the AdminHaulRequestDetail level.
+  const pickableBuckets = React.useMemo(() => {
+    let list = (haulLive.buckets || []).filter(b => b.session && !b.session.haul_id);
+    if (req.assignedHaulerId) list = list.filter(b => b.session.hauler_id === req.assignedHaulerId);
+    return list.sort((a, b) => String(b.session.started_at || '').localeCompare(String(a.session.started_at || '')));
+  }, [haulLive.buckets, req.assignedHaulerId]);
+
+  // Session-to-haul assignment patch — writes driver_sessions.haul_id and
+  // reflects via applyRowPatch + refetch. Mirrors HaulTruckingIntegration's
+  // saveHaul / saveHaulerFromCard pattern. Picking "" / null detaches.
+  const [actionErr, setActionErr] = useState(null);
+  const patchSessionHaul = async (sessionId, nextHaulId) => {
+    setActionErr(null);
+    try {
+      if (!_sb || !_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ haul_id: nextHaulId })
+        .eq('id', sessionId).select().single();
+      if (upd.error) throw upd.error;
+      if (haulLive && typeof haulLive.applyRowPatch === 'function' && upd.data) haulLive.applyRowPatch('driver_sessions', upd.data);
+      if (haulLive && typeof haulLive.refetch === 'function') { try { await haulLive.refetch(); } catch (_) {} }
+    } catch (e) {
+      console.warn('[AdminHaulRequestDetail] patchSessionHaul', e);
+      setActionErr(e && e.message ? e.message : 'patch failed');
+    }
+  };
+
   // Distinct contractor/dispatcher list (for the Settlement Statement
   // picker). Excludes the synthetic "__unassigned__" bucket so the
   // dropdown only offers picks that can produce a meaningful statement.
@@ -9638,20 +9686,41 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
         { label: haulRequestLabel(db, req) },
       ]} navigate={navigate} />
 
-      {/* v20: Combined HAUL REQUEST tile — collapses Project & contractor /
-          Haul Request / Logistics into one Card with an Edit-mode gateway.
-          Read-only by default; "Edit" up top reveals all editable
-          affordances simultaneously and surfaces the danger Delete button
-          at the bottom. Done exits edit mode (saves are already incremental
-          via updateLogistics). MARKER: v20-haul-detail-combined-tile */}
+      {/* 2026-06-02 (Job detail redesign per Robert spec): top summary
+          tile follows screenshot 1 — Project name + favorite icon (left)
+          and EDIT button (top-right); Site Contractor + phone/email below
+          with Status pill to the right; NEEDS/HAS pill + material/volume
+          row; site address line; 4-tile stat row (donut + sessions + hours
+          + dollars); pickup/dropoff/timing; site access loading + dumping.
+          The legacy "Haul Request" eyebrow + 3-col Project/Contractor/Hauler
+          grid is replaced by this clearer top-of-page hierarchy.
+          MARKER: v40-job-detail-redesign */}
       <Card padding={S[4]} style={{ marginBottom: S[4] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], marginBottom: S[3] }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <Label color={C.accent}>Haul Request</Label>
-            {isEditing && (
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>Tap any value to edit. Done keeps changes · Cancel rolls back.</div>
-            )}
+        {/* Header: Project name (inline-editable) + favorite star (left)
+            | EDIT button or edit-mode Cancel/Done pair (right) */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: S[3], marginBottom: S[3] }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+            <div style={{ ...T.h2, fontWeight: 700, color: C.ink, letterSpacing: -0.4, minWidth: 0 }}>
+              <InlineEditableText
+                value={req.projectLabel || (project ? project.name : '')}
+                onSave={saveJobName}
+                placeholder="— Untitled job —"
+                style={{ fontFamily: F.display, fontSize: 22, fontWeight: 700, color: C.ink, letterSpacing: -0.4 }}
+                ariaLabel="Edit job name" />
+            </div>
+            {/* Favorite / star — visual affordance only (commit-scope is layout;
+                follow-up wires the haul_requests.favorite column). */}
+            <button type="button"
+              aria-label="Favorite (coming soon)"
+              title="Favorite — not yet wired"
+              style={{
+                background: 'transparent', border: 'none', cursor: 'default',
+                color: C.inkFaint, padding: 4, fontSize: 18, lineHeight: 1, opacity: 0.55,
+              }}>☆</button>
           </div>
+          {isEditing && (
+            <div style={{ ...T.caption, color: C.inkDim, marginRight: S[3], flex: '0 0 auto', alignSelf: 'center' }}>Tap to edit · Done keeps · Cancel rolls back</div>
+          )}
           {/* v20.1: Edit ↗ hotspot — mono caps + accent border, matches the
               jse-design-system Pill silhouette but interactive. In edit mode
               swaps to a Cancel + Done pair (Done = exit, Cancel = rollback). */}
@@ -9700,181 +9769,193 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           )}
         </div>
 
-        {/* ── PROJECT + CONTRACTOR + HAULER(S) — horizontal 3-col on desktop,
-            auto-stacks on mobile via auto-fit. Replaces the 3 vertically-stacked
-            sub-sections each with their own 24+24 px divider, saving ~96px of
-            vertical space on desktop and ~48px on mobile (single border now). ── */}
+        {/* Site Contractor / Owner row — name + (optional) phone/email left,
+            Status pill right. Site Contractor is inline-editable (writes
+            req.contractorName); the assigned hauler / dispatcher is NOT
+            shown here — it lives on the edit form's separate field, and
+            the Driver Activity / Tickets section below shows whoever's
+            actually working the job (per-session). */}
         <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: S[3], rowGap: S[3],
+          display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
+          gap: S[3], marginBottom: S[3], flexWrap: 'wrap',
         }}>
-          {/* Job — inline-editable. Writes req.projectLabel (haul_requests.project_label).
-              Legacy `project.name` fallback retained for any flat haul that
-              still has a projectId pointer, but Projects-as-entity was
-              dropped 2026-05-25 so in practice this always edits the haul's
-              own free-text label. */}
-          <div>
-            <Label color={C.inkDim}>Job</Label>
-            <div style={{ marginTop: 4 }}>
-              <InlineEditableText
-                value={req.projectLabel || (project ? project.name : '')}
-                onSave={saveJobName}
-                placeholder="— Untitled job —"
-                style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}
-                ariaLabel="Edit job name" />
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>{project ? (project.address || '—') : '—'}</div>
-            </div>
-          </div>
-
-          {/* Site Contractor / Owner — bound to req.contractorName (the
-              SAME field the marketplace card reads as the second line under
-              the project name). Distinct from the assigned hauler / dispatcher
-              dropdown, which lives in the Trucking section below (line ~8568)
-              and writes req.assignedHaulerId. Two-column grid stays auto-fit
-              so this collapses cleanly on mobile. */}
-          <div>
-            <Label color={C.inkDim}>Site Contractor / Owner</Label>
-            <div style={{ marginTop: 4 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ ...T.bodySm, color: C.ink, fontWeight: 700 }}>
               <InlineEditableText
                 value={req.contractorName}
                 onSave={saveContractorName}
-                placeholder="— No contractor / owner set —"
-                style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}
+                placeholder="— No site contractor / owner set —"
+                style={{ ...T.bodySm, color: C.ink, fontWeight: 700 }}
                 ariaLabel="Edit site contractor / owner" />
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2 }}>
-                Customer being invoiced for the haul
-              </div>
             </div>
+            {(req.contractorPhone || req.contractorEmail) && (
+              <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[3], flexWrap: 'wrap' }}>
+                {req.contractorPhone && (
+                  <a href={'tel:' + req.contractorPhone}
+                    style={{ color: C.inkDim, textDecoration: 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {req.contractorPhone}</a>
+                )}
+                {req.contractorEmail && (
+                  <a href={'mailto:' + req.contractorEmail}
+                    style={{ color: C.inkDim, textDecoration: 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {req.contractorEmail}</a>
+                )}
+              </div>
+            )}
           </div>
-
-          {/* v28: Hauler block removed from top metadata row — it duplicated
-              info shown in the Assignments section below. Keeps the header
-              focused on Project + Site Contractor only; assigned hauler /
-              dispatcher edits live in the Trucking section's dropdown. */}
+          {/* Status pill — editable bucket (Pending / Active / Completed) */}
+          <div style={{ flexShrink: 0 }}>
+            {(() => {
+              const bucket = displayStatus(req.status);
+              const tone = STATUS_TONES[bucket] || STATUS_TONES.Pending;
+              return (
+                <select value={bucket}
+                  onChange={(e) => saveStatus(e.target.value)}
+                  aria-label="Job status"
+                  style={{
+                    ...T.bodySm, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                    background: tone.bg, color: tone.color,
+                    border: `1px solid ${tone.color}`, borderRadius: R.pill,
+                    padding: '4px 10px', cursor: 'pointer',
+                    fontFamily: F.mono, fontSize: 11, outline: 'none',
+                  }}>
+                  {Object.keys(STATUS_TONES).map(k => (
+                    <option key={k} value={k}>{k}</option>
+                  ))}
+                </select>
+              );
+            })()}
+          </div>
         </div>
 
-        {/* ── v28-HAUL-HERO: title + route + progress + stat cards on left,
-            donut on the right. Promotes hours-billed and total dollar value
-            to live next to the % donut, matching the reference mockup. Stacks
-            cleanly on mobile via flex-wrap. MARKER: v28-haul-hero ── */}
-        <div style={{ marginTop: S[3], paddingTop: S[3], borderTop: `1px solid ${C.rule}` }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: S[4], flexWrap: 'wrap' }}>
-            {/* LEFT — title, route, progress + metrics + stat-card pair */}
-            <div style={{ flex: '1 1 320px', minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                {/* 2026-06-02: pill is now ALWAYS clickable, not just in
-                    edit mode. The swap-arrows glyph implies "swappable"
-                    and Robert wants the dispatcher to flip direction
-                    without entering edit mode first. */}
-                <HasNeedsPill type={projectHaulType} fontSize={20} onClick={toggleProjectHaulType} />
-                {isEditing ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
-                    <input type="number" min="1" step="1"
-                      value={req.volumeCY == null ? '' : req.volumeCY}
-                      onChange={e => {
-                        const raw = e.target.value;
-                        if (raw === '') return;
-                        const n = parseFloat(raw);
-                        if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
-                          updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
-                        }
-                      }}
-                      aria-label="Quantity in cubic yards"
-                      title="Click to edit quantity"
-                      style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 80, textAlign: 'center', boxSizing: 'border-box' }} />
-                    <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
-                    <MaterialField value={req.materialCode} db={db}
-                      onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
-                      style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
-                  </div>
-                ) : (
-                  <div style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, margin: 0 }}>
-                    {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
-                  </div>
-                )}
-                {/* 2026-06-02: editable status — dispatcher buckets the
-                    job into Pending / Active / Completed. Color-coded
-                    options match the section header tones on the Jobs
-                    list, so a Pending → Active flip on the detail page
-                    visually moves the row to the Active section. */}
-                <div style={{ marginLeft: 'auto' }}>
-                  {(() => {
-                    const bucket = displayStatus(req.status);
-                    const tone = STATUS_TONES[bucket] || STATUS_TONES.Pending;
-                    return (
-                      <select value={bucket}
-                        onChange={(e) => saveStatus(e.target.value)}
-                        aria-label="Job status"
-                        style={{
-                          ...T.bodySm, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
-                          background: tone.bg, color: tone.color,
-                          border: `1px solid ${tone.color}`, borderRadius: R.pill,
-                          padding: '4px 10px', cursor: 'pointer',
-                          fontFamily: F.mono, fontSize: 11, outline: 'none',
-                        }}>
-                        {Object.keys(STATUS_TONES).map(k => (
-                          <option key={k} value={k}>{k}</option>
-                        ))}
-                      </select>
-                    );
-                  })()}
-                </div>
-              </div>
-
-              {/* Inline route + request metadata — derives endpoint from
-                  project address when pickup/dropoff are empty (per HAS/NEEDS). */}
-              <div style={{ ...T.caption, color: C.inkDim, marginTop: 6, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-                {(() => {
-                  const projAddr = (project && project.address) || '';
-                  const projName = (project && project.name) || '';
-                  const isNeeds = projectHaulType === 'NEEDS';
-                  const pick = isNeeds
-                    ? (pickup.name || pickup.address || '—')
-                    : (pickup.name || pickup.address || projName || projAddr || '—');
-                  const drop = isNeeds
-                    ? (dropoff.name || dropoff.address || projName || projAddr || '—')
-                    : (dropoff.name || dropoff.address || '—');
-                  return (
-                    <>
-                      <span style={{ color: C.ink }}>{pick}</span>
-                      <span style={{ color: C.inkFaint }}>→</span>
-                      <span style={{ color: C.ink }}>{drop}</span>
-                      {(routeMiles != null || routeMin != null) && <span style={{ color: C.inkFaint }}>·</span>}
-                      {routeMiles != null && <span style={{ fontFamily: F.mono }}>{routeMiles.toFixed(1)} mi</span>}
-                      {routeMiles != null && routeMin != null && <span style={{ color: C.inkFaint }}>•</span>}
-                      {routeMin != null && <span style={{ fontFamily: F.mono }}>{routeMin} min</span>}
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* 2026-05-30 Phase 4 C2.3: progress bar + inline metrics +
-                  HRS BILLED + TOTAL stat-cards + CY HAULED donut removed.
-                  All were per-haul-request driver-data rollups. Truck-count
-                  chip kept because it reads from req.assignments — that's
-                  contractor-side, not driver-side. */}
-              <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.ink, fontWeight: 700 }}>
-                  {req.volumeCY || 0} CY ordered
-                </span>
-                <span style={{ ...T.caption, color: C.inkFaint }}>·</span>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: C.inkDim }}>
-                  {(() => {
-                    const n = assignedTruckCountForRequest(req);
-                    return n === 0 ? 'no trucks' : n + ' truck' + (n === 1 ? '' : 's');
-                  })()}
-                </span>
-              </div>
+        {/* NEEDS / HAS pill + volume × material — single inline row. The
+            pill is always clickable (toggleable direction); volume + material
+            stay inline-editable when isEditing. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: S[3] }}>
+          <HasNeedsPill type={projectHaulType} fontSize={20} onClick={toggleProjectHaulType} />
+          {isEditing ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
+              <input type="number" min="1" step="1"
+                value={req.volumeCY == null ? '' : req.volumeCY}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (raw === '') return;
+                  const n = parseFloat(raw);
+                  if (Number.isFinite(n) && n > 0 && n !== req.volumeCY) {
+                    updateLogistics(r => ({ ...r, volumeCY: n }), 'volume');
+                  }
+                }}
+                aria-label="Quantity in cubic yards"
+                title="Click to edit quantity"
+                style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, background: C.surface, border: `1px solid ${C.ruleHi}`, borderRadius: R.sm, padding: '2px 8px', width: 80, textAlign: 'center', boxSizing: 'border-box' }} />
+              <span style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink }}>CY of</span>
+              <MaterialField value={req.materialCode} db={db}
+                onSave={(v) => { if (v !== req.materialCode) updateLogistics(r => ({ ...r, materialCode: v }), 'material'); }}
+                style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, padding: '2px 8px', minWidth: 0 }} />
             </div>
-          </div>
-
-          {req.notes && (
-            <div style={{ ...T.caption, marginTop: S[3], padding: S[2], background: C.surfaceHi, borderRadius: R.sm, color: C.ink, lineHeight: 1.45 }}>
-              {req.notes}
+          ) : (
+            <div style={{ fontFamily: F.display, fontSize: 20, fontWeight: 700, lineHeight: 1.1, letterSpacing: -0.3, color: C.ink, margin: 0 }}>
+              {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
             </div>
           )}
         </div>
+
+        {/* Site address — for NEEDS the site is the dropoff (receiving the
+            haul); for HAS the site is the pickup (giving up the haul). Falls
+            back to the dispatcher-named location if the address geocodes
+            haven't filled in yet. */}
+        {(() => {
+          const isNeeds = projectHaulType === 'NEEDS';
+          const siteAddr = isNeeds
+            ? (dropoff.address || dropoff.name || (project && project.address) || '—')
+            : (pickup.address  || pickup.name  || (project && project.address) || '—');
+          if (siteAddr === '—') return null;
+          return (
+            <div style={{ ...T.bodySm, color: C.inkDim, marginBottom: S[3] }}>
+              <span style={{ color: C.inkFaint, marginRight: 6 }} aria-hidden="true">📍</span>
+              {siteAddr}
+            </div>
+          );
+        })()}
+
+        {/* 4-tile stat row — Progress donut · Sessions · Hours billed · $ billed.
+            Aggregator sources from haulTickets (driver_sessions WHERE haul_id =
+            req.id). Donut color keys off haul_type via projectHaulType:
+            NEEDS → accent green, HAS → blue. Mobile auto-fit collapses to
+            2×2; desktop runs 4-across. */}
+        {(() => {
+          const target = Number(req.volumeCY) || 0;
+          const pct = target > 0 ? Math.min(100, (jobProgress.cyHauled / target) * 100) : 0;
+          const remaining = Math.max(0, target - jobProgress.cyHauled);
+          const donutColor = projectHaulType === 'HAS' ? '#185FA5' : C.accent;
+          return (
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+              gap: S[3], marginBottom: S[3],
+              padding: S[3], background: C.surfaceHi, borderRadius: R.md,
+            }}>
+              {/* Progress donut */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], minWidth: 0 }}>
+                {target > 0 ? (
+                  <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`${Math.round(pct)}% progress`}>
+                    <circle cx="32" cy="32" r="26" fill="none" stroke={C.rule} strokeWidth="7" />
+                    <circle cx="32" cy="32" r="26" fill="none" stroke={donutColor} strokeWidth="7"
+                      strokeDasharray={`${(pct / 100) * 2 * Math.PI * 26} ${2 * Math.PI * 26}`}
+                      strokeDashoffset={2 * Math.PI * 26 * 0.25}
+                      transform="rotate(-90 32 32)"
+                      strokeLinecap="round" />
+                    <text x="32" y="36" textAnchor="middle"
+                      style={{ fontFamily: F.mono, fontSize: 14, fontWeight: 700, fill: C.ink }}>
+                      {Math.round(pct)}%
+                    </text>
+                  </svg>
+                ) : (
+                  <div style={{ width: 64, height: 64, borderRadius: '50%', border: `2px dashed ${C.ruleHi}`, display: 'flex', alignItems: 'center', justifyContent: 'center', ...T.micro, color: C.inkFaint, textAlign: 'center' }}>No target</div>
+                )}
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 13, fontWeight: 700, color: C.ink, lineHeight: 1.2 }}>
+                    {target > 0
+                      ? `${jobProgress.cyHauled.toLocaleString()} / ${target.toLocaleString()} CY`
+                      : `${jobProgress.cyHauled.toLocaleString()} CY`}
+                  </div>
+                  {target > 0 && (
+                    <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>
+                      {remaining > 0 ? `Remaining: ${remaining.toLocaleString()} CY` : 'Target met'}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* SESSIONS */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Sessions</div>
+                <div style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{jobProgress.sessions}</div>
+              </div>
+
+              {/* HOURS BILLED */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>Hours billed</div>
+                <div style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>{formatShiftDuration(jobProgress.hoursSec)}</div>
+              </div>
+
+              {/* $ BILLED */}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>$ Billed</div>
+                <div style={{ fontFamily: F.mono, fontSize: 20, fontWeight: 700, color: C.accent, lineHeight: 1.1 }}>${Math.round(jobProgress.dollars).toLocaleString()}</div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Optional notes — kept inline above the route block when present. */}
+        {req.notes && (
+          <div style={{ ...T.caption, marginBottom: S[3], padding: S[2], background: C.surfaceHi, borderRadius: R.sm, color: C.ink, lineHeight: 1.45 }}>
+            {req.notes}
+          </div>
+        )}
 
         {/* ── v28-PICKUP-DROPOFF: conditional based on HAS/NEEDS direction.
             NEEDS → project site is DROPOFF (auto-derived from project.address
@@ -10114,478 +10195,62 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
       {/* Route preview — mini-map + drive time + tandem throughput estimate */}
       <HaulRouteMiniMap db={db} setDb={setDb} pickupAddress={pickup.address} dropoffAddress={dropoff.address} />
 
-      {/* 2026-06-01 (v21 trucking integration): formal hauler + truck
-          assignment via haul_requests.assigned_hauler_id + the
-          haul_assigned_trucks join table. The legacy assignments[]
-          block below still drives day-row + load-entry workflows;
-          this section layers the new dispatcher-driven pointers on
-          top. Sessions on this job + progress totals pull from
-          driver_sessions WHERE haul_id = req.id, via DriverActivityTable. */}
-      <HaulTruckingIntegration req={req} db={db} setDb={setDb} navigate={navigate} updateReq={updateReq} />
-
-      {/* Assignments — multi-truck, multi-day per-truck loads with completion donuts */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[3], gap: S[3], flexWrap: 'wrap' }}>
-        <div>
-          <Label>Assignments</Label>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
-            {(() => {
-              // F3 (2026-05-24 audit): use canonical dedup'd helper so this
-              // header agrees with the dispatch row.
-              const n = assignedTruckCountForRequest(req);
-              // 2026-05-30 Phase 4 C2.3: removed "X of Y CY delivered (Z%)"
-              // tail — per-haul-request driver rollup is gone.
-              return n === 0
-                ? 'No trucks assigned yet.'
-                : `${n} truck${n === 1 ? '' : 's'} assigned · ${req.volumeCY || 0} CY ordered`;
-            })()}
+      {/* 2026-06-02 (Job detail redesign): Driver Activity / Tickets —
+          replaces the legacy HaulTruckingIntegration mount + Assignments
+          section (truck-assignment picker + per-truck day-row grid). Reads
+          driver_sessions WHERE haul_id = req.id via DriverActivityTable
+          with showFilterPills (All / On Shift / Off Shift) + filterByHaulId.
+          + Add ticket dropdown picks from unassigned tickets cascade-narrowed
+          on req.assignedHaulerId. Per-ticket contractor + hauler edits live
+          on each session card's inline Dispatch / Job dropdowns. */}
+      <Card padding={S[4]} style={{ marginBottom: S[4] }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], marginBottom: S[3], flexWrap: 'wrap' }}>
+          <div>
+            <Label>Driver Activity / Tickets</Label>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+              Driver sessions whose haul_id matches. Per-ticket contractor + hauler edits live on each card.
+            </div>
           </div>
-        </div>
-        <Btn variant="primary" size="sm" onClick={() => setAssigningTruck(v => !v)}>
-          {assigningTruck ? 'Cancel' : '+ Assign truck'}
-        </Btn>
-      </div>
-
-      {assigningTruck && (() => {
-        // v33: Picker filter — drop orphan trucks (haulerId missing or pointing
-        // at a deleted hauler) so we never render an "unassigned" pill. Then
-        // group surviving trucks by their owning hauler and stack a section
-        // per hauler so admins read the picker the same way they read the
-        // assignment tiles below.
-        const pickableTrucks = db.trucks.filter(t => !alreadyAssignedIds.has(t.id) && t.haulerId && haulerById.has(t.haulerId));
-        const trucksByHauler = new Map();
-        for (const t of pickableTrucks) {
-          if (!trucksByHauler.has(t.haulerId)) trucksByHauler.set(t.haulerId, []);
-          trucksByHauler.get(t.haulerId).push(t);
-        }
-        const sortedHaulerIds = Array.from(trucksByHauler.keys()).sort((a, b) => {
-          const an = (haulerById.get(a)?.name || '').toLowerCase();
-          const bn = (haulerById.get(b)?.name || '').toLowerCase();
-          return an.localeCompare(bn);
-        });
-        return (
-          <Card style={{ marginBottom: S[4], padding: S[4], background: C.surfaceHi }}>
-            <Label style={{ marginBottom: S[2] }}>Pick a truck</Label>
-            {pickableTrucks.length === 0 ? (
-              <div style={{ ...T.bodySm, color: C.inkFaint }}>No available trucks.</div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-                {sortedHaulerIds.map(hid => {
-                  const hauler = haulerById.get(hid);
-                  const trucks = trucksByHauler.get(hid);
-                  return (
-                    <div key={hid}>
-                      <div style={{ ...T.caption, color: C.inkDim, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase', marginBottom: S[2] }}>
-                        {hauler ? hauler.name : 'Unknown hauler'}
-                      </div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: S[2] }}>
-                        {trucks.map(t => (
-                          <button key={t.id} onClick={() => assignTruck(t.haulerId, t.id)} style={{
-                            ...T.bodySm, background: 'transparent', color: C.ink, border: `1px solid ${C.ruleHi}`,
-                            borderRadius: R.pill, padding: '8px 14px', cursor: 'pointer', fontWeight: 600,
-                          }}
-                            onMouseEnter={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }}
-                            onMouseLeave={e => { e.currentTarget.style.borderColor = C.ruleHi; e.currentTarget.style.color = C.ink; }}
-                          >#{t.plate} <span style={{ color: C.inkFaint, marginLeft: 4 }}>· {t.type}</span></button>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-        );
-      })()}
-
-      {assignments.length > 0 && (() => {
-        // v33: Group assignment tiles under a per-hauler section header so
-        // multi-truck-per-hauler hauls read as a single unit. The header is
-        // text-only for now; commit 4 wires the "Settlement statement"
-        // hotspot into the right-aligned placeholder.
-        const assignmentsByHauler = new Map();
-        for (const a of assignments) {
-          if (!assignmentsByHauler.has(a.haulerId)) assignmentsByHauler.set(a.haulerId, []);
-          assignmentsByHauler.get(a.haulerId).push(a);
-        }
-        const sortedHaulerIds = Array.from(assignmentsByHauler.keys()).sort((x, y) => {
-          const xn = (haulerById.get(x)?.name || '').toLowerCase();
-          const yn = (haulerById.get(y)?.name || '').toLowerCase();
-          return xn.localeCompare(yn);
-        });
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: S[5], marginBottom: S[6] }}>
-            {sortedHaulerIds.map(hid => {
-              const sectionHauler = haulerById.get(hid);
-              const sectionAssignments = assignmentsByHauler.get(hid);
-              const truckCount = sectionAssignments.length;
-              return (
-                <div key={hid}>
-                  <div style={{
-                    display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
-                    gap: S[3], flexWrap: 'wrap',
-                    paddingBottom: S[2], marginBottom: S[3],
-                    borderBottom: `1px solid ${C.rule}`,
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'baseline', gap: S[2], minWidth: 0 }}>
-                      <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.2 }}>
-                        {sectionHauler ? sectionHauler.name : 'Unknown hauler'}
-                      </div>
-                      <div style={{ ...T.caption, color: C.inkDim }}>
-                        {truckCount} truck{truckCount === 1 ? '' : 's'}
-                      </div>
-                    </div>
-                    {/* v34: settlement-statement hotspot — opens a printable
-                        per-hauler payout statement for THIS haul. Modal lives
-                        at the bottom of this component's JSX. */}
-                    <Btn variant="ghost" size="sm" onClick={() => setStmtForHauler(hid)}>
-                      <span aria-hidden="true" style={{ marginRight: 6 }}>📄</span>Open settlement statement
-                    </Btn>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[3] }}>
-                    {sectionAssignments.map(a => {
-            const t = db.trucks.find(x => x.id === a.truckId);
-            const aHauler = db.haulers.find(h => h.id === a.haulerId);
-            // v32: per-truck CY rollup still reads admin-entered db.loads
-            // (HaulerLogLoadForm writes here, tagged with haulRequestId).
-            // Hours per haul-request retired in Phase 4 C4.1: drivers don't
-            // tag sessions to hauls anymore, and admin can't enter hours
-            // by hand (C3.3 deleted the editor). Tiles for hours + $
-            // render "—" below.
-            const truckCY = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId).reduce((s, l) => s + (Number(l.cy) || 0), 0);
-            const isAddingDay = addingDayFor === a.truckId;
-            const typeMeta = TRUCK_TYPES.find(x => x.code === (t && t.type)) || null;
-            // 2026-05-25: assignment-level ratePerHour is the source of truth.
-            // rateForAssignment walks: a.ratePerHour → t.ratePerHour → DEFAULT_RATES[type] → 0.
-            const hourlyRate = rateForAssignment(a, t);
-            const todayDay = a.days.find(dd => isToday(dd.date)) || null;
-            const todayStart = todayDay ? (todayDay.startTime || '—') : '—';
-            const sortedDays = [...a.days].sort((x, y) => (y.date || '').localeCompare(x.date || ''));
-            const fmtUSD = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-            return (
-                  <Card key={a.truckId} padding={S[4]}>
-                    {/* Truck header row — title + close button */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: S[2] }}>
-                      <span aria-hidden="true" style={{
-                        width: 28, height: 28, borderRadius: R.sm,
-                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        border: `1px solid ${C.ruleHi}`, color: C.inkDim, fontSize: 16, flexShrink: 0,
-                      }}>🚚</span>
-                      {/* 2026-05-30 (Commit D): plate is clickable —
-                          opens the shared DriverSessionDrawer scoped to
-                          this truck (resolves to today's session if any). */}
-                      <button
-                        type="button"
-                        onClick={() => setDrawerTruckId(a.truckId)}
-                        title="Open today's driver session for this truck"
-                        style={{
-                          ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3,
-                          minWidth: 0, background: 'transparent', border: 'none',
-                          padding: 0, cursor: 'pointer', textAlign: 'left',
-                        }}
-                        onMouseEnter={e => { e.currentTarget.style.color = C.accent; }}
-                        onMouseLeave={e => { e.currentTarget.style.color = C.ink; }}
-                      >
-                        #{t ? t.plate : a.truckId}
-                      </button>
-                      {t && t.type ? (
-                        <span style={{
-                          ...T.monoSm, padding: '2px 8px', borderRadius: R.sm,
-                          background: C.warnSoft, color: C.warn, fontWeight: 700, letterSpacing: 0.4,
-                        }}>{t.type}</span>
-                      ) : null}
-                      <button onClick={() => removeAssignment(a.truckId)} aria-label={`Remove truck ${t ? '#' + t.plate : ''} assignment`} title="Remove truck from this job" style={{
-                        marginLeft: 'auto',
-                        background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                        width: 28, height: 28, borderRadius: R.sm, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 18, lineHeight: 1, padding: 0,
-                      }}
-                        onMouseEnter={e => { e.currentTarget.style.color = C.warn; e.currentTarget.style.background = C.warnSoft; }}
-                        onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; e.currentTarget.style.background = 'transparent'; }}
-                      >×</button>
-                    </div>
-
-                    {/* Hauler name + verified indicator */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: S[1], marginBottom: S[3] }}>
-                      <div style={{ ...T.bodySm, color: C.ink, fontWeight: 700 }}>{aHauler ? aHauler.name : 'Unknown hauler'}</div>
-                      <span aria-hidden="true" style={{ color: C.ok, fontSize: 12 }}>✓</span>
-                    </div>
-
-                    {/* v29: 6-card KPI strip — hauler-level totals up top so
-                        billing/operational context is one glance. Stat values
-                        are derived (never hardcoded). Mobile: auto-fit
-                        collapses to 2 columns then 1 column. */}
-                    <div style={{
-                      display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                      gap: S[2], padding: S[2], border: `1px solid ${C.rule}`, borderRadius: R.md,
-                      marginBottom: S[3],
-                    }}>
-                      {/* TOTAL DELIVERED CY */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.accent}`, color: C.accent, fontSize: 14,
-                        }}>📦</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>
-                            {truckCY}<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>CY</span>
-                          </div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total delivered</div>
-                        </div>
-                      </div>
-
-                      {/* TOTAL BILLED HRS + $ — 2026-05-30 Phase 4 C4.1:
-                          per-haul-request hours retired. Hours come from
-                          driver_sessions (not scoped per haul); admin can't
-                          enter hours by hand anymore (C3.3). Both tiles
-                          render "—" with an explainer line so the dispatcher
-                          knows where the values went. */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.ruleHi}`, color: C.inkFaint, fontSize: 14, lineHeight: 1,
-                        }}>◷</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.inkFaint, lineHeight: 1.1 }}>
-                            —<span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>HRS</span>
-                          </div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Not per-haul</div>
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.ruleHi}`, color: C.inkFaint, fontFamily: F.mono, fontSize: 14, fontWeight: 700, lineHeight: 1,
-                        }}>$</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: C.inkFaint, lineHeight: 1.1 }}>—</div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Total billed</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>Not per-haul</div>
-                        </div>
-                      </div>
-
-                      {/* TRUCK TYPE */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.info}`, color: C.info, fontSize: 14,
-                        }}>🛒</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.display, fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.1, textTransform: 'uppercase', letterSpacing: 0.3 }}>
-                            {(typeMeta && typeMeta.label) || (t && t.type) || '—'}
-                          </div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Truck type</div>
-                        </div>
-                      </div>
-
-                      {/* RATE (THIS HAUL) — inline editable on the assignment.
-                          2026-05-25: assignment.ratePerHour is now the billing
-                          source of truth. Edits here propagate through
-                          rateForAssignment → dollarsForRequest / invoices /
-                          settlement statements. Falls back to truck.ratePerHour
-                          then DEFAULT_RATES[type] when assignment.ratePerHour
-                          isn't set. */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.info}`, color: C.info, fontSize: 14,
-                        }}>🏷</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 16, fontWeight: 700, color: C.ink, lineHeight: 1.1, display: 'inline-flex', alignItems: 'baseline' }}>
-                            $<EditableText
-                              value={String(Math.round(hourlyRate))}
-                              onSave={(v) => {
-                                const cleaned = String(v == null ? '' : v).replace(/[^0-9.]/g, '');
-                                const n = parseFloat(cleaned);
-                                const next = (cleaned !== '' && Number.isFinite(n) && n > 0) ? n : null;
-                                if (next === a.ratePerHour) return;
-                                updateReq(r => ({
-                                  ...r,
-                                  assignments: r.assignments.map(x => x.truckId === a.truckId
-                                    ? { ...x, ratePerHour: next }
-                                    : x),
-                                }));
-                              }}
-                              mono />
-                            <span style={{ color: C.inkFaint, fontSize: 11, marginLeft: 4 }}>/HR</span>
-                          </div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Rate (this haul)</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>
-                            {a.ratePerHour != null
-                              ? 'Per-haul override'
-                              : (t && t.ratePerHour != null ? 'From truck default' : 'From type default')}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* TODAY START TIME */}
-                      <div style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: S[2] }}>
-                        <span aria-hidden="true" style={{
-                          width: 28, height: 28, borderRadius: R.sm, flexShrink: 0,
-                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                          border: `1.5px solid ${C.warn}`, color: C.warn, fontSize: 14,
-                        }}>📅</span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontFamily: F.mono, fontSize: 14, fontWeight: 700, color: C.ink, lineHeight: 1.1 }}>Start {todayStart}</div>
-                          <div style={{ ...T.micro, color: C.inkDim, letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 }}>Today</div>
-                          <div style={{ ...T.micro, color: C.inkFaint, marginTop: 1 }}>First load time</div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Day sections — newest first. v32: each day's loads +
-                        hours come from db.loads / db.hours filtered by
-                        haulRequestId + truckId + date (canonical store);
-                        the assignments[].days[] entry remains only as the
-                        date + startTime stub. */}
-                    {sortedDays.map(d => {
-                      const loadsForDay = (db.loads || []).filter(l => l && l.haulRequestId === req.id && l.truckId === a.truckId && l.date === d.date);
-                      const dailyCY = loadsForDay.reduce((s, l) => s + (Number(l.cy) || 0), 0);
-                      // 2026-05-30 Phase 4 C4.1: dailyHours + dailyDollars
-                      // dropped — per-haul-request hours are gone. Day-row
-                      // chip shows "—" in their slots.
-                      const isAddingLoad = addLoadForm.truckId === a.truckId && addLoadForm.date === d.date;
-                      const dayLabel = isToday(d.date) ? 'Today' : isYesterday(d.date) ? 'Yesterday' : isoToShortDate(d.date);
-                      return (
-                        <div key={d.date} style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, border: `1px solid ${C.rule}` }}>
-                          {/* Header row — date + start time (editable) on the left, daily totals on the right */}
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[2], flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
-                              <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>{dayLabel}</div>
-                              <span aria-hidden="true" style={{ ...T.monoSm, color: C.ok }}>•</span>
-                              <span style={{ ...T.monoSm, color: C.inkDim, fontWeight: 500 }}>Start{' '}
-                                <span style={{ color: C.ink }}>
-                                  <EditableText value={d.startTime || ''} placeholder="HH:MM"
-                                    onSave={(v) => { const tt = (v || '').trim(); if (tt !== d.startTime) updateDay(a.truckId, d.date, { startTime: tt }); }} />
-                                </span>
-                              </span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                              {/* 2026-05-30 Phase 4 C4.1: inline hours
-                                  editor + dailyDollars chip removed. Hours
-                                  no longer per-haul. dailyCY chip stays —
-                                  reads admin-entered db.loads tagged with
-                                  haulRequestId. */}
-                              <span style={{ ...T.monoSm, color: C.inkFaint }}>— h</span>
-                              <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
-                              <span style={{ ...T.monoSm, color: C.inkDim }}>{dailyCY} CY</span>
-                              <span style={{ ...T.monoSm, color: C.inkFaint }}>·</span>
-                              <span style={{ ...T.monoSm, color: C.inkFaint }}>—</span>
-                              {a.days.length > 1 && (
-                                <button onClick={() => removeDay(a.truckId, d.date)} aria-label="Remove day" title="Remove day" style={{
-                                  background: 'transparent', border: 'none', color: C.inkFaint, cursor: 'pointer',
-                                  width: 22, height: 22, borderRadius: R.xs, display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                  fontSize: 16, lineHeight: 1, padding: 0,
-                                }}
-                                  onMouseEnter={e => { e.currentTarget.style.color = C.warn; }}
-                                  onMouseLeave={e => { e.currentTarget.style.color = C.inkFaint; }}
-                                >×</button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Compact column header — PHOTO | TIME | CY HAULED */}
-                          {loadsForDay.length > 0 && (
-                            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginTop: S[2], paddingBottom: 4, borderBottom: `1px solid ${C.rule}` }}>
-                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', minWidth: 48 }}>Photo</span>
-                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', minWidth: 64 }}>Time</span>
-                              <span style={{ ...T.micro, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', flex: 1 }}>CY Hauled</span>
-                            </div>
-                          )}
-
-                          {loadsForDay.length === 0 ? (
-                            <div style={{ ...T.caption, color: C.inkFaint, padding: `${S[2]}px 0` }}>No loads yet today.</div>
-                          ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column' }}>
-                              {loadsForDay.map(l => (
-                                <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: S[2], padding: '6px 0', borderBottom: `1px solid ${C.rule}` }}>
-                                  {/* v32: photo thumbnail — click to open lightbox.
-                                      Mirrors the HaulerTruckView pattern; upload
-                                      writes a data URL into db.loads[i].photo. */}
-                                  <button
-                                    onClick={(e) => { e.stopPropagation(); setPhotoFor(l.id); }}
-                                    title={l.photo ? 'View / replace photo' : 'Add photo'}
-                                    style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', minWidth: 48 }}
-                                  >
-                                    {l.photo ? (
-                                      <img src={l.photo} alt="" style={{ width: 32, height: 32, borderRadius: R.xs, objectFit: 'cover', border: `1px solid ${C.ruleHi}` }} />
-                                    ) : (
-                                      <div style={{ width: 32, height: 32, borderRadius: R.xs, background: C.surface, border: `1px dashed ${C.ruleHi}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.inkFaint, fontSize: 14 }} aria-label="No photo — click to add">📷</div>
-                                    )}
-                                  </button>
-                                  <span style={{ ...T.monoSm, color: C.info, fontWeight: 600, minWidth: 64, display: 'inline-block' }}>
-                                    <EditableText value={l.time || ''} placeholder="HH:MM"
-                                      onSave={(v) => { const tt = (v || '').trim(); if (tt !== l.time) updateLoad(a.truckId, d.date, l.id, { time: tt }); }} />
-                                  </span>
-                                  <span style={{ flex: 1, color: C.ink, display: 'inline-flex', alignItems: 'baseline', gap: 4, ...T.bodySm, fontWeight: 600 }}>
-                                    <EditableText value={l.cy != null ? String(l.cy) : ''} placeholder="0"
-                                      onSave={(v) => { const n = parseCY(v); if (n != null && n !== l.cy) updateLoad(a.truckId, d.date, l.id, { cy: n }); }} />
-                                    <span style={{ color: C.inkFaint, ...T.monoSm, fontWeight: 400 }}>CY</span>
-                                  </span>
-                                  <button onClick={() => removeLoad(a.truckId, d.date, l.id)} style={{
-                                    background: 'transparent', border: 'none', color: C.warn, cursor: 'pointer',
-                                    ...T.bodySm, padding: '2px 6px', borderRadius: R.xs, fontWeight: 600,
-                                  }}
-                                    onMouseEnter={e => { e.currentTarget.style.opacity = '0.7'; }}
-                                    onMouseLeave={e => { e.currentTarget.style.opacity = '1'; }}
-                                  >Remove</button>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {isAddingLoad ? (
-                            <div style={{ marginTop: S[2], display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
-                              <input type="time" value={addLoadForm.time} onChange={e => setAddLoadForm(f => ({ ...f, time: e.target.value }))}
-                                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                              <input type="number" min="0" step="0.5" placeholder="CY" value={addLoadForm.cy} onChange={e => setAddLoadForm(f => ({ ...f, cy: e.target.value }))}
-                                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, width: 80 }} />
-                              <Btn variant="primary" size="sm" onClick={() => addLoad(a.truckId, d.date, addLoadForm.time, addLoadForm.cy)}>Add</Btn>
-                              <Btn variant="ghost" size="sm" onClick={() => setAddLoadForm({ truckId: null, date: null, time: '', cy: '' })}>Cancel</Btn>
-                            </div>
-                          ) : (
-                            <button onClick={() => setAddLoadForm({ truckId: a.truckId, date: d.date, time: '', cy: '' })} style={{
-                              marginTop: S[2], background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.info,
-                              ...T.caption, padding: '6px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
-                            }}>+ Add load</button>
-                          )}
-                        </div>
-                      );
-                    })}
-
-                    {isAddingDay ? (
-                      <div style={{ marginTop: S[3], padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', gap: S[2], alignItems: 'center', flexWrap: 'wrap' }}>
-                        <input type="date" value={newDayDate} onChange={e => setNewDayDate(e.target.value)}
-                          style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                        <input type="time" value={newDayStart} onChange={e => setNewDayStart(e.target.value)}
-                          style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink }} />
-                        <Btn variant="primary" size="sm" onClick={() => addDay(a.truckId)}>Add day</Btn>
-                        <Btn variant="ghost" size="sm" onClick={() => { setAddingDayFor(null); setNewDayDate(TODAY_ISO); setNewDayStart('08:00'); }}>Cancel</Btn>
-                      </div>
-                    ) : (
-                      <button onClick={() => setAddingDayFor(a.truckId)} style={{
-                        marginTop: S[3], width: '100%', background: 'transparent', border: `1px dashed ${C.ruleHi}`, color: C.accent,
-                        ...T.bodySm, padding: '10px 10px', borderRadius: R.sm, cursor: 'pointer', fontWeight: 600,
-                      }}>+ Add day</button>
-                    )}
-                  </Card>
+          {pickableBuckets.length > 0 ? (
+            <select value=""
+              onChange={(e) => { if (e.target.value) patchSessionHaul(e.target.value, req.id); }}
+              aria-label="Add ticket to this job"
+              style={{ ...T.bodySm, background: C.surface, color: C.ink, border: `1px solid ${C.ruleHi}`, padding: '6px 10px', borderRadius: R.sm, fontFamily: F.body, minWidth: 240 }}>
+              <option value="">+ Add ticket ▾</option>
+              {pickableBuckets.map(b => {
+                const sess = b.session;
+                const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+                const cy = cyPerLoad * (b.pickupCount || 0);
+                const dt = sess.started_at ? new Date(sess.started_at).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: '2-digit', day: '2-digit' }) : '—';
+                return (
+                  <option key={sess.id} value={sess.id}>
+                    {(sess.driver_name || '—')} · {(sess.company || '—')} · {dt} · {cy} CY
+                  </option>
                 );
               })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        );
-      })()}
+            </select>
+          ) : (
+            <div style={{ ...T.caption, color: C.inkFaint }}>
+              {req.assignedHaulerId
+                ? 'No unassigned tickets under this contractor / dispatcher right now.'
+                : 'No unassigned tickets right now.'}
+            </div>
+          )}
+        </div>
+        {actionErr && (
+          <div style={{ ...T.caption, color: C.warn, marginBottom: S[2] }}>Error: {actionErr}</div>
+        )}
+        <DriverActivityTable
+          db={db}
+          navigate={navigate}
+          live={haulLive}
+          showFilterPills={true}
+          filterByHaulId={req.id}
+          emptyText="No tickets on this job yet. Add a ticket above or have a driver pick this job from the card chip."
+        />
+      </Card>
 
-      {/* v18: Invoices — JSE-issued interim/final invoices billed to the GC,
+{/* v18: Invoices — JSE-issued interim/final invoices billed to the GC,
           payable to Jobsite Exchange. Buttons drop into the print view. */}
       <Card style={{ marginBottom: S[5] }}>
         <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[4] }}>
@@ -10703,247 +10368,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
           </div>
         )}
       </Card>
-
-      {/* v32: photo lightbox + hidden file input — mirrors HaulerTruckView. */}
-      <input ref={replacePhotoRef} type="file" accept="image/*" capture="environment" onChange={onPickReplacePhoto} style={{ display: 'none' }} />
-      {photoLoad && (() => {
-        const photoTruck = (db.trucks || []).find(t => t.id === photoLoad.truckId);
-        return (
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label="Load photo"
-            onClick={() => setPhotoFor(null)}
-            style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: S[4] }}
-          >
-            <div
-              onClick={e => e.stopPropagation()}
-              style={{ background: C.bg, border: `1px solid ${C.ruleHi}`, borderRadius: R.lg, padding: S[4], maxWidth: 'min(640px, 100%)', maxHeight: '90vh', display: 'flex', flexDirection: 'column', gap: S[3] }}
-            >
-              <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3] }}>
-                <div>
-                  <Label color={C.accent}>Load photo</Label>
-                  <div style={{ ...T.bodySm, color: C.inkDim, fontFamily: F.mono, marginTop: 2 }}>
-                    #{photoTruck ? photoTruck.plate : (photoLoad.truckId || '?')} · {photoLoad.time} · {photoLoad.cy || 0} CY{photoLoad.material ? (' · ' + materialLabel(photoLoad.material)) : ''}
-                  </div>
-                </div>
-                <button
-                  onClick={() => setPhotoFor(null)}
-                  aria-label="Close"
-                  style={{ background: 'transparent', border: 'none', color: C.inkDim, cursor: 'pointer', fontSize: 24, lineHeight: 1, padding: 4 }}
-                >×</button>
-              </div>
-              {photoLoad.photo ? (
-                <img src={photoLoad.photo} alt={`Load on #${photoTruck ? photoTruck.plate : ''} at ${photoLoad.time}`} style={{ width: '100%', maxHeight: '60vh', objectFit: 'contain', borderRadius: R.md, background: '#000' }} />
-              ) : (
-                <div style={{ ...T.bodySm, color: C.inkDim, textAlign: 'center', padding: S[5], border: `1px dashed ${C.ruleHi}`, borderRadius: R.md }}>No photo on file for this load yet. Click "Upload photo" to add one.</div>
-              )}
-              <div style={{ display: 'flex', gap: S[2], justifyContent: 'flex-end' }}>
-                {photoLoad.photo && (
-                  <button
-                    onClick={() => { if (window.confirm('Remove the photo from this load?')) setDb(prev => ({ ...prev, loads: (prev.loads || []).map(l => l.id === photoLoad.id ? { ...l, photo: null } : l) })); }}
-                    style={{ ...T.bodySm, background: 'transparent', border: `1px solid ${C.warn}`, color: C.warn, padding: '8px 14px', borderRadius: R.sm, cursor: 'pointer', fontFamily: F.display, fontWeight: 600 }}
-                  >Remove photo</button>
-                )}
-                <button
-                  onClick={() => replacePhotoRef.current && replacePhotoRef.current.click()}
-                  style={{ ...T.bodySm, background: C.accent, border: 'none', color: C.bg, padding: '8px 14px', borderRadius: R.sm, cursor: 'pointer', fontFamily: F.display, fontWeight: 700 }}
-                >{photoLoad.photo ? 'Replace photo' : 'Upload photo'}</button>
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* v34: per-hauler printable settlement statement.
-          Opens from the "Open settlement statement" hotspot in each
-          per-hauler section header. Shows that hauler's payout lines for
-          THIS haul only: one row per (truck × day × hours row), totals at
-          bottom. window.print() prints just the sheet — scoped
-          .settlement-print-* @media print stylesheet strips admin chrome. */}
-      {stmtForHauler && (() => {
-        const settle = haulerById.get(stmtForHauler);
-        const settleAssignments = assignments.filter(a => a.haulerId === stmtForHauler);
-        const fmtMoneyStmt = (n) => '$' + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-        // 2026-05-30 Phase 4 C4.4: per-(truck × day) line-item derivation
-        // retired. The two sources it used — day.hours overrides on
-        // req.assignments[].days[] and db.hours filtered by haulRequestId —
-        // are both stale after Phase 4 (admin can't enter day.hours
-        // anymore per C4.1, and driver_sessions don't tag haul requests).
-        // The statement still renders with empty line-items + subtotal=0
-        // until a future commit restructures it to compute from
-        // driver_sessions over a date range. Truck-list header derived
-        // from assignments still shows who was on this haul (admin-side
-        // intent), so the statement isn't empty.
-        const lines = [];
-        const subtotal = 0;
-
-        const stmtDate = TODAY_ISO; // 2026-05-23 frozen
-        const hidShort = String(stmtForHauler || '').replace(/^op-/, '');
-        const stmtNumber = 'STMT-' + (req.projectId || 'X') + '-' + hidShort + '-' + stmtDate.replace(/-/g, '');
-        const haulTitle = haulRequestLabel(db, req) || req.id;
-
-        return (
-          <div
-            className="settlement-print-backdrop"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Settlement statement"
-            onClick={e => { if (e.target === e.currentTarget) setStmtForHauler(null); }}
-            style={{
-              position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', zIndex: 200,
-              display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-              padding: S[4], overflowY: 'auto',
-            }}
-          >
-            {/* Scoped print stylesheet — when window.print() fires, only the
-                settlement sheet is visible on the page. */}
-            <style>{`
-              @media print {
-                body, html { background: #ffffff !important; color: #000000 !important; }
-                body * { visibility: hidden !important; }
-                .settlement-print-backdrop, .settlement-print-backdrop * { visibility: visible !important; }
-                .settlement-print-backdrop {
-                  position: absolute !important; left: 0 !important; top: 0 !important;
-                  background: #ffffff !important; padding: 0 !important; overflow: visible !important;
-                  display: block !important;
-                }
-                .settlement-print-sheet {
-                  box-shadow: none !important; border: none !important; max-width: none !important;
-                  background: #ffffff !important; color: #000000 !important;
-                  margin: 0 !important; padding: 0 !important;
-                }
-                .settlement-print-sheet * { color: #000000 !important; background: transparent !important; border-color: #cccccc !important; }
-                .settlement-print-hide { display: none !important; }
-                .settlement-print-line { border-bottom: 1px solid #cccccc !important; }
-              }
-            `}</style>
-
-            {/* Floating chrome — Print + Close. Hidden in print. */}
-            <div
-              className="settlement-print-hide"
-              style={{ position: 'fixed', top: S[3], right: S[3], display: 'flex', gap: S[2], zIndex: 201 }}
-            >
-              <Btn variant="primary" size="sm" onClick={() => window.print()}>Print</Btn>
-              <Btn variant="secondary" size="sm" onClick={() => setStmtForHauler(null)}>Close</Btn>
-            </div>
-
-            <div
-              className="settlement-print-sheet"
-              onClick={e => e.stopPropagation()}
-              style={{
-                background: C.bg, color: C.ink, border: `1px solid ${C.ruleHi}`, borderRadius: R.lg,
-                padding: S[6], maxWidth: 820, width: '100%', margin: 'auto',
-                boxShadow: '0 24px 48px rgba(0,0,0,0.5)',
-              }}
-            >
-              {/* Header band */}
-              <div className="settlement-print-line" style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
-                gap: S[4], paddingBottom: S[4], marginBottom: S[5], borderBottom: `1px solid ${C.rule}`, flexWrap: 'wrap',
-              }}>
-                <div>
-                  <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4 }}>Settlement Statement</div>
-                  <div style={{ ...T.h3, fontWeight: 700, fontFamily: F.mono, color: C.ink }}>{stmtNumber}</div>
-                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-                    Date <span style={{ fontFamily: F.mono, color: C.ink }}>{stmtDate}</span>
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right', maxWidth: 360 }}>
-                  <div style={{ ...T.caption, color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4 }}>Haul</div>
-                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{haulTitle}</div>
-                  <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono, marginTop: 4 }}>{req.id}</div>
-                </div>
-              </div>
-
-              {/* PAYER / PAYEE block */}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: S[5], marginBottom: S[5] }}>
-                <div>
-                  <Label style={{ marginBottom: S[2] }}>From (payer)</Label>
-                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{JSE_INVOICE_ISSUER.name}</div>
-                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
-                    {JSE_INVOICE_ISSUER.contactName}<br />
-                    ☎ {JSE_INVOICE_ISSUER.phone}<br />
-                    ✉ {JSE_INVOICE_ISSUER.email}<br />
-                    {JSE_INVOICE_ISSUER.website}
-                  </div>
-                </div>
-                <div>
-                  <Label style={{ marginBottom: S[2] }}>Pay to (payee)</Label>
-                  <div style={{ ...T.body, color: C.ink, fontWeight: 600 }}>{settle ? settle.name : 'Unknown hauler'}</div>
-                  <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 2, lineHeight: 1.6 }}>
-                    {settle && settle.contact ? <>{settle.contact}<br /></> : null}
-                    {settle && settle.address ? <>{settle.address}<br /></> : null}
-                    {settle && settle.phone ? <>☎ {settle.phone}<br /></> : null}
-                    {settle && settle.email ? <>✉ {settle.email}</> : null}
-                  </div>
-                </div>
-              </div>
-
-              {/* Line items table */}
-              <Label style={{ marginBottom: S[2] }}>Line items</Label>
-              <div style={{ marginBottom: S[5], border: `1px solid ${C.rule}`, borderRadius: R.md, overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 600 }}>
-                  <thead>
-                    <tr style={{ background: C.surfaceHi }}>
-                      <Th>Truck</Th>
-                      <Th>Date</Th>
-                      <Th align="right">Hours</Th>
-                      <Th align="right">Rate / hr</Th>
-                      <Th align="right">Amount</Th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {lines.length === 0 ? (
-                      <tr>
-                        <td colSpan="5" style={{ ...T.bodySm, textAlign: 'center', padding: S[4], color: C.inkDim }}>
-                          No hours logged for this hauler on this job yet.
-                        </td>
-                      </tr>
-                    ) : lines.map(li => (
-                      <tr key={li.key} className="settlement-print-line" style={{ borderBottom: `1px solid ${C.rule}` }}>
-                        <Td>
-                          <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600, fontFamily: F.mono }}>#{li.truckPlate}</div>
-                          <div style={{ ...T.caption, color: C.inkDim }}>{li.truckType}</div>
-                        </Td>
-                        <Td mono>{li.date}</Td>
-                        <Td align="right" mono>{li.hours.toFixed(2)}</Td>
-                        <Td align="right" mono>{fmtMoneyStmt(li.rate)}</Td>
-                        <Td align="right" mono>{fmtMoneyStmt(li.amount)}</Td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Totals */}
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: S[5] }}>
-                <div style={{ minWidth: 280 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: S[2], ...T.bodySm, color: C.inkDim }}>
-                    <span>Subtotal</span><span style={{ fontFamily: F.mono, color: C.ink }}>{fmtMoneyStmt(subtotal)}</span>
-                  </div>
-                  <div
-                    className="settlement-print-line"
-                    style={{ display: 'flex', justifyContent: 'space-between', padding: S[3], borderTop: `1px solid ${C.rule}`, ...T.h4, fontWeight: 700, color: C.ink }}
-                  >
-                    <span>Total payout owed</span><span style={{ fontFamily: F.mono }}>{fmtMoneyStmt(subtotal)}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Footer */}
-              <div
-                className="settlement-print-line"
-                style={{ ...T.caption, color: C.inkFaint, textAlign: 'center', marginTop: S[5], paddingTop: S[3], borderTop: `1px solid ${C.rule}`, lineHeight: 1.6 }}
-              >
-                Pay by check — make payable to <span style={{ color: C.ink, fontWeight: 600 }}>{settle ? settle.name : '—'}</span>.<br />
-                Generated by {JSE_INVOICE_ISSUER.name} · {JSE_INVOICE_ISSUER.website}
-              </div>
-            </div>
-          </div>
-        );
-      })()}
 
       {/* 2026-05-30 (Commit D): shared dispatcher-style drawer. Opens
           when an assignment-tile truck plate is clicked. */}
