@@ -14539,7 +14539,13 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
            gone; one card render to maintain. */
         <div className="jse-active-trucks-grid" style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          // 2026-06-01 (v2): auto-fill (was auto-fit). auto-fit collapses
+          // empty tracks so a single-card row stretches the card to full
+          // viewport width — fine for Dispatch Overview's flat grid when
+          // it's full, but jarring when it shows 1-2 cards. auto-fill
+          // keeps the tracks so cards stay at their natural ~320-350px
+          // width even when the row is sparse.
+          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
           gap: S[2],
           marginBottom: S[5],
         }}>
@@ -15967,7 +15973,19 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                    gridColumn '1 / -1'. */
                 <div key={dk} className="jse-active-trucks-grid" style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                  // 2026-06-01 (v2): auto-fill (was auto-fit). The Dispatch
+                  // tab structure forces a new row after each hauler
+                  // subheader (full-width via gridColumn '1 / -1'), so
+                  // a hauler with 1 card ends up alone in its row. With
+                  // auto-fit + 1fr, that single card stretched edge-to-edge
+                  // — Robert's screenshotted regression. auto-fill keeps
+                  // the empty tracks so the card stays at ~320-350px width.
+                  // Two single-card haulers on the same date still each
+                  // occupy their own row (the subheader forces it), but
+                  // each card is now properly sized — and within a single
+                  // hauler with multiple cards, the cards still flow into
+                  // 2/3/N columns as expected.
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
                   gap: S[2],
                   rowGap: S[2],
                 }}>
