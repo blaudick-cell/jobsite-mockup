@@ -7151,6 +7151,18 @@ function AdminReports({ db, navigate }) {
 // Haul Requests — admin views (v3)
 // =====================================================================
 function AdminHaulRequests({ db, setDb, navigate, hash }) {
+  // 2026-06-01: Split this component's render into two MODES based on the
+  // active route. Was a single combined page (Overview embed at the top,
+  // jobs list at the bottom). Robert's nav expectation:
+  //   /admin            → Dispatch Overview only (live drivers + map + weather)
+  //   /admin/jobs (or /admin/requests, legacy) → Jobs list only (filter +
+  //     Pending/Active/Completed sections + "+ New job")
+  // Both routes still resolve to this component; the mode flag changes
+  // which sections render so the bug — "tap Jobs, land on Overview" —
+  // goes away while preserving all the existing filter/section logic.
+  const parts = (hash || '').split('?')[0].split('/').filter(Boolean);
+  const isJobsList = parts.length >= 2 && (parts[1] === 'jobs' || parts[1] === 'requests');
+  const isOverview = !isJobsList;
   const requests = db.haulRequests || [];
   // 2026-05-25: Projects entity dropped. The legacy `?projectId=` filter is
   // gone — hauls are flat. HaulProjectRedirect still strips a legacy
@@ -7411,7 +7423,7 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
 
   return (
     <div style={{ padding: S[6], maxWidth: 1480, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Dispatch Overview' }]} navigate={navigate} />
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: isJobsList ? 'Jobs' : 'Dispatch Overview' }]} navigate={navigate} />
       {filterProject && (
         <div style={{ marginBottom: S[3], display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
           <div style={{
@@ -7433,102 +7445,94 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
       )}
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: S[5], gap: S[3], flexWrap: 'wrap' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 6 }}>
-            <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: C.ok, boxShadow: `0 0 0 0 ${C.ok}`, animation: 'jse-pulse 1.6s ease-out infinite' }} />
-            <Label color={C.accent} style={{ margin: 0 }}>Live · dispatch marketplace</Label>
-            <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· {db.haulers.length} haulers connected · GPS active · updated 8s ago</span>
-          </div>
-          <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Dispatch Overview</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Active drivers up top with capacity at a glance; haul requests list below.</div>
+          {isOverview ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: S[2], marginBottom: 6 }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: '50%', background: C.ok, boxShadow: `0 0 0 0 ${C.ok}`, animation: 'jse-pulse 1.6s ease-out infinite' }} />
+                <Label color={C.accent} style={{ margin: 0 }}>Live · dispatch marketplace</Label>
+                <span style={{ ...T.caption, color: C.inkFaint, fontFamily: F.mono }}>· {db.haulers.length} haulers connected · GPS active · updated 8s ago</span>
+              </div>
+              <style>{`@keyframes jse-pulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,0.55); } 70% { box-shadow: 0 0 0 8px rgba(34,197,94,0); } 100% { box-shadow: 0 0 0 0 rgba(34,197,94,0); } }`}</style>
+              <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Dispatch Overview</h1>
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Match incoming demand to available trucks. Active drivers up top with capacity at a glance.</div>
+            </>
+          ) : (
+            <>
+              <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Jobs</h1>
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>Every haul request, by status. Filter, search, click to open.</div>
+            </>
+          )}
         </div>
-        <Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>
+        <Btn variant="primary" onClick={() => navigate('/admin/jobs/new')}>+ New job</Btn>
       </div>
 
-      {/* 2026-05-30 (Active Drivers @ top, reshuffled): Robert moved
-          the capacity-limits feature back into the active-only
-          DriverActivityTable (one section, table format, not the
-          cards-format strip). Header summary + CY/load column give
-          dispatchers "do I have capacity for this incoming haul?" at
-          a glance. The standalone <ActiveDriversCapacityStrip /> that
-          briefly sat here was superseded by these two props on the
-          shared table. */}
-      {/* 2026-05-31: Dispatch Overview embed carries the same filter
-          pills as the Dispatch tab + caps visible cards at 5 (newest
-          first) + a "View all in Dispatch →" link that passes the
-          current filter through as a query string.
-          2026-06-01: `showCapacitySummary` removed — the 4-tile strip
-          (Active drivers / Capacity CY / CY today / Billed today) was
-          reporting numbers Robert flagged as inaccurate. The computation
-          logic stays in DriverActivityTable so the tiles can be
-          re-enabled once the math is fixed; only this mount point is
-          unmounted. */}
-      <DriverActivityTable
-        db={db}
-        navigate={navigate}
-        showFilterPills
-        maxRows={5}
-        viewAllHref="/admin/dispatch"
-      />
-
-      {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
-          desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. */}
-      <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
-        <div style={{ minWidth: 0 }}>
-          <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <SiteConditionsCard />
-        </div>
-      </div>
-
-      {/* 2026-05-30: 6-card "Operations KPI strip" deleted per Robert —
-          numbers were derived from mock fields not tied to the canonical
-          driver_sessions / truck_events store. Hauling Overview now
-          leads with the active-only DriverActivityTable + capacity
-          summary header, then map+weather, then haul requests. */}
-
-      {/* Filter / sort bar */}
-      <Card padding={S[3]} style={{ marginBottom: S[5] }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-          <input
-            type="search"
-            value={search}
-            onChange={ev => setSearch(ev.target.value)}
-            placeholder="Search by id, haul, GC, or location…"
-            style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+      {isOverview && (
+        <>
+          {/* Overview-only: live drivers table (capped at 5) + map + weather.
+              Jobs list view (/admin/jobs) deliberately omits these — they
+              belong on the dashboard, not the listing page. */}
+          <DriverActivityTable
+            db={db}
+            navigate={navigate}
+            showFilterPills
+            maxRows={5}
+            viewAllHref="/admin/dispatch"
           />
-          <select value={statusFilter} onChange={ev => setStatusFilter(ev.target.value)} style={inputStyle}>
-            <option value="all">All status</option>
-            <option value="pending">Pending</option>
-            <option value="matched">Matched</option>
-            <option value="accepted">Accepted</option>
-            <option value="completed">Completed</option>
-          </select>
-          <select value={materialFilter} onChange={ev => setMaterialFilter(ev.target.value)} style={inputStyle}>
-            {materialOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-          <select value={priorityFilter} onChange={ev => setPriorityFilter(ev.target.value)} style={inputStyle}>
-            <option value="all">All priority</option>
-            <option value="critical">Critical</option>
-            <option value="high">High</option>
-            <option value="normal">Normal</option>
-            <option value="scheduled">Scheduled</option>
-          </select>
-          <div style={{ ...T.caption, color: C.inkDim, marginLeft: 'auto' }}>{filtered.length} of {enriched.length} requests</div>
-        </div>
-      </Card>
 
-      {/* 2026-05-25: Side-rail (Recommended Matches + Dispatch Activity)
-          removed. a3436d8 already killed NEEDS ATTENTION + LIVE TRUCK
-          ACTIVITY; this commit completes the cleanup by dropping the two
-          remaining dashboard tiles per Robert's spec. Pending/Active/
-          Completed sections now span full width. */}
-      <div>
-        <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending requests match the filters." />
-        <Section label="Active"    color={C.accent} rows={active}    emptyText="No active matches." />
-        <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed requests yet." />
-      </div>
+          {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
+              desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. */}
+          <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
+            <div style={{ minWidth: 0 }}>
+              <LiveOperationsTileMap db={db} setDb={setDb} navigate={navigate} />
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <SiteConditionsCard />
+            </div>
+          </div>
+        </>
+      )}
+
+      {isJobsList && (
+        <>
+          {/* Jobs-list-only: filter/sort bar + 3 status sections.
+              Overview deliberately omits these — the list lives at /admin/jobs. */}
+          <Card padding={S[3]} style={{ marginBottom: S[5] }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+              <input
+                type="search"
+                value={search}
+                onChange={ev => setSearch(ev.target.value)}
+                placeholder="Search by id, job, contractor, or location…"
+                style={{ ...inputStyle, flex: 1, minWidth: 220 }}
+              />
+              <select value={statusFilter} onChange={ev => setStatusFilter(ev.target.value)} style={inputStyle}>
+                <option value="all">All status</option>
+                <option value="pending">Pending</option>
+                <option value="matched">Matched</option>
+                <option value="accepted">Accepted</option>
+                <option value="completed">Completed</option>
+              </select>
+              <select value={materialFilter} onChange={ev => setMaterialFilter(ev.target.value)} style={inputStyle}>
+                {materialOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <select value={priorityFilter} onChange={ev => setPriorityFilter(ev.target.value)} style={inputStyle}>
+                <option value="all">All priority</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="scheduled">Scheduled</option>
+              </select>
+              <div style={{ ...T.caption, color: C.inkDim, marginLeft: 'auto' }}>{filtered.length} of {enriched.length} jobs</div>
+            </div>
+          </Card>
+
+          <div>
+            <Section label="Pending"   color={C.warn}   rows={pending}   emptyText="No pending jobs match the filters." />
+            <Section label="Active"    color={C.accent} rows={active}    emptyText="No active jobs." />
+            <Section label="Completed" color={C.inkDim} rows={completed} emptyText="No completed jobs yet." />
+          </div>
+        </>
+      )}
     </div>
   );
 }
