@@ -8678,6 +8678,63 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     ));
     return true;
   };
+
+  // 2026-06-02: Inline-editable haul_requests.status. Dispatcher
+  // surface accepts three buckets — Pending / Active / Completed —
+  // mapping to the canonical enum (pending / matched / completed).
+  // The legacy 'accepted' state still groups under "Active" on the
+  // Jobs list, so switching from 'accepted' → 'matched' via this
+  // dropdown is a no-op visually (both display as "Active") but
+  // canonicalises the row's enum.
+  const displayStatus = (s) => {
+    if (s === 'pending') return 'Pending';
+    if (s === 'matched' || s === 'accepted') return 'Active';
+    if (s === 'completed') return 'Completed';
+    return s || 'Pending';
+  };
+  const STATUS_TONES = {
+    Pending:   { color: C.warn,   bg: C.warnSoft,   value: 'pending'  },
+    Active:    { color: C.accent, bg: C.accentSoft, value: 'matched'  },
+    Completed: { color: C.inkDim, bg: 'rgba(255,255,255,0.06)', value: 'completed' },
+  };
+  const saveStatus = (nextBucket) => {
+    const tone = STATUS_TONES[nextBucket];
+    if (!tone) return false;
+    const curRaw = req.status || 'pending';
+    const curDisplay = displayStatus(curRaw);
+    if (curDisplay === nextBucket) return false;
+    const nextRaw = tone.value;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, status: nextRaw } : r) },
+      { type: 'haul_request.statusChanged', actorRole: 'admin', actorId: null,
+        summary: `Status changed: ${curDisplay} → ${nextBucket} on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
+    ));
+    return true;
+  };
+
+  // 2026-06-02: Inline-editable haul_requests.assigned_hauler_id.
+  // Same write path as the Trucking section dropdown (line ~8451),
+  // exposed on the top-of-page Contractor tile so the dispatcher can
+  // change the assigned hauler without scrolling into the Trucking
+  // section. Cascade is INTENTIONALLY one-way: changing the job's
+  // assignedHaulerId does NOT auto-reassign sessions linked to this
+  // haul via haul_id. Driver_sessions.hauler_id stays per-session,
+  // dispatcher can re-cascade manually from the session drawer.
+  const saveAssignedHauler = (nextHaulerId) => {
+    const prevId = req.assignedHaulerId || null;
+    const next = nextHaulerId || null;
+    if (next === prevId) return false;
+    const prevName = prevId ? ((db.haulers || []).find(h => h.id === prevId) || {}).name : null;
+    const nextName = next   ? ((db.haulers || []).find(h => h.id === next)   || {}).name : null;
+    setDb(prev => appendActivity(
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, assignedHaulerId: next } : r) },
+      { type: 'haul_request.contractorChanged', actorRole: 'admin', actorId: null,
+        summary: `Contractor changed: ${prevName || '—'} → ${nextName || '—'} on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
+    ));
+    return true;
+  };
   // v22: HAS/NEEDS toggle. Direction lives on project.haulType (was on
   // project only -- req inherits). Flipping it from a haul-request page
   // updates the parent project so every req under it stays consistent.
@@ -9449,25 +9506,51 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             </div>
           </div>
 
-          {/* Contractor — falls back to req.contractorName on flat hauls */}
+          {/* Contractor — assigned-hauler dropdown. Same data path as the
+              Trucking-section dropdown (line ~8451): writes req.assignedHaulerId
+              and the legacy "Contractor / Dispatcher" pill on cards / lists
+              follows. Sorted alpha; "— Unassigned —" sits at the top. */}
           <div>
             <Label color={C.inkDim}>Contractor</Label>
             <div style={{ marginTop: 4 }}>
-              <div style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{project && project.gc ? project.gc : (req.contractorName || '—')}</div>
+              <select
+                value={req.assignedHaulerId || ''}
+                onChange={(e) => saveAssignedHauler(e.target.value || null)}
+                aria-label="Assigned contractor / dispatcher"
+                style={{
+                  ...T.bodySm, fontWeight: 600,
+                  background: C.surface, color: C.ink,
+                  border: `1px solid ${C.ruleHi}`, borderRadius: R.sm,
+                  padding: '4px 8px', cursor: 'pointer',
+                  fontFamily: F.body, outline: 'none',
+                  maxWidth: '100%',
+                }}>
+                <option value="">— Unassigned —</option>
+                {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
+                  <option key={h.id} value={h.id}>{h.name}</option>
+                ))}
+              </select>
               <div style={{ ...T.caption, color: C.inkDim, marginTop: 2, display: 'flex', gap: S[2], flexWrap: 'wrap', alignItems: 'center' }}>
-                <span>{project && project.contactName ? project.contactName : '—'}</span>
-                {project && project.contactPhone ? (
-                  <a href={'tel:' + project.contactPhone}
-                    style={{ color: C.inkDim, textDecoration: 'none' }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {project.contactPhone}</a>
-                ) : null}
-                {project && project.contactEmail ? (
-                  <a href={'mailto:' + project.contactEmail}
-                    style={{ color: C.inkDim, textDecoration: 'none' }}
-                    onMouseEnter={e => e.currentTarget.style.color = C.accent}
-                    onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {project.contactEmail}</a>
-                ) : null}
+                {(() => {
+                  const h = req.assignedHaulerId ? (db.haulers || []).find(x => x.id === req.assignedHaulerId) : null;
+                  if (!h) return <span style={{ color: C.inkFaint }}>—</span>;
+                  return (
+                    <>
+                      {h.phone ? (
+                        <a href={'tel:' + h.phone}
+                          style={{ color: C.inkDim, textDecoration: 'none' }}
+                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>☎ {h.phone}</a>
+                      ) : null}
+                      {h.email ? (
+                        <a href={'mailto:' + h.email}
+                          style={{ color: C.inkDim, textDecoration: 'none' }}
+                          onMouseEnter={e => e.currentTarget.style.color = C.accent}
+                          onMouseLeave={e => e.currentTarget.style.color = C.inkDim}>✉ {h.email}</a>
+                      ) : null}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -9513,7 +9596,33 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                     {req.volumeCY ?? '—'} CY of {materialLabel(req.materialCode)}
                   </div>
                 )}
-                <div style={{ marginLeft: 'auto' }}><StatusPill status={req.status} /></div>
+                {/* 2026-06-02: editable status — dispatcher buckets the
+                    job into Pending / Active / Completed. Color-coded
+                    options match the section header tones on the Jobs
+                    list, so a Pending → Active flip on the detail page
+                    visually moves the row to the Active section. */}
+                <div style={{ marginLeft: 'auto' }}>
+                  {(() => {
+                    const bucket = displayStatus(req.status);
+                    const tone = STATUS_TONES[bucket] || STATUS_TONES.Pending;
+                    return (
+                      <select value={bucket}
+                        onChange={(e) => saveStatus(e.target.value)}
+                        aria-label="Job status"
+                        style={{
+                          ...T.bodySm, fontWeight: 700, letterSpacing: 0.4, textTransform: 'uppercase',
+                          background: tone.bg, color: tone.color,
+                          border: `1px solid ${tone.color}`, borderRadius: R.pill,
+                          padding: '4px 10px', cursor: 'pointer',
+                          fontFamily: F.mono, fontSize: 11, outline: 'none',
+                        }}>
+                        {Object.keys(STATUS_TONES).map(k => (
+                          <option key={k} value={k}>{k}</option>
+                        ))}
+                      </select>
+                    );
+                  })()}
+                </div>
               </div>
 
               {/* Inline route + request metadata — derives endpoint from
