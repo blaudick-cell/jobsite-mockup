@@ -324,14 +324,19 @@
       from { opacity: 0; }
       to   { opacity: 1; }
     }
+    /* 2026-06-01: backdrop+drawer z-indexes bumped 80/90 → 200/210 so they
+       sit unambiguously above every sticky page element (Dispatch filter
+       row at 50, stat-cards-sticky at 30). The Topbar that mounts the
+       drawer was also lifted to z-index 100 so its stacking context is
+       above sticky filter rows in DOM-sibling tie-breaks. */
     .admin-drawer-backdrop {
       position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-      z-index: 80; animation: adminDrawerFade 180ms ease-out;
+      z-index: 200; animation: adminDrawerFade 180ms ease-out;
     }
     .admin-drawer {
       position: fixed; top: 0; left: 0; bottom: 0;
       width: 280px; background: #141414; border-right: 1px solid #1F1F1F;
-      z-index: 90; padding: 16px; box-sizing: border-box;
+      z-index: 210; padding: 16px; box-sizing: border-box;
       animation: adminDrawerSlideIn 200ms ease-out;
       overflow-y: auto;
     }
@@ -343,13 +348,13 @@
     }
     .chrome-drawer-backdrop {
       position: fixed; inset: 0; background: rgba(0,0,0,0.55);
-      z-index: 80; animation: adminDrawerFade 180ms ease-out;
+      z-index: 200; animation: adminDrawerFade 180ms ease-out;
     }
     .chrome-drawer {
       position: fixed; top: 0; right: 0; bottom: 0;
       width: 300px; max-width: 90vw;
       background: #141414; border-left: 1px solid #1F1F1F;
-      z-index: 90; padding: 16px; box-sizing: border-box;
+      z-index: 210; padding: 16px; box-sizing: border-box;
       animation: chromeDrawerSlideIn 200ms ease-out;
       overflow-y: auto;
       display: flex; flex-direction: column;
@@ -1392,7 +1397,13 @@ function Topbar({ navigate, role, current, right }) {
     <div className="topbar" style={{
       borderBottom: `1px solid ${C.rule}`, padding: `${S[3]}px ${S[5]}px`,
       display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[5],
-      background: C.bg, position: 'sticky', top: 0, zIndex: 50,
+      // 2026-06-01: Topbar's z-index lifted from 50 → 100 so its stacking
+      // context (which contains the hamburger button AND the slide-in
+      // drawer/backdrop) sits above every other sticky page element. The
+      // Dispatch tab's filter pill row is also position:sticky at z-index
+      // 50; before this fix both contexts tied at 50 and the later one in
+      // DOM order (the filter row) bled through the open drawer.
+      background: C.bg, position: 'sticky', top: 0, zIndex: 100,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: S[5] }}>
         <button onClick={() => navigate('/')} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer' }}>
