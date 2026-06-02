@@ -2443,11 +2443,21 @@ function assignedTruckCountForRequest(req) {
 }
 
 function haulTypeForReq(state, req) {
-  if (!req || !state || !state.projects) return 'NEEDS';
-  const proj = state.projects.find(p => p.id === req.projectId);
-  if (proj && proj.haulType === 'HAS') return 'HAS';
-  if (proj && proj.haulType === 'NEEDS') return 'NEEDS';
-  return 'NEEDS';
+  if (!req) return 'NEEDS';
+  // 2026-06-02: prefer the explicit haul_requests.haul_type column (added
+  // by the haul_requests_add_haul_type migration). Falls back to the
+  // legacy project.haulType lookup for any row still tied to a Projects
+  // entity (entity was dropped 2026-05-25 so this path is dormant), then
+  // to materialDirection() so new hauls without an explicit value still
+  // pick a sensible default (Concrete / Asphalt Millings / Spoils / Rip
+  // Rap = HAS, everything else = NEEDS).
+  if (req.haulType === 'HAS' || req.haulType === 'NEEDS') return req.haulType;
+  if (state && state.projects) {
+    const proj = state.projects.find(p => p.id === req.projectId);
+    if (proj && proj.haulType === 'HAS') return 'HAS';
+    if (proj && proj.haulType === 'NEEDS') return 'NEEDS';
+  }
+  return materialDirection(req.materialCode) === 'export' ? 'HAS' : 'NEEDS';
 }
 
 // HAS/NEEDS pill — green for NEEDS, orange for HAS. Optional onClick makes
@@ -3313,7 +3323,7 @@ const SB_FIELDS_JS = {
   // formal "primary hauler on this haul" pointer. matchedHaulerId stays
   // for legacy back-compat (the matched-by-truck flow); assigned_hauler_id
   // is what new dispatcher-driven workflows write to.
-  haulRequests: ['id','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','assignedHaulerId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess'],
+  haulRequests: ['id','contractorName','projectLabel','materialCode','volumeCY','requestedAt','status','matchedHaulerId','matchedTruckId','assignedHaulerId','acceptedByDriver','passedBy','notes','assignments','pickupLocation','dropoffLocation','timing','siteAccess','haulType'],
   activity:     ['id','type','actorRole','actorId','summary','refId','timestamp'],
 };
 
@@ -7279,8 +7289,15 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
       // 2026-06-02 (donut card): cyHauled aggregated from live
       // driver_sessions (haul_id = r.id); direction picks the donut
       // color + the "Needs" / "Exports" verb prefix.
+      // 2026-06-02 (haul_type column): direction sources the new
+      // haul_requests.haul_type column when set, falls back to
+      // materialDirection (Concrete / Asphalt / Spoils / Rip Rap →
+      // export, else import). Dispatcher's pill toggle on the detail
+      // page writes haul_type directly so this re-reads correctly.
       cyHauled: cyByHaulId.get(r.id) || 0,
-      direction: materialDirection(r.materialCode),
+      direction: r.haulType === 'HAS' ? 'export'
+               : r.haulType === 'NEEDS' ? 'import'
+               : materialDirection(r.materialCode),
     };
   });
 
@@ -8896,20 +8913,22 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     ));
     return true;
   };
-  // v22: HAS/NEEDS toggle. Direction lives on project.haulType (was on
-  // project only -- req inherits). Flipping it from a haul-request page
-  // updates the parent project so every req under it stays consistent.
-  // Cheaper than threading a separate req.haulType column through the
-  // Supabase schema, and matches user mental model (a project is one or
-  // the other, not a mix). Emits a project.updated activity entry.
+  // 2026-06-02 (v23): HAS / NEEDS lives on haul_requests.haul_type now —
+  // a real column added in the haul_requests_add_haul_type migration.
+  // Was a no-op since 2026-05-25 when the Projects entity got dropped
+  // (the old toggle wrote to project.haulType but every req.projectId
+  // was null after the unwind). saveHaulType writes the toggled value
+  // directly to the haul row via setDb→syncDbToCloud diff path; the
+  // marketplace card donut + Needs/Has verb prefix re-read through
+  // haulTypeForReq() so flipping here propagates everywhere.
   const projectHaulType = haulTypeForReq(db, req);
   const toggleProjectHaulType = () => {
-    if (!project) return;
     const next = projectHaulType === 'HAS' ? 'NEEDS' : 'HAS';
     setDb(prev => appendActivity(
-      { ...prev, projects: prev.projects.map(p => p.id === project.id ? { ...p, haulType: next } : p) },
-      { type: 'project.updated', actorRole: 'admin', actorId: null,
-        summary: `Admin set ${project.name} direction to ${next}`, refId: project.id }
+      { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, haulType: next } : r) },
+      { type: 'haul_request.haulTypeChanged', actorRole: 'admin', actorId: null,
+        summary: `Direction changed: ${projectHaulType} → ${next} on ${haulRequestLabel(db, req) || req.id}`,
+        refId: req.id }
     ));
   };
   // v20: delete the entire haul request from the combined tile's edit mode.
@@ -9746,7 +9765,11 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             {/* LEFT — title, route, progress + metrics + stat-card pair */}
             <div style={{ flex: '1 1 320px', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
-                <HasNeedsPill type={projectHaulType} fontSize={20} onClick={isEditing ? toggleProjectHaulType : undefined} />
+                {/* 2026-06-02: pill is now ALWAYS clickable, not just in
+                    edit mode. The swap-arrows glyph implies "swappable"
+                    and Robert wants the dispatcher to flip direction
+                    without entering edit mode first. */}
+                <HasNeedsPill type={projectHaulType} fontSize={20} onClick={toggleProjectHaulType} />
                 {isEditing ? (
                   <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', margin: 0 }}>
                     <input type="number" min="1" step="1"
