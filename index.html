@@ -14645,7 +14645,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
            gone; one card render to maintain. */
         <div className="jse-active-trucks-grid" style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
           gap: S[2],
           marginBottom: S[5],
         }}>
@@ -16010,14 +16010,22 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
               const dateBuckets = byDate.get(dk);
               const haulerGroups = haulerSubGroupsForDate(dateBuckets);
               return (
-                <div key={dk}>
-                  {/* 2026-05-31 (Dispatch refactor): compressed date header.
-                      Was T.h3 + 2px accent rule + S[4] margin. Now T.bodySm
-                      with inline bullet separator, 1px subtle rule, much
-                      tighter. */}
+                /* 2026-06-01: ONE grid per date instead of per-hauler.
+                   Auto-fit minmax(320px, 1fr) so cards wrap to 2-3 columns
+                   on wider viewports regardless of hauler grouping. Date
+                   header + hauler subheaders span the full row via
+                   gridColumn '1 / -1'. */
+                <div key={dk} className="jse-active-trucks-grid" style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+                  gap: S[2],
+                  rowGap: S[2],
+                }}>
+                  {/* Date header — spans full width as a section divider. */}
                   <div style={{
+                    gridColumn: '1 / -1',
                     display: 'flex', alignItems: 'baseline', gap: 6,
-                    paddingBottom: 3, marginBottom: S[2],
+                    paddingBottom: 3,
                     borderBottom: `1px solid ${C.rule}`,
                   }}>
                     <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink, fontFamily: F.mono, letterSpacing: 0.2 }}>
@@ -16027,54 +16035,51 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
                       • {dateBuckets.length} Session{dateBuckets.length === 1 ? '' : 's'}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: S[3] }}>
-                    {haulerGroups.map(({ key, cards, isUnassigned, originalDisplay }) => (
-                      <div key={key}>
-                        {/* Hauler sub-header — smaller, tighter spacing */}
-                        <div style={{
-                          display: 'flex', alignItems: 'baseline', gap: 4,
-                          marginBottom: 4,
-                        }}>
-                          <div style={{ ...T.micro, fontWeight: 700,
-                                        color: isUnassigned ? C.inkFaint : C.inkDim,
-                                        letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 10 }}>
-                            {originalDisplay}
-                          </div>
-                          <div style={{ ...T.micro, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, fontSize: 10 }}>
-                            · {cards.length}
-                          </div>
+                  {haulerGroups.map(({ key, cards, isUnassigned, originalDisplay }) => (
+                    <React.Fragment key={key}>
+                      {/* Hauler subheader — spans full width as a section
+                          divider, then cards below take their natural grid
+                          cells (so a single-card hauler doesn't force a
+                          new row in isolation: the next hauler's
+                          subheader still drops below it). */}
+                      <div style={{
+                        gridColumn: '1 / -1',
+                        display: 'flex', alignItems: 'baseline', gap: 4,
+                        marginTop: S[2],
+                      }}>
+                        <div style={{ ...T.micro, fontWeight: 700,
+                                      color: isUnassigned ? C.inkFaint : C.inkDim,
+                                      letterSpacing: 0.5, textTransform: 'uppercase', fontSize: 10 }}>
+                          {originalDisplay}
                         </div>
-                        <div className="jse-active-trucks-grid" style={{
-                          display: 'grid',
-                          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-                          gap: S[2],
-                        }}>
-                          {cards.map(b => (
-                            <ActiveTruckCard
-                              key={b.session.id}
-                              b={b}
-                              trucksById={trucksById}
-                              live={live}
-                              db={db}
-                              onOpenDrawer={(eventId) => {
-                                setDrawerScrollEventId(eventId || null);
-                                setDrawerSessionId(b.session.id);
-                              }}
-                              onEdit={() => {
-                                setDrawerScrollEventId(null);
-                                setDrawerSessionId(b.session.id);
-                              }}
-                              onDelete={() => setDeleteConfirmFor(b)}
-                              fmtClock={fmtClock}
-                              fmtElapsed={fmtElapsed}
-                              eventLabel={eventLabel}
-                              eventColor={eventColor}
-                            />
-                          ))}
+                        <div style={{ ...T.micro, color: C.inkFaint, fontFamily: F.mono, letterSpacing: 0.4, fontSize: 10 }}>
+                          · {cards.length}
                         </div>
                       </div>
-                    ))}
-                  </div>
+                      {cards.map(b => (
+                        <ActiveTruckCard
+                          key={b.session.id}
+                          b={b}
+                          trucksById={trucksById}
+                          live={live}
+                          db={db}
+                          onOpenDrawer={(eventId) => {
+                            setDrawerScrollEventId(eventId || null);
+                            setDrawerSessionId(b.session.id);
+                          }}
+                          onEdit={() => {
+                            setDrawerScrollEventId(null);
+                            setDrawerSessionId(b.session.id);
+                          }}
+                          onDelete={() => setDeleteConfirmFor(b)}
+                          fmtClock={fmtClock}
+                          fmtElapsed={fmtElapsed}
+                          eventLabel={eventLabel}
+                          eventColor={eventColor}
+                        />
+                      ))}
+                    </React.Fragment>
+                  ))}
                 </div>
               );
             })}
