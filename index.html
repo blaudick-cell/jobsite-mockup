@@ -7174,19 +7174,20 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [materialFilter, setMaterialFilter] = useState('all');
-  const [priorityFilter, setPriorityFilter] = useState('all');
 
-  // === Helpers — convert HH:MM to minutes since midnight, compute waiting age ===
-  const hhmmToMin = (t) => {
-    if (!t || typeof t !== 'string' || !t.includes(':')) return 0;
-    const [h, m] = t.split(':').map(Number);
-    return h * 60 + m;
-  };
-  const now = new Date();
-  const nowMin = now.getHours() * 60 + now.getMinutes();
+  // 2026-06-01: Fake-indicator audit. Deleted: hhmmToMin/nowMin helpers,
+  // waitingMin/trucksNeeded/trucksAssigned/priority/lifecycle/matFlow/distance
+  // enrichment fields, the priorityFilter pill row, the priTone/lifecycleTone
+  // tone maps, and the dead buildRecommendations/recTarget/recommendations/
+  // activityFeed/fmtAgo scaffolding. None of them were backed by real driver
+  // session / truck_event data — they were demo "Critical / Searching /
+  // Waiting 378 min / Requested 15:30 / ~14 mi" chrome that misled the
+  // dispatcher into reading mock numbers as production state. r.status
+  // (pending/matched/accepted/completed) and r.materialCode + r.volumeCY
+  // are still real; they keep their filter pills + Pending/Active/Completed
+  // sections + the volume + material display on each row.
   const fmtLoc = (loc) => (loc && typeof loc === 'object') ? (loc.name || loc.address || '') : (typeof loc === 'string' ? loc : '');
 
-  // === Enrich each request with derived dispatch fields ===
   const enriched = requests.map(r => {
     // 2026-05-25: project lookup deleted — synthesize a pseudo-project from
     // the haul's free-text contractor/projectLabel fields so the downstream
@@ -7195,33 +7196,8 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
       ? { id: null, name: r.projectLabel || '—', gc: r.contractorName || '', address: r.contractorAddress || '' }
       : null;
     const material = MATERIALS.find(mm => mm.code === r.materialCode);
-    const reqMin = hhmmToMin(r.requestedAt);
-    const waitingMin = Math.max(0, nowMin - reqMin);
-    const trucksNeeded = Math.max(1, Math.ceil((r.volumeCY || 0) / 18));
-    const trucksAssigned = (r.assignments || []).length || (r.matchedTruckId ? 1 : 0);
-    // Priority: critical (>30m waiting + pending), high (pending, no trucks), normal, scheduled (future request)
-    let priority = 'normal';
-    if (r.status === 'pending') {
-      if (waitingMin > 30) priority = 'critical';
-      else if (trucksAssigned === 0) priority = 'high';
-    } else if (r.status === 'completed') priority = 'scheduled';
-    // Lifecycle state for the matched/accepted bucket
-    let lifecycle = 'Searching';
-    if (r.status === 'pending')        lifecycle = trucksAssigned > 0 ? 'Matching' : 'Searching';
-    else if (r.status === 'matched')   lifecycle = 'Assigned';
-    else if (r.status === 'accepted')  lifecycle = 'En route';
-    else if (r.status === 'completed') lifecycle = 'Completed';
-    // Material flow direction
-    const matFlow = r.materialCode === 'EX' ? 'Export'
-                  : r.materialCode === 'CF' ? 'Import — Clean Fill'
-                  : r.materialCode === 'CR' ? 'Import — Aggregate'
-                  : r.materialCode === 'TS' ? 'Topsoil Transfer'
-                  : 'Transfer';
-    // Distance estimate (demo)
-    const distance = 8 + (r.id.charCodeAt(r.id.length - 1) % 28);
     return {
-      r, project, material, waitingMin, trucksNeeded, trucksAssigned,
-      priority, lifecycle, matFlow, distance,
+      r, project, material,
       pickup: fmtLoc(r.pickupLocation) || (project ? project.address : ''),
       dropoff: fmtLoc(r.dropoffLocation) || (project ? project.address : ''),
     };
@@ -7232,7 +7208,6 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
     if (projectIdFilter && e.r.projectId !== projectIdFilter) return false;
     if (statusFilter !== 'all' && e.r.status !== statusFilter) return false;
     if (materialFilter !== 'all' && e.r.materialCode !== materialFilter) return false;
-    if (priorityFilter !== 'all' && e.priority !== priorityFilter) return false;
     if (search) {
       const q = search.toLowerCase();
       const hay = (e.r.id + ' ' + (e.project ? e.project.name : '') + ' ' + (e.project ? e.project.gc : '') + ' ' + (e.material ? e.material.label : '') + ' ' + e.pickup + ' ' + e.dropoff).toLowerCase();
@@ -7253,50 +7228,6 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   // store, so they were drift-prone noise. The KPI grid JSX below the
   // map+weather block was deleted alongside.
 
-  // === Priority + lifecycle tone helpers ===
-  const priTone = (p) => ({
-    critical:  { c: C.danger || C.warn, soft: C.dangerSoft || C.warnSoft, label: 'Critical' },
-    high:      { c: C.warn,   soft: C.warnSoft, label: 'High' },
-    normal:    { c: C.accent, soft: C.accentSoft, label: 'Normal' },
-    scheduled: { c: C.info,   soft: C.infoSoft, label: 'Scheduled' },
-  }[p] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: p });
-  const lifecycleTone = (s) => ({
-    'Searching':  { c: C.warn,   soft: C.warnSoft },
-    'Matching':   { c: C.info,   soft: C.infoSoft },
-    'Assigned':   { c: C.accent, soft: C.accentSoft },
-    'En route':   { c: C.ok,     soft: C.okSoft },
-    'Completed':  { c: C.inkDim, soft: 'rgba(255,255,255,0.06)' },
-  }[s] || { c: C.inkDim, soft: 'rgba(255,255,255,0.06)' });
-
-  // === Recommended matches — derive from db.haulers/db.trucks for first pending ===
-  const buildRecommendations = (e) => {
-    if (!e) return [];
-    return db.haulers.slice(0, 5).map((h, i) => {
-      const haulerTrucks = db.trucks.filter(t => t.haulerId === h.id);
-      const active = haulerTrucks.filter(t => t.driverId && (db.hours || []).some(hr => hr.truckId === t.id && hr.status === 'open')).length;
-      const available = haulerTrucks.length - active;
-      // Stable deterministic fields per hauler
-      const minsAway = 6 + ((h.id.charCodeAt(h.id.length - 1) + i) % 22);
-      const fulfillment = 88 + ((h.id.charCodeAt(0) + i * 7) % 11);
-      const rateEst = e.material && e.material.code === 'CF' ? 125 : e.material && e.material.code === 'CR' ? 125 : e.material && e.material.code === 'TS' ? 140 : 130;
-      return { hauler: h, available, totalTrucks: haulerTrucks.length, minsAway, fulfillment, rateEst };
-    }).filter(rec => rec.available > 0).slice(0, 3);
-  };
-  const recTarget = pending[0] || enriched.find(e => e.r.status === 'pending');
-  const recommendations = buildRecommendations(recTarget);
-
-  // === Dispatch activity feed — recent events ===
-  const activityFeed = (db.activity || []).slice().sort((a, b) => b.timestamp - a.timestamp).slice(0, 8);
-  const fmtAgo = (ts) => {
-    const sec = Math.max(1, Math.floor((Date.now() - ts) / 1000));
-    if (sec < 60) return sec + ' sec ago';
-    const min = Math.floor(sec / 60);
-    if (min < 60) return min + ' min ago';
-    const hr = Math.floor(min / 60);
-    if (hr < 24) return hr + ' hr ago';
-    return Math.floor(hr / 24) + ' d ago';
-  };
-
   // === Dispatch-style row ===
   // List-page delete handler — confirm + remove from db.haulRequests + emit
   // activity event. Mirrors the detail-page `deleteHaulRequest` in
@@ -7314,8 +7245,6 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
   };
 
   const DispatchRow = ({ e, last }) => {
-    const tone = priTone(e.priority);
-    const lct  = lifecycleTone(e.lifecycle);
     return (
       <div
         onClick={() => navigate('/admin/requests/' + e.r.id)}
@@ -7350,12 +7279,8 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
           onMouseEnter={ev => { ev.currentTarget.style.color = C.warn; ev.currentTarget.style.background = C.warnSoft; }}
           onMouseLeave={ev => { ev.currentTarget.style.color = C.inkFaint; ev.currentTarget.style.background = 'transparent'; }}
         >×</button>
-        {/* LEFT — id / haul / route / requested */}
+        {/* LEFT — name / contractor / route */}
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 4 }}>
-            <Pill color={tone.c} soft={tone.soft}>{tone.label}</Pill>
-            <Pill color={lct.c} soft={lct.soft}>{e.lifecycle}</Pill>
-          </div>
           <div style={{ ...T.body, fontWeight: 700, color: C.ink, marginBottom: 2 }}>{e.project ? e.project.name : '—'}</div>
           <div style={{ ...T.caption, color: C.inkDim }}>{e.project ? e.project.gc : ''}</div>
           <div style={{ ...T.caption, color: C.inkFaint, marginTop: 6, fontFamily: F.mono, lineHeight: 1.4 }}>
@@ -7363,40 +7288,20 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             <span style={{ color: C.accent, margin: '0 4px' }}>{'→'}</span>
             <span style={{ color: C.ink }}>{e.dropoff || '—'}</span>
           </div>
-          <div style={{ ...T.caption, color: C.inkDim, marginTop: 4 }}>
-            Requested <span style={{ fontFamily: F.mono, color: C.ink }}>{e.r.requestedAt}</span>
-            <span style={{ color: C.inkFaint }}> · </span>
-            {e.r.status === 'pending'
-              ? <span style={{ color: e.waitingMin > 30 ? (C.danger || C.warn) : C.warn, fontWeight: 600 }}>Waiting {e.waitingMin} min</span>
-              : <span style={{ color: C.inkDim }}>Dispatched</span>}
-          </div>
         </div>
 
-        {/* CENTER — material / volume / trucks / distance */}
+        {/* CENTER — direction / volume / material / assigned trucks */}
         <div style={{ minWidth: 0 }}>
-          {/* v22: HAS/NEEDS + qty + material collapsed into one line. Drops
-              the previous matFlow pill ("Import -- Clean Fill", derived from
-              material code) AND the separate VOLUME label/value row. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: 6 }}>
             <HasNeedsPill type={haulTypeForReq(db, e.r)} fontSize={18} />
             <span style={{ ...T.h4, fontFamily: F.mono, fontWeight: 700, color: C.ink }}>{e.r.volumeCY} CY</span>
             <span style={{ ...T.bodySm, color: C.inkDim }}>of</span>
             <span style={{ ...T.bodySm, color: C.ink, fontWeight: 600 }}>{e.material ? e.material.label : e.r.materialCode}</span>
           </div>
-          {/* 2026-05-30 Phase 4 C2.3: per-haul CY-delivered / hours-billed /
-              progress-bar chips removed. Driver-side activity no longer rolls
-              up to a specific haul request — the row now displays only the
-              contractor-side scope (volume ordered, assignments, distance /
-              time). Per-driver / per-truck / per-hauler / per-day rollups
-              live elsewhere (AdminActiveTrucks, AdminHaulerDetail). */}
           <div style={{ ...T.caption, color: C.inkDim, fontFamily: F.mono }}>
             <span style={{ color: C.ink, fontWeight: 600 }}>{e.r.volumeCY || 0}</span> CY ordered
             <span style={{ color: C.inkFaint }}> · </span>
             <span>{assignedTruckCountForRequest(e.r)} truck{assignedTruckCountForRequest(e.r) === 1 ? '' : 's'}</span>
-            <span style={{ color: C.inkFaint }}> · </span>
-            <span>~{e.distance} mi</span>
-            <span style={{ color: C.inkFaint }}> · </span>
-            <span>~{Math.round(e.distance * 1.8)} min</span>
           </div>
         </div>
       </div>
@@ -7514,13 +7419,6 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
               </select>
               <select value={materialFilter} onChange={ev => setMaterialFilter(ev.target.value)} style={inputStyle}>
                 {materialOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <select value={priorityFilter} onChange={ev => setPriorityFilter(ev.target.value)} style={inputStyle}>
-                <option value="all">All priority</option>
-                <option value="critical">Critical</option>
-                <option value="high">High</option>
-                <option value="normal">Normal</option>
-                <option value="scheduled">Scheduled</option>
               </select>
               <div style={{ ...T.caption, color: C.inkDim, marginLeft: 'auto' }}>{filtered.length} of {enriched.length} jobs</div>
             </div>
@@ -9598,8 +9496,6 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
                       {routeMiles != null && <span style={{ fontFamily: F.mono }}>{routeMiles.toFixed(1)} mi</span>}
                       {routeMiles != null && routeMin != null && <span style={{ color: C.inkFaint }}>•</span>}
                       {routeMin != null && <span style={{ fontFamily: F.mono }}>{routeMin} min</span>}
-                      <span style={{ color: C.inkFaint }}>·</span>
-                      <span>req {req.requestedAt}</span>
                     </>
                   );
                 })()}
