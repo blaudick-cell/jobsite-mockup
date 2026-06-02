@@ -15018,6 +15018,44 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
     }
   }
 
+  // 2026-06-02 (card-header restructure): driver-name is now inline-editable
+  // on the card itself (was previously drawer-only via MetaField). Mirrors
+  // the saveCompany shape — PATCH driver_sessions.driver_name + audit line
+  // into dispatcher_notes, then applyRowPatch + refetch. Returns true on
+  // success so InlineEditableText can flash ✓; false on error → flashes ✗.
+  async function saveDriverName(nextName) {
+    const next = (nextName || '').trim() || null;
+    const prev = sess.driver_name || null;
+    if (next === prev) return true;
+    if (!next) return false;
+    try {
+      if (!_sb.ready || !_sb.client) throw new Error('Supabase not ready');
+      const cur = await _sb.client.from('driver_sessions')
+        .select('dispatcher_notes').eq('id', sess.id).single();
+      if (cur.error) throw cur.error;
+      const curNotes = (cur.data && cur.data.dispatcher_notes) || '';
+      const stamp = new Date().toLocaleTimeString('en-US', {
+        timeZone: 'America/Denver', hour: 'numeric', minute: '2-digit',
+      });
+      const auditLine = `Admin edited driver name at ${stamp} MT: '${prev || '—'}' → '${next}'`;
+      const appendedNotes = curNotes ? (curNotes + '\n\n' + auditLine) : auditLine;
+      const upd = await _sb.client.from('driver_sessions')
+        .update({ driver_name: next, dispatcher_notes: appendedNotes })
+        .eq('id', sess.id).select().single();
+      if (upd.error) throw upd.error;
+      if (live && typeof live.applyRowPatch === 'function' && upd.data) {
+        live.applyRowPatch('driver_sessions', upd.data);
+      }
+      if (live && typeof live.refetch === 'function') {
+        try { await live.refetch(); } catch (_) {}
+      }
+      return true;
+    } catch (e) {
+      console.warn('[ActiveTruckCard] saveDriverName', e);
+      return false;
+    }
+  }
+
   // 2026-06-01: saveHaulerFromCard writes both hauler_id (FK) and company
   // (legacy display column) in one PATCH. Picking "" / null clears both.
   async function saveHaulerFromCard(nextHaulerId) {
@@ -15146,19 +15184,23 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                    : companyFlash === 'saving' ? C.inkDim : null;
   const flashLabel = companyFlash === 'saved' ? '✓' : companyFlash === 'error' ? '✗' : '…';
 
-  // 2026-05-31 (Dispatch refactor): single unified card render for
-  // mobile + desktop. No more status pill, no more colored left
-  // strip — the on-shift/off-shift context is implicit from the
-  // filter selection. Visual hierarchy per Robert spec:
-  //   1. Driver name
-  //   2. Revenue
-  //   3. Hours
-  //   4. CY hauled
-  //   5. Loads completed
-  //   6. Truck type
-  //   7. Pickup / Drop-off addresses
-  //   8. Last event
-  // Tight padding throughout; goal is 2+ cards visible on iPhone.
+  // 2026-06-02 (card-header restructure per Robert spec): six-row layout.
+  //   Row 1: Driver: <name>  Dispatch: <contractor>  Job: <job>   [✎][🗑]
+  //   Row 2: <loads> Loads · <cy> CY · <hours> · $<revenue>
+  //   Row 3: ▲ Pickup: <address>
+  //   Row 4: ▼ Dropoff: <address>
+  //   Row 5: #<truck#> <truck-type> · <cy/load> CY/load · $<rate>/hr
+  //   Row 6: Last: <event> <time> · <MM/DD/YYYY>
+  // Label-prefixed identifiers replace the old "name dominant + revenue
+  // accent" header so dispatcher can scan Driver / Contractor / Job in
+  // one line; address & truck-info promoted to dedicated rows. Driver
+  // name is now inline-editable via InlineEditableText (was drawer-only
+  // through MetaField); contractor + job stay as inline-styled <select>.
+  // Edit/delete actions float top-right absolute so the wrap behaviour
+  // of the header row doesn't push them around. Pickup + Dropoff lines
+  // always render (— no location fallback when first event hasn't fired
+  // or hasn't been reverse-geocoded yet) so the card grid stays a
+  // consistent height.
   {
     const truckTypeShort = (tt) => {
       const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
@@ -15167,7 +15209,7 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
       return map[tt] || tt || '—';
     };
     const lastEvBlurb = b.lastEvent
-      ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)} • ${fmtMtDate(b.lastEvent.event_at)}`
+      ? `Last: ${eventLabel(b.lastEvent.event_type)} ${fmtClock(b.lastEvent.event_at)} · ${fmtMtDate(b.lastEvent.event_at)}`
       : 'Just clocked in';
     // 2026-06-01 (v3 card refinement): loads = completed dropoff_load
     // events only. The dispatcher cares about loads actually moved,
@@ -15192,7 +15234,11 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
       cursor: 'pointer',
       outline: 'none',
       fontFamily: F.body, fontSize: 12,
-      minWidth: 0, maxWidth: '100%',
+      // 2026-06-02 (card-header restructure): clamp closed-state select
+      // width with a finite pixel cap so a long option label (e.g.
+      // "Cobblestone Carwash · Cowgirl Demolition") can't blow out the
+      // card width on mobile. The dropdown popup still shows full names.
+      minWidth: 0, maxWidth: 180,
       textOverflow: 'ellipsis', whiteSpace: 'nowrap', overflow: 'hidden',
       backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='${encodeURIComponent(filled ? '#B3E635' : '#5A5A5A')}' d='M5 7L1 3h8z'/></svg>")`,
       backgroundRepeat: 'no-repeat', backgroundPosition: 'right center', backgroundSize: '8px 8px',
@@ -15224,6 +15270,12 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       fontSize: 14, lineHeight: 1, transition: 'opacity 120ms ease, color 120ms ease',
     };
+    const labelStyle = {
+      color: C.inkFaint, fontFamily: F.mono, fontSize: 10.5,
+      letterSpacing: 0.3, fontWeight: 500, flexShrink: 0,
+    };
+    const pickupAddr  = fmtEventLocation(firstPickup)  || '— no location';
+    const dropoffAddr = fmtEventLocation(firstDropoff) || '— no location';
     return (
       <div
         onClick={() => onOpenDrawer()}
@@ -15232,26 +15284,17 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
           background: C.surface,
           border: `1px solid ${C.rule}`,
           borderRadius: R.md,
-          padding: '7px 12px',
-          display: 'flex', flexDirection: 'column', gap: 3,
+          padding: '8px 12px',
+          display: 'flex', flexDirection: 'column', gap: 4,
+          position: 'relative',
         }}>
-        {/* Row 1: driver name (left) + revenue (right, accent) + action icons (smaller, low contrast).
-            Name dominates by font; revenue is right-aligned next; edit/delete sit furthest right at
-            low opacity so the eye lands on name and revenue first. */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-          <div style={{
-            ...T.body, fontFamily: F.display, fontSize: 16, fontWeight: 700,
-            color: C.ink, lineHeight: 1.2, letterSpacing: -0.2,
-            minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            flex: 1,
+        {/* Top-right corner: edit + delete action icons. Position-absolute so
+            the wrap behaviour of the header row never pushes them around. */}
+        {(onEdit || onDelete) && (
+          <div onClick={(e) => e.stopPropagation()} style={{
+            position: 'absolute', top: 4, right: 6,
+            display: 'flex', alignItems: 'center', gap: 2, zIndex: 1,
           }}>
-            {sess.driver_name || <span style={{ color: C.inkFaint }}>— no name</span>}
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-            <span style={{
-              fontFamily: F.mono, fontVariantNumeric: 'tabular-nums',
-              fontSize: 14, fontWeight: 700, color: C.accent, letterSpacing: -0.2,
-            }}>{fmtUsd0(dollarsToday)} <span style={{ color: C.inkDim, fontWeight: 600, fontSize: 11, letterSpacing: 0.3 }}>Revenue</span></span>
             {onEdit && (
               <button type="button" aria-label="Edit session" title="Edit session"
                 onClick={(e) => { e.stopPropagation(); onEdit(); }}
@@ -15269,18 +15312,31 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
               >🗑</button>
             )}
           </div>
-        </div>
+        )}
 
-        {/* 2026-06-01 (v3 card refinement): Contractor | Job line.
-            Dropdowns styled as inline text (appearance: none, dashed
-            underline, chevron hint) per Robert's "lower visual weight"
-            spec. Tap target stays accessible via vertical padding;
-            visual chrome drops to the minimum. */}
+        {/* Row 1: Driver / Dispatch / Job — label-prefixed inline tokens.
+            Driver = InlineEditableText. Dispatch + Job = inline <select>.
+            paddingRight reserves room for the absolute-positioned icons. */}
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
-          fontSize: 12, color: C.inkDim, flexWrap: 'wrap',
+          display: 'flex', alignItems: 'center', flexWrap: 'wrap',
+          gap: '4px 12px', fontSize: 13, paddingRight: 56, minWidth: 0,
         }}>
-          <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, maxWidth: '60%' }}>
+          <span onClick={(e) => e.stopPropagation()} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
+          }}>
+            <span style={labelStyle}>Driver:</span>
+            <InlineEditableText
+              value={sess.driver_name}
+              onSave={saveDriverName}
+              placeholder="— no name —"
+              ariaLabel="Edit driver name"
+              style={{ fontWeight: 700, color: C.ink, fontSize: 13 }}
+            />
+          </span>
+          <span onClick={(e) => e.stopPropagation()} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
+          }}>
+            <span style={labelStyle}>Dispatch:</span>
             <select value={sess.hauler_id || ''}
               onChange={(e) => saveHaulerFromCard(e.target.value || null)}
               title={sess.hauler_id ? `Assigned to: ${haulerDisplay}` : 'Assign contractor / dispatcher'}
@@ -15290,10 +15346,12 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 <option key={h.id} value={h.id}>{h.name}</option>
               ))}
             </select>
-            {flashColor && <span style={{ color: flashColor, marginLeft: 3, flexShrink: 0 }}>{flashLabel}</span>}
+            {flashColor && <span style={{ color: flashColor, marginLeft: 2, flexShrink: 0 }}>{flashLabel}</span>}
           </span>
-          <span style={{ color: C.inkFaint, flexShrink: 0 }}>|</span>
-          <span onClick={(e) => e.stopPropagation()} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, minWidth: 0, maxWidth: '60%' }}>
+          <span onClick={(e) => e.stopPropagation()} style={{
+            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
+          }}>
+            <span style={labelStyle}>Job:</span>
             <select value={sess.haul_id || ''}
               onChange={(e) => saveHaul(e.target.value || null)}
               title={currentHaulLabel ? `Assigned to job: ${currentHaulLabel}` : 'Assign to a job'}
@@ -15302,18 +15360,14 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
               {pickableHaulsGrouped.forContractor.length > 0 && (
                 <optgroup label={sess.hauler_id ? `Jobs for ${haulerDisplay}` : 'Jobs for contractor'}>
                   {pickableHaulsGrouped.forContractor.map(r => (
-                    <option key={r.id} value={r.id}>
-                      {r.projectLabel || r.id}{r.volumeCY ? ` — ${r.volumeCY} CY` : ''}
-                    </option>
+                    <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
                   ))}
                 </optgroup>
               )}
               {pickableHaulsGrouped.unassigned.length > 0 && (
                 <optgroup label="Unassigned jobs">
                   {pickableHaulsGrouped.unassigned.map(r => (
-                    <option key={r.id} value={r.id}>
-                      {r.projectLabel || r.id}{r.volumeCY ? ` — ${r.volumeCY} CY` : ''}
-                    </option>
+                    <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
                   ))}
                 </optgroup>
               )}
@@ -15321,73 +15375,71 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
                 <optgroup label="All other jobs">
                   {pickableHaulsGrouped.otherContractors.map(r => (
                     <option key={r.id} value={r.id}>
-                      {r.projectLabel || r.id}{r.contractorName ? ` · ${r.contractorName}` : ''}{r.volumeCY ? ` — ${r.volumeCY} CY` : ''}
+                      {r.projectLabel || r.id}{r.contractorName ? ` · ${r.contractorName}` : ''}
                     </option>
                   ))}
                 </optgroup>
               )}
             </select>
-            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 3, flexShrink: 0 }}>…</span>}
-            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 3, flexShrink: 0 }}>✓</span>}
-            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 3, flexShrink: 0 }}>✗</span>}
+            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 2, flexShrink: 0 }}>…</span>}
+            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 2, flexShrink: 0 }}>✓</span>}
+            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 2, flexShrink: 0 }}>✗</span>}
           </span>
         </div>
 
-        {/* Truck type · CY/load. Truck# moved to the drawer (still
-            editable there); the card body is too cramped for the
-            extra segment and Robert's canonical spec omits it. */}
+        {/* Row 2: metrics — Loads · CY · Hours · $Revenue.
+            Revenue is the only $ amount on the card (rate on row 5 is /hr-qualified). */}
+        <div style={{
+          display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap',
+          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums', color: C.ink,
+          fontSize: 13.5, fontWeight: 700, letterSpacing: -0.2,
+        }}>
+          <span>{loadLabel}</span>
+          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
+          <span>{cyCompleted} CY</span>
+          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
+          <span>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
+          <span style={{ color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
+        </div>
+
+        {/* Row 3: ▲ Pickup address — green triangle, muted address. */}
+        <div style={{
+          color: C.inkDim, fontSize: 11.5, lineHeight: 1.25,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+        }}>
+          <span style={{ color: C.ok, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▲</span>
+          <span style={{ color: C.inkFaint }}>Pickup:</span>{' '}
+          <span>{pickupAddr}</span>
+        </div>
+
+        {/* Row 4: ▼ Dropoff address — red/orange triangle, muted address. */}
+        <div style={{
+          color: C.inkDim, fontSize: 11.5, lineHeight: 1.25,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+        }}>
+          <span style={{ color: C.warn, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▼</span>
+          <span style={{ color: C.inkFaint }}>Dropoff:</span>{' '}
+          <span>{dropoffAddr}</span>
+        </div>
+
+        {/* Row 5: #truck# truck-type · CY/load · $rate/hr.
+            Truck# prefix only renders when truck_number is non-blank. */}
         <div style={{
           ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
-          display: 'flex', alignItems: 'center', gap: 4,
+          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
         }}>
+          {truckNumDisplay && (
+            <span style={{ fontWeight: 700, color: C.ink, fontFamily: F.mono }}>#{truckNumDisplay}</span>
+          )}
           <span>{truckTypeShort(truckType || sess.truck_type)}</span>
-          <span style={{ color: C.inkFaint }}>•</span>
+          <span style={{ color: C.inkFaint }}>·</span>
           <span>{cyPerLoad} CY/load</span>
+          <span style={{ color: C.inkFaint }}>·</span>
+          <span>${hourlyRate}/hr</span>
         </div>
 
-        {/* ▲ Pickup / ▼ Drop-off addresses — direction-indicator glyphs
-            per Robert's spec, single line each with ellipsis. */}
-        {firstPickup && (
-          <div style={{
-            color: C.inkFaint, fontSize: 11, lineHeight: 1.25,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            <span style={{ color: C.ok, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▲</span>
-            <span style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.3 }}>Pickup:</span>{' '}
-            <span style={{ color: C.inkDim }}>{fmtEventLocation(firstPickup)}</span>
-          </div>
-        )}
-        {firstDropoff && (
-          <div style={{
-            color: C.inkFaint, fontSize: 11, lineHeight: 1.25,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            <span style={{ color: C.warn, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▼</span>
-            <span style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.3 }}>Dropoff:</span>{' '}
-            <span style={{ color: C.inkDim }}>{fmtEventLocation(firstDropoff)}</span>
-          </div>
-        )}
-
-        {/* Metrics: Hours • CY • Loads — single line, • separators,
-            no labels (order implies). Completed loads only (drop count). */}
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
-          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums', color: C.ink,
-          fontSize: 13.5, fontWeight: 700,
-        }}>
-          <span>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-          <span style={{ color: C.inkFaint, fontWeight: 400 }}>•</span>
-          <span>{cyCompleted} CY</span>
-          <span style={{ color: C.inkFaint, fontWeight: 400 }}>•</span>
-          <span>{loadLabel}</span>
-        </div>
-
-        {/* Hourly rate — secondary, muted, own line. */}
-        <div style={{ fontFamily: F.mono, fontSize: 10.5, color: C.inkFaint }}>
-          ${hourlyRate}/hr
-        </div>
-
-        {/* Last event — always carries the MM/DD/YYYY date per spec. */}
+        {/* Row 6: Last event — carries MM/DD/YYYY date per long-standing spec. */}
         <div style={{
           color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2,
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
