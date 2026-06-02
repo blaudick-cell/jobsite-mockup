@@ -7426,6 +7426,56 @@ function AdminHaulRequests({ db, setDb, navigate, hash }) {
             viewAllHref="/admin/dispatch"
           />
 
+          {/* 2026-06-02: PENDING + ACTIVE JOBS PREVIEW (restored)
+              ───────────────────────────────────────────────────
+              This section has been dropped twice during major refactors
+              — once in the Hauls→Jobs rename, again in a Dispatch
+              Overview restructure. Per Robert's standing rule it's
+              MANDATORY on Dispatch Overview. The full Jobs list lives
+              at /admin/jobs; this preview is a 5-card cap of currently
+              open work (Pending + Active buckets) so the dispatcher
+              sees both halves of the operational picture (drivers
+              + jobs) on one screen.
+
+              See memory: project_dispatch_overview_sections — future
+              sessions will load that note before touching this file
+              so the section can't drop again silently. */}
+          {(() => {
+            // 5 most-recent open jobs across both buckets, pending first
+            // (Robert's section ordering: amber = needs attention).
+            const open = [...pending, ...active].slice(0, 5);
+            return (
+              <div style={{ marginBottom: S[5] }}>
+                <div style={{
+                  display: 'flex', alignItems: 'baseline', justifyContent: 'space-between',
+                  gap: S[2], marginBottom: S[3], flexWrap: 'wrap',
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: S[3], flexWrap: 'wrap' }}>
+                    <Label>Pending + Active jobs</Label>
+                    <span style={{ ...T.caption, color: C.inkDim }}>
+                      {pending.length} pending · {active.length} active
+                    </span>
+                  </div>
+                  <a href="#/admin/jobs" onClick={(e) => { e.preventDefault(); navigate('/admin/jobs'); }}
+                    style={{ ...T.bodySm, color: C.accent, textDecoration: 'none', fontWeight: 600 }}>
+                    View all in Jobs →
+                  </a>
+                </div>
+                {open.length === 0 ? (
+                  <Card padding={0}>
+                    <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>
+                      No pending or active jobs right now.
+                    </div>
+                  </Card>
+                ) : (
+                  <Card padding={0}>
+                    {open.map((e, i) => <DispatchRow key={e.r.id} e={e} last={i === open.length - 1} />)}
+                  </Card>
+                )}
+              </div>
+            );
+          })()}
+
           {/* 2026-05-25: Live ops map + site conditions widget — side-by-side on
               desktop (1.4fr / 1fr), stacks on mobile via hcc-attn-row CSS. */}
           <div className="hcc-attn-row" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: S[4], marginBottom: S[4] }}>
