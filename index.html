@@ -3260,7 +3260,7 @@ assertLiveOpsTablesAreSeedFree();
 // don't sync (defense against accidentally upserting derived values).
 const SB_FIELDS_JS = {
   // 2026-05-25: projects entry removed — see SB_TABLES comment above.
-  haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments'],
+  haulers:      ['id','name','contact','phone','email','address','projectIds','logo','attachments','slug'],
   trucks:       ['id','plate','type','hauler','projectId','haulerId','driverId','make','model','capacityCy','ratePerHour'],
   // `haulRequestId` restored after Dispatch applied the matching
   // `ALTER TABLE loads / hours ADD COLUMN haul_request_id` migrations
@@ -10604,6 +10604,25 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
             <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
+            {/* 2026-06-02 (contractor-view link): copies the bookmarkable
+                /c/<slug> URL to the dispatcher's clipboard. Internal-handoff
+                safe by link secrecy (no auth gate per launch spec). */}
+            <Btn variant="secondary" size="sm"
+              onClick={async () => {
+                const slug = hauler.slug;
+                if (!slug) { alert('This contractor has no slug yet — edit and save to regenerate, or check the haulers_add_slug migration ran.'); return; }
+                const url = `${window.location.origin}/#/c/${slug}`;
+                try {
+                  await navigator.clipboard.writeText(url);
+                  alert(`Copied contractor link:\n${url}`);
+                } catch (_) {
+                  window.prompt('Copy this contractor link:', url);
+                }
+              }}
+              disabled={!hauler.slug}
+              title={hauler.slug ? `Copy /c/${hauler.slug} link to clipboard` : 'No slug yet'}>
+              Copy contractor link
+            </Btn>
           </div>
         </div>
       )}
@@ -18213,6 +18232,42 @@ function HaulerInvoices({ hauler, projectId, project, trucks, hours, db, setDb }
     </div>
   );
 }
+// 2026-06-02 (contractor-view standalone link): `/c/<slug>` route.
+// Look up the hauler by slug, mount HaulerHome scoped to that hauler.
+// No admin sidebar, no "Switch role" — internal-handoff safe by link
+// secrecy alone (no auth gate per project-dispatch-production-launch).
+// If slug doesn't resolve, render a friendly 404 hint rather than
+// silently dropping the dispatcher into the admin landing.
+function ContractorViewShell({ db, setDb, navigate, hash }) {
+  const parts = (hash || '').split('/').filter(Boolean);
+  const slug = parts[1] || '';
+  const op = (db.haulers || []).find(h => (h.slug || '').toLowerCase() === slug.toLowerCase());
+  if (!op) {
+    return (
+      <div>
+        <Topbar navigate={() => {}} role="Contractor / Dispatcher" current="Unknown contractor" right={null} />
+        <div style={{ padding: S[6], maxWidth: 640, margin: '0 auto', textAlign: 'center' }}>
+          <Label color={C.warn} style={{ marginBottom: S[3] }}>Link not found</Label>
+          <div style={{ ...T.body, color: C.inkDim }}>
+            We couldn't find a contractor / dispatcher matching <span style={{ fontFamily: F.mono, color: C.ink }}>/{slug}</span>.
+            Check the URL with whoever shared it.
+          </div>
+        </div>
+      </div>
+    );
+  }
+  // Slim Topbar — no ChromeMenu (admin "Switch role" / reset demo hidden
+  // so contractor can't navigate into admin chrome). Navigate is no-op'd
+  // for top-level navigation; HaulerHome's internal links use the real
+  // navigate, which keeps drawer + drilldowns working within /c/<slug>.
+  return (
+    <div>
+      <Topbar navigate={navigate} role="Contractor / Dispatcher" current={op.name} right={null} />
+      <HaulerHome haulerId={op.id} db={db} setDb={setDb} navigate={navigate} />
+    </div>
+  );
+}
+
 function HaulerShell({ db, setDb, navigate, hash }) {
   const parts = hash.split('/').filter(Boolean);
   // Build "current" label for topbar based on depth
@@ -18594,6 +18649,7 @@ function App() {
         {route === '' && <Landing navigate={navigate} />}
         {route === 'admin' && <AdminShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         {route === 'hauler' && <HaulerShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
+        {route === 'c' && <ContractorViewShell db={db} setDb={setDb} navigate={navigate} hash={hash} />}
         <CloudStatusChip status={cloudStatus} />
         <SyncErrorOverlay />
       </div>
