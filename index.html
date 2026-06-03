@@ -6727,451 +6727,458 @@ function DateRangePicker({ preset, setPreset, customStart, setCustomStart, custo
   );
 }
 
+// 2026-06-02 (#6.1): AdminReports rebuilt against driver_sessions + truck_events
+// (the e-ticket source of truth). Replaces the legacy db.loads + db.hours +
+// db.projects aggregator that returned all zeros after the Phase 4 purge.
+// Driver_sessions = one row per shift; truck_events = per-event log. All
+// rollups (per-hauler / per-job / per-driver / per-material) derive from
+// these via filterByX → reduce patterns. Daily strip walks events by
+// event_at; material breakdown joins through driver_sessions.haul_id →
+// haul_requests.material_code. CSV export via the existing deliverBlob
+// helper used by the Dispatch / Settlement PDFs.
+//
+// Date-range model: presets cover today / this week / this month + custom.
+// Range is local-MT (matches the dispatcher mental model + every other
+// today-bucket in the app).
 function AdminReports({ db, navigate }) {
-  const [sort, setSort] = useState({ key: 'name', dir: 'asc' });
-  const [preset, setPreset] = useState('today');
+  const live = useDriverSessionsLive();
+  const [preset, setPreset] = useState('this_week');
   const [customStart, setCustomStart] = useState(isoDaysAgo(6));
   const [customEnd, setCustomEnd] = useState(TODAY_ISO);
   const { startIso, endIso } = rangeFromPreset(preset, customStart, customEnd);
 
-  // Pulse the KPI row when another browser tab pushes new data into our db.
-  const remoteNonce = useContext(RemoteUpdateContext);
-  const [flashing, setFlashing] = useState(false);
-  useEffect(() => {
-    if (remoteNonce === 0) return;
-    setFlashing(true);
-    const id = setTimeout(() => setFlashing(false), 1200);
-    return () => clearTimeout(id);
-  }, [remoteNonce]);
+  // === Range-scoped session + event filtering ============================
+  // Local-MT date boundaries: `event_at` / `started_at` are UTC ISO strings;
+  // compare against startIso/endIso (MT calendar dates) via the same MT
+  // floor-to-midnight trick used in HaulerRollupStats.
+  const trucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
 
-  // ----- KPIs -----
-  const activeProjects = db.projects.filter(p => p.status === 'active');
-  const openShifts = db.hours.filter(h => h.status === 'open');
-  const onShiftNow = openShifts.length;
-  const distinctHaulersOnShift = new Set(
-    openShifts.map(h => {
-      const t = db.trucks.find(t => t.id === h.truckId);
-      return t ? t.haulerId : null;
-    }).filter(Boolean)
-  ).size;
+  const mtDayKey = (iso) => {
+    if (!iso) return null;
+    try {
+      // Reformat into MT calendar date.
+      const d = new Date(iso);
+      const mt = new Date(d.toLocaleString('en-US', { timeZone: 'America/Denver' }));
+      return mt.getFullYear() + '-' + String(mt.getMonth() + 1).padStart(2, '0') + '-' + String(mt.getDate()).padStart(2, '0');
+    } catch (_) { return null; }
+  };
 
-  // Range-scoped loads + hours. All KPIs, tables, sparklines pull from these.
-  const loadsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso));
-  const hoursInRange = db.hours.filter(h => h.date && isInRange(h.date, startIso, endIso));
-  const loadsCount = loadsInRange.length;
-  const hoursTotal = hoursInRange.reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  const inRange = (iso) => {
+    const dk = mtDayKey(iso);
+    if (!dk) return false;
+    return dk >= startIso && dk <= endIso;
+  };
 
-  // For the delta sub-line, compare to the prior window of the same length.
-  // (For "Today" preset this is yesterday — same behavior as before.)
-  const rangeDays = (() => {
-    const [y1,m1,d1] = startIso.split('-').map(Number);
-    const [y2,m2,d2] = endIso.split('-').map(Number);
-    const a = Date.UTC(y1, m1-1, d1);
-    const b = Date.UTC(y2, m2-1, d2);
-    return Math.round((b - a) / 86400000) + 1;
-  })();
-  const priorEndIso = (() => {
-    const [y,m,d] = startIso.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m-1, d));
-    dt.setUTCDate(dt.getUTCDate() - 1);
-    return dt.toISOString().slice(0, 10);
-  })();
-  const priorStartIso = (() => {
-    const [y,m,d] = priorEndIso.split('-').map(Number);
-    const dt = new Date(Date.UTC(y, m-1, d));
-    dt.setUTCDate(dt.getUTCDate() - (rangeDays - 1));
-    return dt.toISOString().slice(0, 10);
-  })();
-  const priorLoadsCount = db.loads.filter(l => l.date && isInRange(l.date, priorStartIso, priorEndIso)).length;
-  const priorHoursTotal = db.hours
-    .filter(h => h.date && isInRange(h.date, priorStartIso, priorEndIso))
-    .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
+  // Range-scoped buckets — every session whose started_at lands in the window.
+  const buckets = React.useMemo(() => {
+    return (live.buckets || []).filter(b => b && b.session && inRange(b.session.started_at));
+  }, [live.buckets, startIso, endIso]);
 
-  let deltaPct = null;
-  let deltaDir = null;
-  if (priorLoadsCount > 0) {
-    const diff = loadsCount - priorLoadsCount;
-    deltaPct = Math.round(Math.abs(diff / priorLoadsCount) * 100);
-    deltaDir = diff >= 0 ? 'up' : 'down';
-  }
+  // === Aggregate KPIs ====================================================
+  const kpis = React.useMemo(() => {
+    let sessions = 0, hoursSec = 0, cyHauled = 0, dollars = 0, loadsDelivered = 0;
+    const sessionIds = new Set();
+    for (const b of buckets) {
+      const sess = b.session;
+      sessions += 1;
+      sessionIds.add(sess.id);
+      const { totalHours } = computeShiftHours(sess);
+      hoursSec += (totalHours || 0) * 3600;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      cyHauled += cyPerLoad * (b.pickupCount || 0);
+      dollars += sessionDollarsToday(sess, trucksById);
+    }
+    for (const ev of (live.events || [])) {
+      if (!ev || ev.event_type !== 'dropoff_load') continue;
+      if (!sessionIds.has(ev.session_id)) continue;
+      if (!inRange(ev.event_at)) continue;
+      loadsDelivered += 1;
+    }
+    return { sessions, hoursSec, cyHauled, dollars, loadsDelivered };
+  }, [buckets, live.events, trucksById, startIso, endIso]);
 
-  // Convenience flags + labels for UI strings that read "yesterday" vs "prior window".
-  const isTodayPreset = preset === 'today';
-  const priorLabel = isTodayPreset
-    ? 'yesterday'
-    : `prior ${rangeDays} day${rangeDays === 1 ? '' : 's'}`;
+  // === Daily activity strip — sessions + CY per MT calendar day ==========
+  const dailyStrip = React.useMemo(() => {
+    // Build a list of every MT day inside [startIso..endIso], cap at 30 to
+    // keep the bar chart legible.
+    const days = [];
+    const [sy, sm, sd] = startIso.split('-').map(Number);
+    const [ey, em, ed] = endIso.split('-').map(Number);
+    const start = new Date(Date.UTC(sy, sm - 1, sd));
+    const end = new Date(Date.UTC(ey, em - 1, ed));
+    const dayMs = 86400000;
+    const max = Math.min(30, Math.floor((end - start) / dayMs) + 1);
+    for (let i = 0; i < max; i++) {
+      const d = new Date(start.getTime() + i * dayMs);
+      const iso = d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+      days.push({ iso, sessions: 0, cy: 0 });
+    }
+    const byDay = new Map(days.map(d => [d.iso, d]));
+    for (const b of buckets) {
+      const dk = mtDayKey(b.session.started_at);
+      const slot = dk ? byDay.get(dk) : null;
+      if (!slot) continue;
+      slot.sessions += 1;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[b.session.truck_type] || 0;
+      slot.cy += cyPerLoad * (b.pickupCount || 0);
+    }
+    return days;
+  }, [buckets, startIso, endIso]);
 
-  // ----- Per-day buckets for sparklines + bar chart (always last 7 days for the chart) -----
-  const last7Days = Array.from({ length: 7 }, (_, i) => isoDaysAgo(6 - i)); // oldest → newest
-  const loadsPerDay7 = last7Days.map(iso => ({
-    iso,
-    count: db.loads.filter(l => l.date === iso).length,
-  }));
-  const hoursPerDay7 = last7Days.map(iso =>
-    db.hours.filter(h => h.date === iso).reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0)
-  );
-  const shiftsPerDay7 = last7Days.map(iso =>
-    db.hours.filter(h => h.date === iso).length
-  );
+  // === Per-hauler rollup ==================================================
+  const haulerRollups = React.useMemo(() => {
+    const m = new Map();
+    for (const b of buckets) {
+      const sess = b.session;
+      const key = sess.hauler_id || '__unassigned__';
+      let row = m.get(key);
+      if (!row) {
+        const h = (db.haulers || []).find(x => x.id === sess.hauler_id);
+        row = { id: sess.hauler_id, name: (h && h.name) || sess.company || 'Unassigned', sessions: 0, hoursSec: 0, cy: 0, dollars: 0 };
+        m.set(key, row);
+      }
+      row.sessions += 1;
+      const { totalHours } = computeShiftHours(sess);
+      row.hoursSec += (totalHours || 0) * 3600;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      row.cy += cyPerLoad * (b.pickupCount || 0);
+      row.dollars += sessionDollarsToday(sess, trucksById);
+    }
+    return Array.from(m.values()).sort((a, b) => b.dollars - a.dollars);
+  }, [buckets, db.haulers, trucksById]);
 
-  // ----- Project status rows (range-scoped) -----
-  const projectRows = db.projects.map(p => {
-    const ops = db.haulers.filter(o => o.projectIds.includes(p.id));
-    const trucks = db.trucks.filter(t => t.projectId === p.id);
-    const pLoadsInRange = db.loads.filter(l => l.projectId === p.id && l.date && isInRange(l.date, startIso, endIso));
-    const pLoadsPrior = db.loads.filter(l => l.projectId === p.id && l.date && isInRange(l.date, priorStartIso, priorEndIso)).length;
-    // "Last load" — last entry within the range. For multi-day ranges the latest
-    // load may be on any day inside the range; prefer the latest ISO date, then latest time.
-    const lastLoad = pLoadsInRange.reduce((best, l) => {
-      if (!best) return l;
-      if (l.date > best.date) return l;
-      if (l.date === best.date && l.time > best.time) return l;
-      return best;
-    }, null);
-    const avgPerDay = rangeDays > 0 ? +(pLoadsInRange.length / rangeDays).toFixed(1) : 0;
-    return {
-      id: p.id,
-      name: p.name,
-      status: p.status || 'active',
-      haulers: ops.length,
-      trucks: trucks.length,
-      loadsInRange: pLoadsInRange.length,
-      loadsPrior: pLoadsPrior,
-      avgPerDay,
-      lastTime: lastLoad ? (rangeDays === 1 ? lastLoad.time : `${isoToShortDate(lastLoad.date)} ${lastLoad.time}`) : '—',
+  // === Per-job rollup =====================================================
+  const jobRollups = React.useMemo(() => {
+    const m = new Map();
+    for (const b of buckets) {
+      const sess = b.session;
+      const key = sess.haul_id || '__unassigned__';
+      let row = m.get(key);
+      if (!row) {
+        const req = (db.haulRequests || []).find(r => r.id === sess.haul_id);
+        row = {
+          id: sess.haul_id,
+          name: (req && (req.projectLabel || req.id)) || 'Unassigned tickets',
+          contractor: (req && req.contractorName) || '—',
+          sessions: 0, hoursSec: 0, cy: 0, dollars: 0,
+        };
+        m.set(key, row);
+      }
+      row.sessions += 1;
+      const { totalHours } = computeShiftHours(sess);
+      row.hoursSec += (totalHours || 0) * 3600;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      row.cy += cyPerLoad * (b.pickupCount || 0);
+      row.dollars += sessionDollarsToday(sess, trucksById);
+    }
+    return Array.from(m.values()).sort((a, b) => b.dollars - a.dollars);
+  }, [buckets, db.haulRequests, trucksById]);
+
+  // === Per-driver rollup ==================================================
+  const driverRollups = React.useMemo(() => {
+    const m = new Map();
+    for (const b of buckets) {
+      const sess = b.session;
+      const key = (sess.driver_name || '— unknown driver').trim() || '— unknown driver';
+      let row = m.get(key);
+      if (!row) {
+        row = { name: key, sessions: 0, hoursSec: 0, cy: 0, dollars: 0 };
+        m.set(key, row);
+      }
+      row.sessions += 1;
+      const { totalHours } = computeShiftHours(sess);
+      row.hoursSec += (totalHours || 0) * 3600;
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      row.cy += cyPerLoad * (b.pickupCount || 0);
+      row.dollars += sessionDollarsToday(sess, trucksById);
+    }
+    return Array.from(m.values()).sort((a, b) => b.dollars - a.dollars);
+  }, [buckets, trucksById]);
+
+  // === Material breakdown — CY by material, import vs export split =======
+  const materialRollups = React.useMemo(() => {
+    const m = new Map();
+    for (const b of buckets) {
+      const sess = b.session;
+      const req = (db.haulRequests || []).find(r => r.id === sess.haul_id);
+      const materialCode = req ? (req.materialCode || '—') : '—';
+      const direction = req
+        ? (req.haulType === 'HAS' ? 'export'
+           : req.haulType === 'NEEDS' ? 'import'
+           : materialDirection(req.materialCode))
+        : 'import';
+      let row = m.get(materialCode);
+      if (!row) {
+        row = { code: materialCode, label: materialLabel(materialCode) || materialCode, imports: 0, exports: 0, total: 0 };
+        m.set(materialCode, row);
+      }
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      const cy = cyPerLoad * (b.pickupCount || 0);
+      row.total += cy;
+      if (direction === 'export') row.exports += cy;
+      else row.imports += cy;
+    }
+    return Array.from(m.values()).sort((a, b) => b.total - a.total);
+  }, [buckets, db.haulRequests]);
+
+  // === CSV export — every session in range, one row per session ==========
+  const downloadCsv = () => {
+    const rows = [['driver','company','job','material','truck_type','started_at','ended_at','hours','cy','rate_per_hour','dollars']];
+    for (const b of buckets) {
+      const sess = b.session;
+      const req = (db.haulRequests || []).find(r => r.id === sess.haul_id);
+      const { totalHours } = computeShiftHours(sess);
+      const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[sess.truck_type] || 0;
+      const cy = cyPerLoad * (b.pickupCount || 0);
+      const rate = sessionHourlyRate(sess, trucksById);
+      const dollars = sessionDollarsToday(sess, trucksById);
+      rows.push([
+        sess.driver_name || '',
+        sess.company || '',
+        (req && req.projectLabel) || '',
+        (req && req.materialCode) || '',
+        sess.truck_type || '',
+        sess.started_at || '',
+        sess.ended_at || '',
+        (totalHours || 0).toFixed(2),
+        String(cy),
+        String(rate),
+        String(dollars),
+      ]);
+    }
+    const quote = (v) => {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
+    const csv = rows.map(r => r.map(quote).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    deliverBlob(blob, `reports-${startIso}-to-${endIso}.csv`);
+  };
+
+  // === UI helpers =========================================================
+  const PRESETS = [
+    { k: 'today',      label: 'Today' },
+    { k: 'this_week',  label: 'This week' },
+    { k: 'this_month', label: 'This month' },
+    { k: 'custom',     label: 'Custom' },
+  ];
+  const presetPill = (active) => ({
+    ...T.caption, fontFamily: F.mono, fontWeight: 700, letterSpacing: 0.4,
+    textTransform: 'uppercase', fontSize: 10,
+    padding: '6px 12px', borderRadius: R.pill,
+    border: '1px solid ' + (active ? C.accent : C.ruleHi),
+    background: active ? C.accentSoft : 'transparent',
+    color: active ? C.accent : C.inkDim,
+    cursor: 'pointer', outline: 'none',
   });
+  const rangeLabel = (() => {
+    if (preset === 'today') return 'Today';
+    if (preset === 'this_week') return 'This week';
+    if (preset === 'this_month') return 'This month';
+    return `${startIso} → ${endIso}`;
+  })();
 
-  const statusOrder = { active: 0, upcoming: 1, completed: 2 };
-  const sortedRows = [...projectRows].sort((a, b) => {
-    const va = a[sort.key];
-    const vb = b[sort.key];
-    let cmp;
-    if (sort.key === 'status') cmp = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
-    else if (va == null && vb == null) cmp = 0;
-    else if (va == null) cmp = -1;
-    else if (vb == null) cmp = 1;
-    else if (typeof va === 'number' && typeof vb === 'number') cmp = va - vb;
-    else cmp = String(va).localeCompare(String(vb));
-    return sort.dir === 'asc' ? cmp : -cmp;
-  });
+  // KPI tile
+  const KpiTile = ({ label, value, sub, accent }) => (
+    <div style={{
+      padding: S[3], background: C.surfaceHi, border: `1px solid ${C.rule}`, borderRadius: R.md,
+      minWidth: 0,
+    }}>
+      <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{label}</div>
+      <div style={{ fontFamily: F.mono, fontSize: 22, fontWeight: 700, color: accent || C.ink, lineHeight: 1.1, letterSpacing: -0.3 }}>{value}</div>
+      {sub && <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
 
-  const setSortKey = (k) => {
-    setSort(s => s.key === k ? { ...s, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key: k, dir: 'asc' });
-  };
-
-  // Custom sortable header (Th doesn't accept onClick/style props)
-  const SortTh = ({ label, k, align = 'left' }) => {
-    const active = sort.key === k;
-    const arrow = active ? (sort.dir === 'asc' ? ' â–²' : ' â–¼') : '';
+  // Rollup table — used for hauler / job / driver / material
+  const RollupTable = ({ rows, columns, emptyText }) => {
+    if (!rows || rows.length === 0) {
+      return <div style={{ ...T.bodySm, color: C.inkDim, padding: S[4], textAlign: 'center', background: C.surfaceHi, borderRadius: R.md }}>{emptyText}</div>;
+    }
     return (
-      <th onClick={() => setSortKey(k)} style={{
-        textAlign: align, padding: '10px 14px', borderBottom: `1px solid ${C.rule}`,
-        fontFamily: F.mono, fontSize: 10, fontWeight: 600,
-        color: active ? C.accent : C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase',
-        whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
-      }}>{label}{arrow}</th>
-    );
-  };
-
-  const statusColor = {
-    active:    { color: C.accent, soft: C.accentSoft, label: 'Active' },
-    upcoming:  { color: C.info,   soft: C.infoSoft,   label: 'Upcoming' },
-    completed: { color: C.inkDim, soft: 'rgba(255,255,255,0.06)', label: 'Completed' },
-  };
-
-  // ----- Hauler productivity (range-scoped) -----
-  const haulerRows = db.haulers.map(op => {
-    const opTrucks = db.trucks.filter(t => t.haulerId === op.id);
-    const opTruckIds = new Set(opTrucks.map(t => t.id));
-    const ldsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso) && opTruckIds.has(l.truckId)).length;
-    const hrsInRange = db.hours
-      .filter(h => h.date && isInRange(h.date, startIso, endIso) && opTruckIds.has(h.truckId))
-      .reduce((s, h) => s + calcHours(h.clockIn, h.breakMin, h.clockOut), 0);
-    const activeProjs = op.projectIds.filter(pid => {
-      const p = db.projects.find(p => p.id === pid);
-      return p && p.status === 'active';
-    }).length;
-    return { id: op.id, name: op.name, loadsInRange: ldsInRange, hoursInRange: hrsInRange, activeProjects: activeProjs };
-  })
-    .sort((a, b) => b.loadsInRange - a.loadsInRange || b.hoursInRange - a.hoursInRange)
-    .slice(0, 10);
-
-  // ----- Truck utilization (range-scoped) -----
-  // 2026-05-24 sweep: drop orphan trucks (haulerId missing / points at a
-  // deleted hauler) before rendering the utilization table — otherwise ghost
-  // trucks with "—" everywhere clutter the report.
-  const _haulerByIdReports = new Map((db.haulers || []).map(o => [o.id, o]));
-  const truckRows = db.trucks
-    .filter(t => t && t.haulerId && _haulerByIdReports.has(t.haulerId))
-    .map(t => {
-      const ldsInRange = db.loads.filter(l => l.date && isInRange(l.date, startIso, endIso) && l.truckId === t.id).length;
-      const project = db.projects.find(p => p.id === t.projectId);
-      const inService = db.hours.some(h => h.truckId === t.id && h.status === 'open');
-      return {
-        id: t.id,
-        plate: t.plate,
-        type: t.type,
-        loadsInRange: ldsInRange,
-        driverName: t.driverId || '—',
-        projectName: project ? project.name : '—',
-        status: inService ? 'inservice' : 'idle',
-      };
-    }).sort((a, b) => b.loadsInRange - a.loadsInRange || String(a.plate).localeCompare(String(b.plate)));
-
-  // ----- Top-level empty state: no projects -----
-  if (db.projects.length === 0) {
-    return (
-      <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-        <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
-        <EmptyState
-          icon={<ProjectIcon size={40} />}
-          title="No jobs yet"
-          body="Create one to start generating activity reports."
-          action={<Btn variant="primary" onClick={() => navigate('/admin/requests/new')}>+ New haul</Btn>}
-        />
-      </div>
-    );
-  }
-
-  const deltaColor = deltaDir === 'down' ? C.warn : C.ok;
-  const deltaArrow = deltaDir === 'up' ? '▲' : '▼';
-
-  // Range label for headlines + table headers (e.g. "Today", "Last 7 days").
-  const presetMeta = RANGE_PRESETS.find(p => p.key === preset);
-  const rangeLabel = preset === 'custom'
-    ? `${isoToShortDate(startIso)} – ${isoToShortDate(endIso)}`
-    : (presetMeta ? presetMeta.label : 'Range');
-  const loadsColLabel = isTodayPreset
-    ? 'Loads today'
-    : (preset === 'yesterday' ? 'Loads yesterday' : 'Loads in range');
-  const priorColLabel = isTodayPreset
-    ? 'Loads yesterday'
-    : `Avg/day`;
-
-  return (
-    <div style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
-      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
-
-      <div style={{ marginBottom: S[4], display: 'flex', flexDirection: 'column', gap: S[3] }}>
-        <div>
-          <Label color={C.accent} style={{ marginBottom: 6 }}>Live activity</Label>
-          <h1 style={{ ...T.h2Lg, fontWeight: 700, letterSpacing: -1.2, margin: 0, color: C.ink }}>Reports</h1>
-          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 6 }}>
-            Activity across hauls, haulers, and trucks. Numbers update live as hours and loads are logged.
-          </div>
-        </div>
-
-        {/* Date range picker */}
-        <Card padding={S[3]} style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap' }}>
-            <Label>Date range</Label>
-            <span style={{ ...T.monoSm, color: C.inkDim }}>
-              {isoToShortDate(startIso)}{startIso !== endIso ? ` – ${isoToShortDate(endIso)}` : ''} · {rangeDays} {rangeDays === 1 ? 'day' : 'days'}
-            </span>
-          </div>
-          <DateRangePicker
-            preset={preset} setPreset={setPreset}
-            customStart={customStart} setCustomStart={setCustomStart}
-            customEnd={customEnd} setCustomEnd={setCustomEnd}
-          />
-        </Card>
-      </div>
-
-      {/* A. Headline KPI row with sparklines */}
-      <div className={flashing ? 'jse-pulse' : undefined} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: S[3], marginBottom: S[4] }}>
-        <Card padding={S[4]}>
-          <Stat
-            label="Active hauls"
-            value={activeProjects.length}
-            sub={`total ${db.projects.length}`}
-          />
-        </Card>
-        <Card padding={S[4]}>
-          <Stat
-            label="On shift now"
-            value={onShiftNow}
-            sub={`${distinctHaulersOnShift} hauler${distinctHaulersOnShift === 1 ? '' : 's'}`}
-          />
-          <div style={{ marginTop: S[2] }}>
-            <Sparkline data={shiftsPerDay7} color={C.info} />
-          </div>
-        </Card>
-        <Card padding={S[4]}>
-          <Stat
-            label={isTodayPreset ? 'Loads today' : `Loads (${rangeLabel.toLowerCase()})`}
-            value={loadsCount}
-            sub={
-              priorLoadsCount === 0
-                ? `no ${priorLabel} data`
-                : `${deltaArrow} ${deltaPct}% vs ${priorLabel} (${priorLoadsCount})`
-            }
-          />
-          <div style={{ marginTop: S[2] }}>
-            <Sparkline data={loadsPerDay7.map(d => d.count)} color={C.accent} />
-          </div>
-        </Card>
-        <Card padding={S[4]}>
-          <Stat
-            label={isTodayPreset ? 'Hours today' : `Hours (${rangeLabel.toLowerCase()})`}
-            value={fmtHours(hoursTotal)}
-            sub={`${priorLabel} total ${fmtHours(priorHoursTotal)}h`}
-          />
-          <div style={{ marginTop: S[2] }}>
-            <Sparkline data={hoursPerDay7} color={C.ok} />
-          </div>
-        </Card>
-      </div>
-
-      {/* B. Daily activity summary */}
-      <Card padding={S[4]} style={{ marginBottom: S[4] }}>
-        <Label style={{ marginBottom: 6 }}>{isTodayPreset ? 'Daily activity' : `${rangeLabel} activity`}</Label>
-        {loadsCount === 0 ? (
-          <div style={{ ...T.body, color: C.inkDim }}>No loads logged in this range.</div>
-        ) : priorLoadsCount === 0 ? (
-          <div style={{ ...T.bodyLg, fontFamily: F.display, color: C.ink, fontWeight: 600 }}>
-            {isTodayPreset ? 'Today' : rangeLabel} <span style={{ color: C.accent }}>{loadsCount}</span> loads <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}>(no {priorLabel} comparison)</span>
-          </div>
-        ) : (
-          <div style={{ ...T.bodyLg, fontFamily: F.display, color: C.ink, fontWeight: 600 }}>
-            {isTodayPreset ? 'Today' : rangeLabel} <span style={{ color: C.accent }}>{loadsCount}</span> loads
-            <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}> — </span>
-            <span style={{ color: deltaColor }}>{deltaArrow} {deltaPct}%</span>
-            <span style={{ ...T.bodySm, color: C.inkDim, fontWeight: 400 }}> vs {priorLabel} ({priorLoadsCount})</span>
-          </div>
-        )}
-      </Card>
-
-      {/* B2. 7-day bar chart */}
-      <Card padding={S[4]} style={{ marginBottom: S[6] }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: S[3] }}>
-          <Label>Loads per day, last 7 days</Label>
-          <span style={{ ...T.monoSm, color: C.inkDim }}>hover for detail</span>
-        </div>
-        <BarChart data={loadsPerDay7} />
-      </Card>
-
-      {/* C. Project status table */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Jobs</Label>
-        <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ ...T.monoSm, color: C.inkDim }}>{sortedRows.length}</span>
-      </div>
-      <Card padding={0} style={{ marginBottom: S[6] }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div style={{ overflowX: 'auto', border: `1px solid ${C.rule}`, borderRadius: R.md }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 480 }}>
           <thead>
-            <tr>
-              <SortTh label="Haul" k="name" />
-              <SortTh label="Status" k="status" />
-              <SortTh label="Contractors / Dispatchers" k="haulers" align="right" />
-              <SortTh label="Trucks" k="trucks" align="right" />
-              <SortTh label={loadsColLabel} k="loadsInRange" align="right" />
-              <SortTh label={priorColLabel} k={isTodayPreset ? 'loadsPrior' : 'avgPerDay'} align="right" />
-              <SortTh label="Last load" k="lastTime" align="right" />
+            <tr style={{ background: C.surfaceHi }}>
+              {columns.map((c, i) => (
+                <th key={i} style={{
+                  textAlign: c.align || 'left', padding: '8px 12px',
+                  borderBottom: `1px solid ${C.rule}`,
+                  fontFamily: F.mono, fontSize: 10, fontWeight: 600,
+                  color: C.inkFaint, letterSpacing: 0.6, textTransform: 'uppercase',
+                  whiteSpace: 'nowrap',
+                }}>{c.label}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
-            {sortedRows.map(r => {
-              const sc = statusColor[r.status] || statusColor.active;
-              return (
-                <Tr key={r.id} onClick={() => navigate(`/admin/requests?projectId=${r.id}`)}>
-                  <Td><span style={{ fontWeight: 600 }}>{r.name}</span></Td>
-                  <Td><Pill color={sc.color} soft={sc.soft}>{sc.label}</Pill></Td>
-                  <Td align="right" mono>{r.haulers}</Td>
-                  <Td align="right" mono>{r.trucks}</Td>
-                  <Td align="right" mono style={{ fontWeight: 600 }}>{r.loadsInRange}</Td>
-                  <Td align="right" mono dim>{isTodayPreset ? r.loadsPrior : r.avgPerDay}</Td>
-                  <Td align="right" mono dim>{r.lastTime}</Td>
-                </Tr>
-              );
-            })}
+            {rows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: `1px solid ${C.rule}` }}>
+                {columns.map((c, j) => (
+                  <td key={j} style={{
+                    padding: '8px 12px', textAlign: c.align || 'left',
+                    fontFamily: c.mono ? F.mono : F.body, fontSize: 13,
+                    color: c.color || C.ink, fontVariantNumeric: c.mono ? 'tabular-nums' : 'normal',
+                  }}>{c.render ? c.render(r) : (r[c.key] ?? '—')}</td>
+                ))}
+              </tr>
+            ))}
           </tbody>
         </table>
+      </div>
+    );
+  };
+
+  // === Render =============================================================
+  return (
+    <div className="jse-reports" style={{ padding: S[6], maxWidth: 1280, margin: '0 auto' }}>
+      <style>{`
+        @media (max-width: 640px) {
+          .jse-reports { padding: 14px !important; }
+          .jse-reports-kpi-grid { grid-template-columns: 1fr 1fr !important; }
+          .jse-reports-tables { grid-template-columns: 1fr !important; }
+        }
+      `}</style>
+
+      <Crumbs items={[{ label: 'Admin', to: '/admin' }, { label: 'Reports' }]} navigate={navigate} />
+
+      {/* Header row: title + CSV export */}
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: S[3], flexWrap: 'wrap', marginBottom: S[4] }}>
+        <div>
+          <div style={{ ...T.h2, fontFamily: F.display, fontWeight: 700, color: C.ink, letterSpacing: -0.4 }}>Reports</div>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+            Driver session activity across {rangeLabel.toLowerCase()}. Live + ended sessions, derived from driver_sessions + truck_events.
+          </div>
+        </div>
+        <Btn variant="primary" size="sm" onClick={downloadCsv} disabled={buckets.length === 0}
+          title={buckets.length === 0 ? 'No sessions in this range to export' : 'Export every session as CSV'}>
+          Download CSV
+        </Btn>
+      </div>
+
+      {/* Date range filter */}
+      <Card padding={S[3]} style={{ marginBottom: S[4] }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+          {PRESETS.map(p => (
+            <button key={p.k} type="button" onClick={() => setPreset(p.k)} style={presetPill(preset === p.k)}>
+              {p.label}
+            </button>
+          ))}
+          {preset === 'custom' && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap' }}>
+              <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)}
+                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono }} />
+              <span style={{ color: C.inkFaint }}>→</span>
+              <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} min={customStart || undefined}
+                style={{ ...T.bodySm, padding: '6px 8px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.mono }} />
+            </div>
+          )}
+        </div>
       </Card>
 
-      {/* D. Hauler productivity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Top haulers {isTodayPreset ? 'today' : `(${rangeLabel.toLowerCase()})`}</Label>
-        <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ ...T.monoSm, color: C.inkDim }}>{haulerRows.length} of {db.haulers.length}</span>
+      {/* KPI tiles */}
+      <div className="jse-reports-kpi-grid" style={{
+        display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: S[3], marginBottom: S[4],
+      }}>
+        <KpiTile label="Sessions" value={kpis.sessions} sub="driver shifts" />
+        <KpiTile label="Loads delivered" value={kpis.loadsDelivered} sub="dropoff_load events" />
+        <KpiTile label="CY hauled" value={kpis.cyHauled.toLocaleString()} sub="cu yd" />
+        <KpiTile label="Hours billed" value={formatShiftDuration(kpis.hoursSec)} />
+        <KpiTile label="$ billed" value={'$' + Math.round(kpis.dollars).toLocaleString()} accent={C.accent} />
       </div>
-      <Card padding={0} style={{ marginBottom: S[6] }}>
-        {haulerRows.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No haulers on the roster yet.</div>
-        ) : (
-          <div>
-            {haulerRows.map((op, i) => (
-              <div key={op.id} style={{
-                display: 'flex', alignItems: 'center', gap: S[4],
-                padding: `${S[3]}px ${S[4]}px`,
-                borderBottom: i < haulerRows.length - 1 ? `1px solid ${C.rule}` : 'none',
-              }}>
-                <div style={{
-                  ...T.bodySm, width: 28, textAlign: 'center', fontFamily: F.mono,
-                  color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
-                }}>{i + 1}</div>
-                <div style={{ ...T.body, flex: 1, fontFamily: F.display, fontWeight: 600, color: C.ink }}>{op.name}</div>
-                <div style={{ textAlign: 'right', minWidth: 64 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.loadsInRange}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>loads</div>
-                </div>
-                <div style={{ textAlign: 'right', minWidth: 64 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{fmtHours(op.hoursInRange)}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>hours</div>
-                </div>
-                <div style={{ textAlign: 'right', minWidth: 64 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{op.activeProjects}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>hauls</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+
+      {/* Daily activity strip — sessions per MT day */}
+      <Card padding={S[4]} style={{ marginBottom: S[4] }}>
+        <Label>Daily activity</Label>
+        <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, marginBottom: S[3] }}>
+          Sessions started per day across the range (max 30 bars shown).
+        </div>
+        {dailyStrip.length === 0 ? (
+          <div style={{ ...T.bodySm, color: C.inkFaint, padding: S[4], textAlign: 'center' }}>No data in this window.</div>
+        ) : (() => {
+          const maxSessions = Math.max(1, ...dailyStrip.map(d => d.sessions));
+          const maxCY = Math.max(1, ...dailyStrip.map(d => d.cy));
+          return (
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120, overflowX: 'auto', paddingBottom: 4 }}>
+              {dailyStrip.map(d => {
+                const hSess = (d.sessions / maxSessions) * 100;
+                const hCy = (d.cy / maxCY) * 100;
+                return (
+                  <div key={d.iso} title={`${d.iso} · ${d.sessions} session${d.sessions === 1 ? '' : 's'} · ${d.cy} CY`}
+                    style={{ flex: '0 0 auto', width: 22, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                    <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', gap: 1, height: 100 }}>
+                      <div style={{ width: 9, height: `${hSess}%`, background: C.accent, borderRadius: 1, minHeight: d.sessions > 0 ? 2 : 0 }} />
+                      <div style={{ width: 9, height: `${hCy}%`, background: '#185FA5', borderRadius: 1, minHeight: d.cy > 0 ? 2 : 0 }} />
+                    </div>
+                    <div style={{ fontFamily: F.mono, fontSize: 8, color: C.inkFaint, transform: 'rotate(-60deg)', transformOrigin: 'center', whiteSpace: 'nowrap', marginTop: 4 }}>
+                      {d.iso.slice(5)}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+        <div style={{ display: 'flex', gap: S[3], marginTop: S[2], ...T.micro, color: C.inkDim }}>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, background: C.accent, marginRight: 4, verticalAlign: 'middle' }}/>Sessions</span>
+          <span><span style={{ display: 'inline-block', width: 9, height: 9, background: '#185FA5', marginRight: 4, verticalAlign: 'middle' }}/>CY</span>
+        </div>
       </Card>
 
-      {/* E. Truck utilization */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[3] }}>
-        <Label color={C.accent}>Truck utilization</Label>
-        <div style={{ flex: 1, height: 1, background: C.rule }} />
-        <span style={{ ...T.monoSm, color: C.inkDim }}>{truckRows.length}</span>
+      {/* Rollup tables — hauler / job / driver / material, 2x2 on desktop, stacked on mobile */}
+      <div className="jse-reports-tables" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: S[4], marginBottom: S[4] }}>
+        <Card padding={S[4]}>
+          <Label>Per-hauler</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, marginBottom: S[3] }}>{haulerRollups.length} contractor{haulerRollups.length === 1 ? '' : 's'} active in range</div>
+          <RollupTable rows={haulerRollups} columns={[
+            { key: 'name', label: 'Hauler' },
+            { key: 'sessions', label: 'Sess', align: 'right', mono: true },
+            { label: 'CY', align: 'right', mono: true, render: (r) => r.cy.toLocaleString() },
+            { label: 'Hrs', align: 'right', mono: true, render: (r) => formatShiftDuration(r.hoursSec) },
+            { label: '$', align: 'right', mono: true, color: C.accent, render: (r) => '$' + Math.round(r.dollars).toLocaleString() },
+          ]} emptyText="No haulers active in this window." />
+        </Card>
+
+        <Card padding={S[4]}>
+          <Label>Per-job</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, marginBottom: S[3] }}>{jobRollups.length} job{jobRollups.length === 1 ? '' : 's'} with sessions in range</div>
+          <RollupTable rows={jobRollups} columns={[
+            { key: 'name', label: 'Job' },
+            { key: 'sessions', label: 'Sess', align: 'right', mono: true },
+            { label: 'CY', align: 'right', mono: true, render: (r) => r.cy.toLocaleString() },
+            { label: '$', align: 'right', mono: true, color: C.accent, render: (r) => '$' + Math.round(r.dollars).toLocaleString() },
+          ]} emptyText="No assigned tickets in this window." />
+        </Card>
+
+        <Card padding={S[4]}>
+          <Label>Per-driver</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, marginBottom: S[3] }}>{driverRollups.length} driver{driverRollups.length === 1 ? '' : 's'} with shifts in range</div>
+          <RollupTable rows={driverRollups} columns={[
+            { key: 'name', label: 'Driver' },
+            { key: 'sessions', label: 'Sess', align: 'right', mono: true },
+            { label: 'Hrs', align: 'right', mono: true, render: (r) => formatShiftDuration(r.hoursSec) },
+            { label: '$', align: 'right', mono: true, color: C.accent, render: (r) => '$' + Math.round(r.dollars).toLocaleString() },
+          ]} emptyText="No drivers active in this window." />
+        </Card>
+
+        <Card padding={S[4]}>
+          <Label>Material breakdown</Label>
+          <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4, marginBottom: S[3] }}>CY hauled by material · imports (green) / exports (blue)</div>
+          <RollupTable rows={materialRollups} columns={[
+            { key: 'label', label: 'Material' },
+            { label: 'Imports', align: 'right', mono: true, color: C.accent, render: (r) => r.imports.toLocaleString() },
+            { label: 'Exports', align: 'right', mono: true, color: '#185FA5', render: (r) => r.exports.toLocaleString() },
+            { label: 'Total CY', align: 'right', mono: true, render: (r) => r.total.toLocaleString() },
+          ]} emptyText="No material data in this window." />
+        </Card>
       </div>
-      <Card padding={0}>
-        {truckRows.length === 0 ? (
-          <div style={{ ...T.bodySm, padding: S[5], textAlign: 'center', color: C.inkDim }}>No trucks on the roster yet.</div>
-        ) : (
-          <div>
-            {truckRows.map((t, i) => (
-              <div key={t.id} style={{
-                display: 'flex', alignItems: 'center', gap: S[4],
-                padding: `${S[3]}px ${S[4]}px`,
-                borderBottom: i < truckRows.length - 1 ? `1px solid ${C.rule}` : 'none',
-                flexWrap: 'wrap',
-              }}>
-                <div style={{
-                  ...T.bodySm, width: 28, textAlign: 'center', fontFamily: F.mono,
-                  color: i < 3 ? C.accent : C.inkFaint, fontWeight: 700,
-                }}>{i + 1}</div>
-                <div style={{ minWidth: 80 }}>
-                  <div style={{ ...T.body, fontFamily: F.display, fontWeight: 600, color: C.ink }}>#{t.plate}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 2 }}>{t.type}</div>
-                </div>
-                <div style={{ flex: 1, minWidth: 120 }}>
-                  <div style={{ ...T.bodySm, color: C.ink }}>{t.projectName}</div>
-                </div>
-                <StatusPill status={t.status} />
-                <div style={{ textAlign: 'right', minWidth: 64 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 15, color: C.ink, fontWeight: 600 }}>{t.loadsInRange}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 10, color: C.inkFaint, letterSpacing: 0.8, textTransform: 'uppercase' }}>{isTodayPreset ? 'loads today' : 'loads'}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
     </div>
   );
 }
-
 // =====================================================================
 // Haul Requests — admin views (v3)
 // =====================================================================
