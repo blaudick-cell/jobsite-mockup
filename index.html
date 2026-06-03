@@ -11169,6 +11169,20 @@ function AdminPayments({ db, setDb, navigate, hash }) {
   const invoiceTotal = (inv) => (inv.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0);
   const invoiceHours = (inv) => (inv.lineItems || []).reduce((s, li) => s + (li.hours || 0), 0);
 
+  // 2026-06-02 (#6.2): driver_sessions hook for the per-hauler settlement
+  // queue. Walks live.buckets to aggregate outstanding $ owed to each
+  // hauler (Σ sessionDollarsToday across that hauler's sessions in any
+  // status). Settlements are PDF-only by design (commit 354dcbe) — there
+  // is no `settlements` table; "paid out" status isn't persisted yet.
+  // The queue surfaces what's BILLABLE per hauler so the dispatcher knows
+  // who needs a statement next.
+  const paymentsLive = useDriverSessionsLive();
+  const paymentsTrucksById = React.useMemo(() => {
+    const m = new Map();
+    for (const t of (db.trucks || [])) m.set(t.id, t);
+    return m;
+  }, [db.trucks]);
+
   // === KPI computations ===
   const sentInvoices  = invoices.filter(i => i.status === 'sent');
   const paidInvoices  = invoices.filter(i => i.status === 'paid');
@@ -11220,6 +11234,61 @@ function AdminPayments({ db, setDb, navigate, hash }) {
     const bkey = b.createdAt || (b.issuedDate ? b.issuedDate + 'T00:00:00Z' : '');
     return bkey.localeCompare(akey);
   });
+
+  // 2026-06-02 (#6.2): aging report — bucket sent (unpaid) invoices by
+  // days since sentAt. Standard A/R bucketing: 0-30 / 30-60 / 60-90 / 90+.
+  // Paid + draft invoices excluded; "void" too. Uses MT-floor on sentAt
+  // matching the rest of the app's today-bucket convention.
+  const agingBuckets = React.useMemo(() => {
+    const buckets = { '0-30': { count: 0, amount: 0, invs: [] },
+                      '30-60': { count: 0, amount: 0, invs: [] },
+                      '60-90': { count: 0, amount: 0, invs: [] },
+                      '90+':   { count: 0, amount: 0, invs: [] } };
+    const todayMs = Date.now();
+    for (const inv of sentInvoices) {
+      if (!inv.sentAt) continue;
+      const sentMs = new Date(inv.sentAt).getTime();
+      if (!Number.isFinite(sentMs)) continue;
+      const days = Math.floor((todayMs - sentMs) / 86400000);
+      let key;
+      if      (days <  30) key = '0-30';
+      else if (days <  60) key = '30-60';
+      else if (days <  90) key = '60-90';
+      else                 key = '90+';
+      const total = invoiceTotal(inv);
+      buckets[key].count += 1;
+      buckets[key].amount += total;
+      buckets[key].invs.push({ inv, days, total });
+    }
+    return buckets;
+  }, [sentInvoices]);
+
+  // Per-hauler settlement queue — running $ owed per hauler from
+  // driver_sessions. There's no `settlements` table (settlements are
+  // PDF-only by design — commit 354dcbe); this surfaces what's BILLABLE
+  // per hauler so the dispatcher knows who needs a statement next. Click
+  // a row → /admin/haulers/<id> where the per-job settlement statement
+  // dropdown lives. Filter to sessions that have ended_at (a session
+  // still on shift isn't ready to bill yet).
+  const settlementQueue = React.useMemo(() => {
+    const m = new Map();
+    for (const b of (paymentsLive.buckets || [])) {
+      if (!b || !b.session) continue;
+      const sess = b.session;
+      if (!sess.ended_at) continue; // mid-shift — not yet billable
+      const haulerId = sess.hauler_id || '__unassigned__';
+      let row = m.get(haulerId);
+      if (!row) {
+        const h = (db.haulers || []).find(x => x.id === sess.hauler_id);
+        row = { id: sess.hauler_id, name: (h && h.name) || sess.company || 'Unassigned', sessions: 0, dollars: 0, lastSessionAt: '' };
+        m.set(haulerId, row);
+      }
+      row.sessions += 1;
+      row.dollars += sessionDollarsToday(sess, paymentsTrucksById);
+      if (sess.ended_at && sess.ended_at > row.lastSessionAt) row.lastSessionAt = sess.ended_at;
+    }
+    return Array.from(m.values()).sort((a, b) => b.dollars - a.dollars);
+  }, [paymentsLive.buckets, db.haulers, paymentsTrucksById]);
 
   const Tab = ({ k, label }) => {
     const active = filter === k;
@@ -11348,13 +11417,88 @@ function AdminPayments({ db, setDb, navigate, hash }) {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[6] }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3], marginBottom: S[5] }}>
         {kpiCards.map(c => (
           <Card key={c.label} padding={S[4]}>
             <Stat label={c.label} value={c.value} sub={c.sub} />
           </Card>
         ))}
       </div>
+
+      {/* 2026-06-02 (#6.2): A/R aging report — sent invoices bucketed by
+          days since sentAt. Each bucket is a Card; click into the bucket
+          to filter the invoice list below to just those (TODO: wire the
+          filter — for now bucket counts + amounts give the dispatcher the
+          A/R-aging signal directly, which is the main ask). */}
+      {sentInvoices.length > 0 && (
+        <Card padding={S[4]} style={{ marginBottom: S[5] }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: S[3], gap: S[2], flexWrap: 'wrap' }}>
+            <div>
+              <Label>A/R Aging</Label>
+              <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>Sent invoices bucketed by days since send · {sentInvoices.length} open</div>
+            </div>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: S[3] }}>
+            {['0-30','30-60','60-90','90+'].map((k, i) => {
+              const bucket = agingBuckets[k];
+              const accent = i === 0 ? C.accent : i === 1 ? C.info : i === 2 ? C.warn : (C.danger || C.warn);
+              return (
+                <div key={k} style={{
+                  padding: S[3], borderRadius: R.md,
+                  background: bucket.count > 0 ? `${accent}11` : C.surfaceHi,
+                  border: `1px solid ${bucket.count > 0 ? accent : C.rule}`,
+                  minWidth: 0,
+                }}>
+                  <div style={{ ...T.micro, color: C.inkFaint, textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{k} days</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 700, color: bucket.count > 0 ? accent : C.inkDim, lineHeight: 1.1 }}>
+                    {fmtMoney(bucket.amount)}
+                  </div>
+                  <div style={{ ...T.micro, color: C.inkDim, marginTop: 2 }}>
+                    {bucket.count} invoice{bucket.count === 1 ? '' : 's'}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+      )}
+
+      {/* 2026-06-02 (#6.2): Per-hauler settlement queue. Walks
+          driver_sessions live data to surface $ owed per hauler (ended
+          shifts only — mid-shift sessions aren't billable yet). Click a
+          row → hauler detail page where the per-dispatcher Settlement
+          Statement PDF gets generated. */}
+      {settlementQueue.length > 0 && (
+        <Card padding={0} style={{ marginBottom: S[5] }}>
+          <div style={{ padding: S[4], borderBottom: `1px solid ${C.rule}` }}>
+            <Label>Settlement queue</Label>
+            <div style={{ ...T.bodySm, color: C.inkDim, marginTop: 4 }}>
+              Open $ owed per contractor / dispatcher · click a row to open the hauler page where the Settlement Statement PDF lives
+            </div>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: C.surfaceHi }}>
+                <Th>Contractor / Dispatcher</Th>
+                <Th align="right">Sessions</Th>
+                <Th align="right">Last shift ended</Th>
+                <Th align="right">Open $</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {settlementQueue.map(r => (
+                <Tr key={r.id || '__unassigned__'}
+                  onClick={() => r.id ? navigate('/admin/haulers/' + r.id) : null}>
+                  <Td><span style={{ color: C.ink, fontWeight: 600 }}>{r.name}</span></Td>
+                  <Td align="right" mono>{r.sessions}</Td>
+                  <Td align="right" mono dim>{r.lastSessionAt ? new Date(r.lastSessionAt).toLocaleDateString('en-US', { timeZone: 'America/Denver', month: '2-digit', day: '2-digit', year: 'numeric' }) : '—'}</Td>
+                  <Td align="right" mono style={{ color: C.accent, fontWeight: 700 }}>${Math.round(r.dollars).toLocaleString()}</Td>
+                </Tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
       <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', marginBottom: S[4] }}>
         <Tab k="all" label="All" />
