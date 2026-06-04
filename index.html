@@ -10930,6 +10930,13 @@ function AdminReporting({ db, setDb, navigate }) {
   // Cheap derived totals from existing data — gives the placeholders something
   // realistic-looking until the real reports get wired up.
   const invoices = db.invoices || [];
+  // 2026-06-03 (derived job↔hauler rollup fix): subscribe to driver_sessions
+  // so the per-hauler rollup can derive hauls from tickets, not from the
+  // legacy haul_requests.assignments[] / db.loads collections (both purged
+  // post e-ticket pivot, which is why Z&Z showed $0 + "No active hauls
+  // assigned" despite 3 days of David Vasquez's work). Mirrors the live
+  // hook used by AdminHaulRequestDetail + AdminPayments.
+  const live = useDriverSessionsLive();
   const paidTotal = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
   const openTotal = invoices.filter(i => i.status === 'sent').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
   const openCount = invoices.filter(i => i.status === 'sent').length;
@@ -10943,24 +10950,86 @@ function AdminReporting({ db, setDb, navigate }) {
   ];
 
   // ===== Per-hauler / per-haul invoicing =====
-  // Each hauler gets a section. Inside each, one row per haul-request the
-  // hauler is assigned to, with status + actions for the haul-scoped invoice
-  // (auto-generated from billed hours × the truck's hourly rate; CY is
-  // reported alongside but never multiplied into the amount). Status flow
-  // reuses the v11 invoice state machine (draft → sent → paid).
+  // 2026-06-03 (derived rollup rewrite): hauls for a hauler are now
+  // DERIVED from driver_sessions — a hauler is "on" a haul whenever any
+  // of their drivers (matched by driver_sessions.hauler_id) has a
+  // session with haul_id set to that haul. Was: filter
+  // haul_requests.assignments[].haulerId — but assignments[] is empty
+  // for every row since the e-ticket pivot purged the legacy per-truck
+  // assignment payload (commit 26cc34e). That's why Z&Z's row showed
+  // "0 hauls · INVOICED TOTAL $0" despite David Vasquez's 3 shifts.
+  //
+  // Also union-in the legacy haul_requests.assignedHaulerId so a job
+  // Robert just created (no tickets yet) still surfaces on its
+  // primary contractor's rollup — otherwise a brand-new job would be
+  // invisible until the first driver clocks in.
   const haulRequests = db.haulRequests || [];
-  const haulsForHauler = (haulerId) => haulRequests
-    .filter(r => (r.assignments || []).some(a => a.haulerId === haulerId))
-    .map(r => {
-      const myAssignments = (r.assignments || []).filter(a => a.haulerId === haulerId);
-      // v32: canonical-store delivered CY for this hauler's trucks on this haul
-      const myTruckIds = new Set(myAssignments.map(a => a.truckId));
-      const deliveredCY = (db.loads || [])
-        .filter(l => l && l.haulRequestId === r.id && myTruckIds.has(l.truckId))
-        .reduce((s, l) => s + (Number(l.cy) || 0), 0);
-      const invoice = invoices.find(i => i.haulerId === haulerId && i.haulRequestId === r.id);
-      return { req: r, myAssignments, deliveredCY, invoice };
-    });
+  const trucksById = new Map((db.trucks || []).map(t => [t.id, t]));
+  const haulsForHauler = (haulerId) => {
+    const byHaul = new Map();
+    // (1) Pick up every session this hauler's drivers have on a haul.
+    for (const b of (live.buckets || [])) {
+      const s = b && b.session;
+      if (!s || !s.haul_id || s.hauler_id !== haulerId) continue;
+      if (!byHaul.has(s.haul_id)) byHaul.set(s.haul_id, []);
+      byHaul.get(s.haul_id).push(b);
+    }
+    // (2) Union-in primary-contractor jobs even if there are no
+    //     tickets yet — keeps freshly-created jobs visible on the
+    //     contractor's rollup before any driver has clocked in.
+    for (const r of haulRequests) {
+      if (r.assignedHaulerId === haulerId && !byHaul.has(r.id)) byHaul.set(r.id, []);
+    }
+    const rows = [];
+    for (const [haulId, buckets] of byHaul.entries()) {
+      const req = haulRequests.find(r => r.id === haulId);
+      if (!req) continue;  // dangling reference (deleted haul) — skip
+      // Hauler's portion of the haul: hours × per-session rate, CY from pickups.
+      const driverNames = new Set();
+      let deliveredCY = 0, hoursSec = 0, dollars = 0;
+      for (const b of buckets) {
+        const s = b.session;
+        const cyPerLoad = DRIVER_LIVE_CY_PER_TRUCK[s.truck_type] || 0;
+        deliveredCY += cyPerLoad * (b.pickupCount || 0);
+        const { currentShiftSeconds } = computeShiftHours(s);
+        hoursSec += currentShiftSeconds || 0;
+        const rate = sessionHourlyRate(s, trucksById);
+        dollars += ((currentShiftSeconds || 0) / 3600) * rate;
+        if (s.driver_name) driverNames.add(s.driver_name);
+      }
+      // Find the invoice covering this haul. Newer Final invoices have
+      // haulerId === null (one invoice per haul, even across multiple
+      // contractors). Pick the most recent. The hauler's portion is
+      // computed from lineItems whose driverName matches one of this
+      // hauler's drivers on the haul.
+      const candidates = invoices
+        .filter(i => i.haulRequestId === haulId && (i.haulerId == null || i.haulerId === haulerId))
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      let invoice = null;
+      let invoicedPortion = 0;
+      let invoicedOpen = 0;
+      for (const inv of candidates) {
+        const myLines = (inv.lineItems || []).filter(li => driverNames.has(li.driverName));
+        const portion = myLines.reduce((s, li) => s + (Number(li.amount) || 0), 0);
+        if (portion > 0 && !invoice) {
+          invoice = inv;
+          invoicedPortion = portion;
+          if (inv.status === 'sent') invoicedOpen = portion;
+        }
+      }
+      rows.push({
+        req,
+        buckets,
+        deliveredCY,
+        hoursSec,
+        dollars,
+        invoice,
+        invoicedPortion,
+        invoicedOpen,
+      });
+    }
+    return rows.sort((a, b) => String(b.req.createdAt || '').localeCompare(String(a.req.createdAt || '')));
+  };
 
   const generateInvoiceForHaul = (haulerId, reqId) => {
     const hauler = db.haulers.find(h => h.id === haulerId);
@@ -11126,10 +11195,15 @@ function AdminReporting({ db, setDb, navigate }) {
         )}
         {db.haulers.map(hauler => {
           const hauls = haulsForHauler(hauler.id);
-          const haulerInvoices = invoices.filter(i => i.haulerId === hauler.id);
-          const haulScopedInvoices = haulerInvoices.filter(i => i.haulRequestId);
-          const haulerTotal = haulScopedInvoices.reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
-          const haulerOpen = haulScopedInvoices.filter(i => i.status === 'sent').reduce((s, i) => s + (i.lineItems || []).reduce((a, li) => a + (li.amount || 0), 0), 0);
+          // 2026-06-03 (derived rollup): per-hauler totals sum the hauler's
+          // PORTION of each haul's invoice (newer Final invoices are
+          // per-haul, not per-hauler, so we can't just match haulerId).
+          // For hauls without an invoice yet, surface the in-progress
+          // dollars (hauler.dollars) so dispatchers can see what's pending.
+          const haulerTotal = hauls.reduce((s, h) => s + (h.invoicedPortion || 0), 0);
+          const haulerOpen  = hauls.reduce((s, h) => s + (h.invoicedOpen   || 0), 0);
+          const haulerPending = hauls.reduce((s, h) => s + (h.invoicedPortion > 0 ? 0 : (h.dollars || 0)), 0);
+          const haulScopedInvoiceCount = hauls.filter(h => h.invoice).length;
           return (
             <Card key={hauler.id} padding={S[5]}>
               <div style={{ display: 'flex', alignItems: 'center', gap: S[3], marginBottom: S[4], flexWrap: 'wrap' }}>
@@ -11137,7 +11211,10 @@ function AdminReporting({ db, setDb, navigate }) {
                 <div style={{ flex: 1, minWidth: 200 }}>
                   <div style={{ ...T.h4, fontWeight: 700, color: C.ink, letterSpacing: -0.3 }}>{hauler.name}</div>
                   <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                    {hauls.length} haul{hauls.length === 1 ? '' : 's'} · {haulScopedInvoices.length} haul-scoped invoice{haulScopedInvoices.length === 1 ? '' : 's'}
+                    {hauls.length} haul{hauls.length === 1 ? '' : 's'} · {haulScopedInvoiceCount} haul-scoped invoice{haulScopedInvoiceCount === 1 ? '' : 's'}
+                    {haulerPending > 0 && (
+                      <span style={{ color: C.inkFaint }}> · {fmtMoney(haulerPending)} pending (no invoice yet)</span>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: S[5], textAlign: 'right' }}>
@@ -11158,45 +11235,59 @@ function AdminReporting({ db, setDb, navigate }) {
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: S[2] }}>
-                  {hauls.map(({ req, deliveredCY, invoice }) => {
-                    const project = db.projects.find(p => p.id === req.projectId);
+                  {hauls.map(({ req, deliveredCY, hoursSec, dollars, invoice, invoicedPortion }) => {
+                    const project = db.projects && db.projects.find(p => p.id === req.projectId);
                     const material = MATERIALS.find(m => m.code === req.materialCode);
-                    const invoiceTotal = invoice ? (invoice.lineItems || []).reduce((s, li) => s + (li.amount || 0), 0) : 0;
+                    const jobTitle = req.projectLabel || (project && project.name) || haulRequestLabel(db, req) || req.id;
+                    const hoursLabel = formatShiftDuration(hoursSec);
+                    // 2026-06-03 (derived rollup): clicking the row now
+                    // routes into the Job detail page where the contractor
+                    // can see their tickets + the haul-scoped Final Invoice
+                    // (issued per-haul, not per-hauler — Robert's spec).
+                    // The legacy per-hauler "Generate invoice" button is
+                    // gone because invoice generation moved to Job detail
+                    // in 354dcbe — that flow does per-dispatcher Settlement
+                    // Statements + a single per-haul Final Invoice.
                     return (
-                      <div key={req.id} style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap' }}>
+                      <div key={req.id} style={{ padding: S[3], background: C.surfaceHi, borderRadius: R.md, display: 'flex', alignItems: 'center', gap: S[3], flexWrap: 'wrap', cursor: 'pointer' }}
+                        onClick={() => navigate('/admin/jobs/' + req.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); navigate('/admin/jobs/' + req.id); } }}
+                        role="link" tabIndex={0}
+                        title="Open job detail">
                         <div style={{ flex: 1, minWidth: 240 }}>
                           <div style={{ ...T.bodySm, fontWeight: 700, color: C.ink }}>
-                            {project ? project.name : '—'}
+                            {jobTitle}
                             <span style={{ ...T.caption, color: C.inkDim, marginLeft: S[2], fontWeight: 500 }}>
-                              {material ? material.label : req.materialCode} · {deliveredCY} of {req.volumeCY} CY delivered
+                              {material ? material.label : req.materialCode} · {deliveredCY} of {req.volumeCY || '—'} CY
                             </span>
                           </div>
-                          {invoice && (
-                            <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
-                              {invoice.number} · {fmtMoney(invoiceTotal)} · issued {invoice.issuedDate}
-                            </div>
-                          )}
+                          <div style={{ ...T.monoSm, color: C.inkDim, marginTop: 2 }}>
+                            {hoursLabel} this hauler · {fmtMoney(dollars)} earned
+                            {invoice && invoicedPortion > 0 && (
+                              <span> · {invoice.number}: {fmtMoney(invoicedPortion)}</span>
+                            )}
+                            {!invoice && deliveredCY > 0 && (
+                              <span style={{ color: C.inkFaint }}> · no invoice yet</span>
+                            )}
+                          </div>
                         </div>
                         {invoice ? (
                           <>
                             <StatusPill status={invoice.status} />
                             {invoice.status === 'draft' && (
-                              <>
-                                <Btn variant="primary" size="xs" onClick={() => sendDraftInvoice(invoice.id)}>Mark sent</Btn>
-                                <Btn variant="ghost" size="xs" onClick={() => discardDraftInvoice(invoice.id)}>Discard</Btn>
-                              </>
+                              <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); sendDraftInvoice(invoice.id); }}>Mark sent</Btn>
                             )}
                             {invoice.status === 'sent' && (
-                              <Btn variant="primary" size="xs" onClick={() => markInvoicePaid(invoice.id)}>Mark paid</Btn>
+                              <Btn variant="primary" size="xs" onClick={(e) => { e.stopPropagation(); markInvoicePaid(invoice.id); }}>Mark paid</Btn>
                             )}
                           </>
                         ) : (
                           <Btn
-                            variant="primary"
+                            variant="secondary"
                             size="xs"
-                            disabled={deliveredCY === 0}
-                            onClick={() => generateInvoiceForHaul(hauler.id, req.id)}
-                          >Generate invoice</Btn>
+                            onClick={(e) => { e.stopPropagation(); navigate('/admin/jobs/' + req.id); }}
+                            title="Open the job to generate a Final Invoice from assigned tickets"
+                          >Open job →</Btn>
                         )}
                       </div>
                     );
