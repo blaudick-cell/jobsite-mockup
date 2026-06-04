@@ -7785,13 +7785,22 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
             null/empty if left blank. Red asterisk marks required fields. */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: S[3] }}>
           <div>
-            <div style={{ ...T.caption, marginBottom: 4 }}>Contractor / Dispatcher <span style={{ color: C.warn }}>*</span></div>
+            <div style={{ ...T.caption, marginBottom: 4 }}>Primary Contractor / Dispatcher <span style={{ color: C.warn }}>*</span></div>
             <select value={assignedHaulerId} onChange={e => setAssignedHaulerId(e.target.value)} style={fInputStyle}>
               <option value="">— Select —</option>
               {(db.haulers || []).slice()
                 .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
                 .map(h => <option key={h.id} value={h.id}>{h.name}</option>)}
             </select>
+            {/* 2026-06-03 (derived-assignments): "Primary" makes the intent
+                explicit — this is the contractor Robert expects on the job at
+                creation time. Additional contractors auto-join the job
+                whenever their drivers' tickets get assigned to it (derived
+                from driver_sessions.hauler_id + haul_id). Shown together on
+                the Job detail page. */}
+            <div style={{ ...T.micro, color: C.inkFaint, marginTop: 4 }}>
+              Other contractors auto-join when their drivers' tickets land on this job.
+            </div>
           </div>
           <div>
             <div style={{ ...T.caption, marginBottom: 4 }}>Job name <span style={{ color: C.warn }}>*</span></div>
@@ -9321,6 +9330,55 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
             })()}
           </div>
         </div>
+
+        {/* 2026-06-03 (derived job↔hauler assignments): chip row showing
+            every contractor / dispatcher working this job. The Primary chip
+            (filled accent) is the one Robert picked at job creation —
+            req.assignedHaulerId. Additional chips (outline) are derived
+            from driver_sessions where haul_id === req.id and hauler_id is
+            set — i.e. whoever's drivers have actually shown up to work it.
+            Clicking either lands on /admin/haulers/<id>. Hidden entirely
+            when no contractor is assigned and no derived haulers exist.
+            dispatchersForHaul is the canonical derived list (used by the
+            Settlement Statement dropdown), so this row stays in sync. */}
+        {(() => {
+          const primaryId = req.assignedHaulerId || null;
+          const derivedIds = dispatchersForHaul.map(d => d.id);
+          const primaryHauler = primaryId ? (db.haulers || []).find(h => h.id === primaryId) : null;
+          const others = dispatchersForHaul.filter(d => d.id !== primaryId);
+          if (!primaryHauler && others.length === 0) return null;
+          const chip = (h, isPrimary) => (
+            <button
+              key={h.id}
+              type="button"
+              onClick={() => navigate('/admin/haulers/' + h.id)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                padding: '4px 10px', borderRadius: R.pill,
+                background: isPrimary ? C.accentSoft : 'transparent',
+                color: isPrimary ? C.accent : C.ink,
+                border: `1px solid ${isPrimary ? C.accent : C.ruleHi}`,
+                fontFamily: F.body, fontSize: 12, fontWeight: 600,
+                cursor: 'pointer',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = isPrimary ? C.accentSoft : C.surfaceHi; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = isPrimary ? C.accentSoft : 'transparent'; }}
+              title={isPrimary ? 'Primary contractor — picked at job creation' : 'Auto-added from this contractor\'s tickets'}
+            >
+              {h.name}
+              {isPrimary && (
+                <span style={{ ...T.micro, color: C.accent, fontFamily: F.mono, marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0.6 }}>Primary</span>
+              )}
+            </button>
+          );
+          return (
+            <div style={{ display: 'flex', alignItems: 'center', gap: S[2], flexWrap: 'wrap', marginBottom: S[3] }}>
+              <Label style={{ marginRight: S[1] }}>Working</Label>
+              {primaryHauler && chip(primaryHauler, true)}
+              {others.map(h => chip(h, false))}
+            </div>
+          );
+        })()}
 
         {/* NEEDS / HAS pill + volume × material — single inline row. The
             pill is always clickable (toggleable direction); volume + material
