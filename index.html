@@ -762,14 +762,18 @@ const MATERIALS = [
   { code: 'AC', label: 'Asphalt Millings' },
   { code: 'RR', label: 'Rip Rap' },
   { code: 'MU', label: 'Mulch' },
+  // 2026-06-04: Demolition Debris — demo-site mixed debris (concrete chunks
+  // + rebar + drywall + framing scraps). Industry-standard "demo" interpretation
+  // (NOT demo/sample). Classed as export — debris is hauled AWAY from a job site.
+  { code: 'DM', label: 'Demolition Debris' },
 ];
 // 2026-06-02: import vs export classification used by the marketplace
 // Job card donut (green for imports / blue for exports) + the
 // "Needs" / "Exports" verb that prefixes the material line.
 // Exports = material hauled AWAY from a site (spoils, demolished
-// concrete + asphalt, ripped-out rip-rap). Everything else defaults
-// to import (brought TO the site).
-const MATERIAL_EXPORT_CODES = new Set(['EX', 'CO', 'AC', 'RR']);
+// concrete + asphalt, ripped-out rip-rap, mixed demo debris). Everything
+// else defaults to import (brought TO the site).
+const MATERIAL_EXPORT_CODES = new Set(['EX', 'CO', 'AC', 'RR', 'DM']);
 function materialDirection(code) {
   return MATERIAL_EXPORT_CODES.has(code) ? 'export' : 'import';
 }
