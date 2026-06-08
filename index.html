@@ -1372,40 +1372,91 @@ function EditableMaterial({ value, onSave, db, style = {} }) {
 // db.haulRequests. Same UX shell as the previous select+Other flow — type
 // to filter; pick a suggestion or accept anything you type.
 function MaterialField({ value, onSave, db, style = {} }) {
-  const [draftText, setDraftText] = useState(materialLabel(value) || '');
-  useEffect(() => setDraftText(materialLabel(value) || ''), [value]);
-  const fieldStyle = { ...T.body, padding: '8px 12px', borderRadius: R.sm, border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink, fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box', ...style };
-  const listId = React.useId();
-  const suggestions = useMemo(() => {
-    const raw = (db && Array.isArray(db.haulRequests))
+  // 2026-06-04 (Robert bug report): previous implementation used
+  // <input list=...> + <datalist> for typeahead autocomplete. Browsers
+  // FILTER the datalist by the input's current text — so once a job
+  // had Material: "Concrete" set, clicking the field showed ONLY
+  // "Concrete" in the popup (the user had to delete the text first
+  // before any other option became visible). Effectively impossible
+  // to switch materials without an extra step. Converted to a true
+  // <select> so the dropdown always shows the full MATERIALS list
+  // regardless of current value, even when there's already a value.
+  //
+  // Edge case: pre-2026-05-25 free-text values that aren't in
+  // MATERIALS still need to render + remain selectable. Surfaced as a
+  // tag-along option at the top with " (legacy)" so they survive a
+  // re-open without forcing a change. Also collect any DISTINCT
+  // legacy materialCode values across existing haulRequests so other
+  // legacy strings remain pickable.
+  const fieldStyle = {
+    ...T.body, padding: '8px 12px', borderRadius: R.sm,
+    border: `1px solid ${C.ruleHi}`, background: C.surface, color: C.ink,
+    fontFamily: F.body, fontWeight: 600, minWidth: 220, boxSizing: 'border-box',
+    cursor: 'pointer', appearance: 'auto',
+    ...style,
+  };
+  // Full canonical option set: MATERIALS in declaration order +
+  // any extra free-text values found in existing data that don't
+  // match a MATERIALS code or label. Dedupe by value.
+  const options = useMemo(() => {
+    const out = MATERIALS.map(m => ({ value: m.code, label: m.label }));
+    const seenValues = new Set(out.map(o => o.value));
+    const seenLabels = new Set(out.map(o => o.label));
+    const extras = (db && Array.isArray(db.haulRequests))
       ? db.haulRequests.map(r => r && r.materialCode).filter(s => s != null && String(s).trim() !== '')
       : [];
-    const set = new Set(raw.map(s => materialLabel(s)));
-    return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)));
+    for (const raw of extras) {
+      if (seenValues.has(raw)) continue;
+      // raw might equal a known label (the legacy free-text flow stored
+      // human labels directly). Skip those — they're already covered.
+      if (seenLabels.has(raw)) continue;
+      seenValues.add(raw);
+      out.push({ value: raw, label: raw + ' (legacy)' });
+    }
+    return out;
   }, [db]);
-
-  const commit = () => {
-    const next = (draftText || '').trim();
-    const current = materialLabel(value) || (value || '');
-    if (next !== current) onSave(next);
-  };
-
+  // Pre-2026-05-25 free-text seed rows stored the human label (e.g.
+  // "Concrete") in materialCode instead of the canonical 2-letter
+  // code ("CO"). Resolve label→code so the select shows the existing
+  // value as its canonical MATERIALS entry rather than as a separate
+  // duplicate "(legacy)" tag-along. The DB row is left untouched
+  // until the user picks something new; first explicit change writes
+  // the canonical code and the legacy form is gone for good.
+  const effectiveValue = useMemo(() => {
+    if (value == null || value === '') return '';
+    if (MATERIALS.some(m => m.code === value)) return value;
+    const byLabel = MATERIALS.find(m => m.label === value);
+    if (byLabel) return byLabel.code;
+    return value;
+  }, [value]);
+  // If the resolved value still isn't in `options` (truly arbitrary
+  // legacy string), splice it in at the top so the <select> can
+  // display it as the selected option. Otherwise React drops the
+  // value silently and the field appears to show the first item.
+  const optionsWithCurrent = useMemo(() => {
+    if (!effectiveValue) return options;
+    if (options.some(o => o.value === effectiveValue)) return options;
+    return [{ value: effectiveValue, label: materialLabel(effectiveValue) + ' (legacy)' }, ...options];
+  }, [options, effectiveValue]);
   return (
-    <>
-      <input value={draftText}
-        onChange={e => setDraftText(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => {
-          if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); }
-          if (e.key === 'Escape') setDraftText(materialLabel(value) || '');
-        }}
-        list={listId}
-        placeholder="Material…"
-        style={fieldStyle} />
-      <datalist id={listId}>
-        {suggestions.map(s => <option key={s} value={s} />)}
-      </datalist>
-    </>
+    <select
+      value={effectiveValue || ''}
+      onChange={e => {
+        const next = e.target.value;
+        // Compare against the resolved value, not the raw stored
+        // value — picking the canonical "Concrete" option when the
+        // row holds free-text "Concrete" should NOT trigger a save
+        // (no-op), but picking a different material should.
+        if (next !== effectiveValue) onSave(next);
+      }}
+      style={fieldStyle}
+      aria-label="Material"
+    >
+      {!effectiveValue && <option value="" disabled>Material…</option>}
+      {optionsWithCurrent.map(o => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
   );
 }
 
