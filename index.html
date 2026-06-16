@@ -87,6 +87,9 @@
     }
 
 
+    /* Card assignment grid collapses to one column on narrow phones. */
+    @media (max-width: 480px) { .jse-card-assign { grid-template-columns: 1fr !important; } }
+
     /* === Tier 2: tables → cards on mobile === */
     @media (max-width: 700px) {
       /* Tables become vertical card stacks */
@@ -3213,6 +3216,25 @@ function hydrateDb(raw) {
 const SB_URL = 'https://naqqlztgbayxcgfphrxg.supabase.co';
 const SB_KEY = 'sb_publishable_oA0wnxRiDG2QzXIeNT3zLQ_3YikcDRl';
 
+// Fire-and-forget SMS via the deployed send-sms Edge Function.
+// Normalises US numbers to E.164 (+1XXXXXXXXXX); silently skips anything
+// that can't be normalised so callers never need to null-guard the phone.
+async function sendSMS(toPhone, message) {
+  if (!toPhone || !message) return;
+  const digits = String(toPhone).replace(/\D/g, '');
+  const e164 = digits.length === 10 ? '+1' + digits
+             : digits.length === 11 && digits[0] === '1' ? '+' + digits
+             : null;
+  if (!e164) return;
+  try {
+    await fetch(SB_URL + '/functions/v1/send-sms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ to: e164, message }),
+    });
+  } catch (_) { /* fire-and-forget — never block the UI */ }
+}
+
 // Per-tab client identity — UUID stored in localStorage so a refresh keeps
 // the same id. Used by the Phase 3 Realtime echo-skip logic.
 const SB_CLIENT_ID = (() => {
@@ -4114,7 +4136,18 @@ function useDriverSessionsLive() {
       const lastEvent = evts.length ? evts[evts.length - 1] : null;
       const pickupCount = evts.filter(e => e.event_type === 'pickup_load').length;
       const dropCount   = evts.filter(e => e.event_type === 'dropoff_load').length;
-      return { session: s, events: evts, lastEvent, pickupCount, dropCount };
+      // 2026-06-11 (driver-widget START SHIFT): shift-hours anchor. The
+      // widget now writes a 'start_shift' truck_event when the driver taps
+      // START SHIFT (or implicitly at the first pickup if they skip it).
+      // The earliest start_shift event — evts is asc, so find() returns it —
+      // is stamped onto the session as `shift_anchor_at`; computeShiftHours
+      // and eventElapsedSeconds prefer it over started_at (intake
+      // completion). Sessions with no start_shift event (everything before
+      // this shipped) resolve undefined and keep the legacy started_at
+      // anchor, so historical hours/$ are byte-identical.
+      const startEv = evts.find(e => e.event_type === 'start_shift');
+      const session = startEv ? { ...s, shift_anchor_at: startEv.event_at } : s;
+      return { session, events: evts, lastEvent, pickupCount, dropCount };
     });
   }, [state.sessions, state.events]);
 
@@ -4273,7 +4306,11 @@ function computeShiftHours(session) {
   if (!session || !session.started_at) {
     return { totalHours: 0, currentShiftSeconds: 0 };
   }
-  const startMs = new Date(session.started_at).getTime();
+  // 2026-06-11: prefer the shift-clock anchor (earliest start_shift
+  // truck_event, stamped as shift_anchor_at by the buckets memo) over
+  // started_at (intake completion). Legacy sessions have no stamp and
+  // keep the wall-clock-from-started_at definition unchanged.
+  const startMs = new Date(session.shift_anchor_at || session.started_at).getTime();
   if (!Number.isFinite(startMs)) {
     return { totalHours: 0, currentShiftSeconds: 0 };
   }
@@ -4291,7 +4328,9 @@ function computeShiftHours(session) {
 function eventElapsedSeconds(session, event) {
   if (!session || !session.started_at) return 0;
   if (!event || !event.event_at) return 0;
-  const startMs = new Date(session.started_at).getTime();
+  // 2026-06-11: same anchor preference as computeShiftHours — timeline
+  // elapsed times count from the shift clock, not intake completion.
+  const startMs = new Date(session.shift_anchor_at || session.started_at).getTime();
   const evMs = new Date(event.event_at).getTime();
   if (!isFinite(startMs) || !isFinite(evMs)) return 0;
   return Math.max(0, Math.floor((evMs - startMs) / 1000));
@@ -4588,8 +4627,8 @@ function Landing({ navigate }) {
         <div style={{ ...sectionShell, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: S[8], alignItems: 'center' }}>
           {/* Left — copy + CTAs */}
           <div>
-            <Label color={C.accent}>Operational visibility</Label>
             <h1 style={{ ...T.h1, fontSize: 64, lineHeight: 1.05, letterSpacing: -2, marginTop: S[3], marginBottom: S[4], color: C.ink }}>
+
               Dispatch to delivery,{' '}
               <span data-hero-line="break">on the same page.</span>
             </h1>
@@ -7810,6 +7849,21 @@ function AdminHaulRequestCreate({ db, setDb, navigate, hash }) {
           refId: newId,
         }
       ));
+      // SMS the assigned hauler with job details
+      const assignedHauler = db.haulers.find(h => h.id === assignedHaulerId);
+      if (assignedHauler && assignedHauler.phone) {
+        const jobLabel = (projectLabel || '').trim() || newId.slice(5);
+        const matLabel2 = (MATERIALS.find(m => m.code === materialCode) || {}).label || materialCode;
+        const pickupName = (newReq.pickupLocation && newReq.pickupLocation.name) || 'TBD';
+        const dropoffName = (newReq.dropoffLocation && newReq.dropoffLocation.name) || 'TBD';
+        const startDate = (newReq.timing && newReq.timing.startDate) || '';
+        sendSMS(assignedHauler.phone,
+          `New job assigned: ${jobLabel} — ${volumeNum} CY ${matLabel2}. ` +
+          `Pickup: ${pickupName} → Drop: ${dropoffName}` +
+          (startDate ? `. Start: ${startDate}` : '') +
+          `. Reply STOP to opt out.`
+        );
+      }
       navigate('/admin/jobs/' + newId);
     } catch (e) {
       setSubmitting(false);
@@ -8685,13 +8739,28 @@ function AdminHaulRequestDetail({ db, setDb, navigate, requestId }) {
     const next = nextHaulerId || null;
     if (next === prevId) return false;
     const prevName = prevId ? ((db.haulers || []).find(h => h.id === prevId) || {}).name : null;
-    const nextName = next   ? ((db.haulers || []).find(h => h.id === next)   || {}).name : null;
+    const nextHauler = next ? (db.haulers || []).find(h => h.id === next) : null;
+    const nextName = nextHauler ? nextHauler.name : null;
     setDb(prev => appendActivity(
       { ...prev, haulRequests: prev.haulRequests.map(r => r.id === req.id ? { ...r, assignedHaulerId: next } : r) },
       { type: 'haul_request.contractorChanged', actorRole: 'admin', actorId: null,
         summary: `Contractor changed: ${prevName || '—'} → ${nextName || '—'} on ${haulRequestLabel(db, req) || req.id}`,
         refId: req.id }
     ));
+    // SMS the newly assigned hauler
+    if (nextHauler && nextHauler.phone) {
+      const jobLabel = haulRequestLabel(db, req) || req.id;
+      const matCode = req.materialCode || '';
+      const volStr = req.volumeCY ? req.volumeCY + ' CY ' : '';
+      const pickupName = (req.pickupLocation && req.pickupLocation.name) || '';
+      const dropoffName = (req.dropoffLocation && req.dropoffLocation.name) || '';
+      sendSMS(nextHauler.phone,
+        `Job assigned to you: ${jobLabel} — ${volStr}${matCode}` +
+        (pickupName ? `. Pickup: ${pickupName}` : '') +
+        (dropoffName ? ` → Drop: ${dropoffName}` : '') +
+        '. Reply STOP to opt out.'
+      );
+    }
     return true;
   };
   // 2026-06-02 (v23): HAS / NEEDS lives on haul_requests.haul_type now —
@@ -10349,7 +10418,15 @@ function AdminHaulers({ db, setDb, navigate }) {
           <div className="hauler-card-actions" style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: S[2], flexWrap: 'wrap' }}>
             <div className="hauler-card-action-btns" style={{ display: 'flex', gap: 6 }}>
               <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.alert('TODO: open assign-haul modal for ' + h.name); }}>Assign haul</Btn>
-              <Btn variant="ghost" size="xs" onClick={(e) => { e.stopPropagation(); window.location.href = 'mailto:' + (h.email || ''); }}>Message</Btn>
+              <Btn variant="ghost" size="xs" onClick={(e) => {
+                e.stopPropagation();
+                if (h.phone) {
+                  const msg = window.prompt('SMS to ' + h.name + ' (' + h.phone + '):', '');
+                  if (msg && msg.trim()) sendSMS(h.phone, msg.trim());
+                } else if (h.email) {
+                  window.location.href = 'mailto:' + h.email;
+                }
+              }}>Message</Btn>
             </div>
           </div>
         </div>
@@ -10716,7 +10793,14 @@ function AdminHaulerDetail({ db, setDb, navigate, haulerId }) {
           </div>
           <div style={{ display: 'flex', gap: S[2], flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <Btn variant="secondary" size="sm" onClick={beginEdit}>Edit hauler</Btn>
-            <Btn variant="secondary" size="sm" onClick={() => { if (hauler.email) window.location.href = `mailto:${hauler.email}`; }} disabled={!hauler.email}>Message</Btn>
+            <Btn variant="secondary" size="sm" onClick={() => {
+              if (hauler.phone) {
+                const msg = window.prompt('SMS to ' + hauler.name + ' (' + hauler.phone + '):', '');
+                if (msg && msg.trim()) sendSMS(hauler.phone, msg.trim());
+              } else if (hauler.email) {
+                window.location.href = `mailto:${hauler.email}`;
+              }
+            }} disabled={!hauler.phone && !hauler.email}>Message</Btn>
             {/* 2026-06-02 (contractor-view link): copies the bookmarkable
                 /c/<slug> URL to the dispatcher's clipboard. Internal-handoff
                 safe by link secrecy (no auth gate per launch spec). */}
@@ -11543,6 +11627,7 @@ function AdminPayments({ db, setDb, navigate, hash }) {
         refId: null,
       }
     ));
+    if (h && h.phone) sendSMS(h.phone, `Invoice ${inv.number} sent — $${(inv.amount || 0).toFixed(2)} due. Reply STOP to opt out.`);
     alert('Invoice ' + inv.number + ' sent to ' + inv.billTo + '.');
   };
 
@@ -11897,6 +11982,7 @@ function AdminInvoiceDetail({ invoiceId, db, setDb, navigate }) {
         refId: null,
       }
     ));
+    if (hauler && hauler.phone) sendSMS(hauler.phone, `Invoice ${inv.number} sent — $${invoiceTotal.toFixed(2)} due. Reply STOP to opt out.`);
     alert('Invoice ' + inv.number + ' sent to ' + inv.billTo + '.');
   };
 
@@ -12470,10 +12556,12 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
   const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
                           : et === 'dropoff_load' ? 'Drop-off'
                           : et === 'end_shift' ? 'End shift'
+                          : et === 'start_shift' ? 'Start shift'
                           : et || '—';
   const eventColor = (et) => et === 'pickup_load' ? C.ok
                           : et === 'dropoff_load' ? C.warn
                           : et === 'end_shift' ? C.warnSoft
+                          : et === 'start_shift' ? C.info
                           : C.inkDim;
   const truckTypeLabel = (tt) => {
     const map = { SD: 'Single Dump', TAN: 'Tandem', ED: 'End Dump',
@@ -12899,6 +12987,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
       for (const e of points) {
         const color = e.event_type === 'pickup_load' ? '#22c55e'
                     : e.event_type === 'dropoff_load' ? '#f59e0b'
+                    : e.event_type === 'start_shift' ? '#3b82f6'
                     : '#ef4444';
         const el = document.createElement('div');
         el.style.cssText = `width:10px;height:10px;border-radius:50%;background:${color};border:2px solid #0b0b0b;box-shadow:0 0 0 1px ${color};`;
@@ -13194,7 +13283,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                 color: C.inkDim,
               }}>{truckType}</span>}
               {sess
-                ? <span style={{ fontSize: 11.5 }}>{fmtClock(sess.started_at)}<span style={{ color: C.inkFaint }}> · </span>{fmtElapsed(sess.started_at, sess.ended_at)}{sess.ended_at && <span style={{ color: C.inkFaint }}> · Ended {fmtClock(sess.ended_at)}</span>}</span>
+                ? <span style={{ fontSize: 11.5 }}>{fmtClock(sess.started_at)}<span style={{ color: C.inkFaint }}> · </span>{fmtElapsed(sess.shift_anchor_at || sess.started_at, sess.ended_at)}{sess.ended_at && <span style={{ color: C.inkFaint }}> · Ended {fmtClock(sess.ended_at)}</span>}</span>
                 : <span style={{ color: C.inkFaint }}>No active driver session for this truck</span>}
             </div>
           </div>
@@ -13467,7 +13556,7 @@ function DriverSessionDrawer({ sessionId, truckId, scrollEventId, onClose, db, s
                       </div>
                       <div style={rowStyle}>
                         <span style={labelStyle}>Shift</span>
-                        <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
+                        <span style={{ ...valueStyle, fontFamily: F.mono }}>{fmtElapsed(sess.shift_anchor_at || sess.started_at, sess.ended_at)}</span>
                       </div>
                       <div style={{ ...rowStyle, position: 'relative' }}>
                         <span style={labelStyle}>End</span>
@@ -13933,6 +14022,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
   const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
                           : et === 'dropoff_load' ? 'Drop-off'
                           : et === 'end_shift' ? 'End shift'
+                          : et === 'start_shift' ? 'Start shift'
                           : et || '—';
 
   const sectionLabel = activeOnly ? 'Active drivers (newest first)' : 'Driver activity (newest first)';
@@ -13979,6 +14069,7 @@ function DriverActivityTable({ db, navigate, live: liveProp, maxRows, activeOnly
     const lbl = lastEv.event_type === 'pickup_load' ? 'Pickup'
               : lastEv.event_type === 'dropoff_load' ? 'Drop-off'
               : lastEv.event_type === 'end_shift' ? 'End shift'
+              : lastEv.event_type === 'start_shift' ? 'Start shift'
               : lastEv.event_type;
     return `Last: ${lbl} ${fmtClock(lastEv.event_at)} · ${fmtMtDate(lastEv.event_at)}`;
   };
@@ -14223,6 +14314,9 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
   const [companyEditing, setCompanyEditing] = React.useState(false);
   const [companyDraft, setCompanyDraft] = React.useState(sess.company || '');
   const [companyFlash, setCompanyFlash] = React.useState(null);
+  // 2026-06-08 (KPI-first tile redesign): collapsed by default; tap the
+  // face to expand route + assignment + the drawer link in place.
+  const [cardOpen, setCardOpen] = React.useState(false);
   // Known-company suggestions (for the datalist) — distinct non-empty
   // companies across all sessions. Helps the dispatcher pick from
   // existing haulers without re-typing.
@@ -14547,175 +14641,195 @@ function ActiveTruckCard({ b, trucksById, live, db, onOpenDrawer, onEdit, onDele
     };
     const pickupAddr  = fmtEventLocation(firstPickup)  || '— no location';
     const dropoffAddr = fmtEventLocation(firstDropoff) || '— no location';
+    const isEnded = !!sess.ended_at;
+    const statusColor = isEnded ? C.inkFaint : C.ok;
+    // Boxed select used inside the expanded assignment block (≥44px tap target).
+    const boxSel = (filled) => ({
+      appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+      width: '100%', height: 42, padding: '0 30px 0 12px',
+      background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.md,
+      color: filled ? C.ink : C.inkDim, fontFamily: F.body, fontSize: 13,
+      fontWeight: filled ? 600 : 500, fontStyle: filled ? 'normal' : 'italic',
+      cursor: 'pointer', outline: 'none',
+      backgroundImage: `url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'><path fill='${encodeURIComponent('#5A5A5A')}' d='M5 7L1 3h8z'/></svg>")`,
+      backgroundRepeat: 'no-repeat', backgroundPosition: 'right 11px center', backgroundSize: '8px 8px',
+    });
+    // KPI-first: the four numbers a dispatcher scans for at a glance.
+    const kpis = [
+      { v: String(loadCountCompleted), l: 'Loads', accent: true },
+      { v: String(cyCompleted),        l: 'CY' },
+      { v: fmtElapsed(sess.shift_anchor_at || sess.started_at, sess.ended_at), l: isEnded ? 'Shift' : 'On shift' },
+      { v: fmtUsd0(dollarsToday),      l: 'Today' },
+    ];
     return (
-      <div
-        onClick={() => onOpenDrawer()}
-        style={{
-          cursor: 'pointer',
-          background: C.surface,
-          border: `1px solid ${C.rule}`,
-          borderRadius: R.md,
-          padding: '8px 12px',
-          display: 'flex', flexDirection: 'column', gap: 4,
-          position: 'relative',
-        }}>
-        {/* Top-right corner: edit + delete action icons. Position-absolute so
-            the wrap behaviour of the header row never pushes them around. */}
-        {(onEdit || onDelete) && (
-          <div onClick={(e) => e.stopPropagation()} style={{
-            position: 'absolute', top: 4, right: 6,
-            display: 'flex', alignItems: 'center', gap: 2, zIndex: 1,
+      <div style={{
+        background: C.surface,
+        border: `1px solid ${cardOpen ? C.ruleHi : C.rule}`,
+        borderRadius: R.lg, overflow: 'hidden',
+        boxShadow: cardOpen ? '0 8px 30px rgba(0,0,0,0.35)' : 'none',
+        transition: 'border-color 120ms ease',
+      }}>
+        {/* Collapsed face — KPI-first. Tap toggles the accordion in place. */}
+        <button type="button"
+          onClick={() => setCardOpen(o => !o)}
+          aria-expanded={cardOpen}
+          style={{
+            width: '100%', textAlign: 'left', background: 'transparent',
+            border: 'none', cursor: 'pointer', color: 'inherit',
+            padding: '14px 14px 4px', display: 'block',
           }}>
-            {onEdit && (
-              <button type="button" aria-label="Edit session" title="Edit session"
-                onClick={(e) => { e.stopPropagation(); onEdit(); }}
-                style={actionBtnStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.color = C.accent; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.color = C.inkFaint; }}
-              >✎</button>
-            )}
-            {onDelete && (
-              <button type="button" aria-label="Delete session" title="Delete session"
-                onClick={(e) => { e.stopPropagation(); onDelete(); }}
-                style={actionBtnStyle}
-                onMouseEnter={(e) => { e.currentTarget.style.opacity = '0.85'; e.currentTarget.style.color = C.warn; }}
-                onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.55'; e.currentTarget.style.color = C.inkFaint; }}
-              >🗑</button>
-            )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{
+              width: 9, height: 9, borderRadius: '50%', flexShrink: 0,
+              background: statusColor,
+              boxShadow: isEnded ? 'none' : `0 0 0 4px ${C.okSoft}`,
+            }} aria-hidden="true" />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{
+                ...T.h4, fontWeight: 700, color: C.ink, display: 'block',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}>{sess.driver_name || '— no name —'}</span>
+              <span style={{ fontFamily: F.mono, fontSize: 11, color: C.inkDim, marginTop: 1, display: 'block' }}>
+                {truckNumDisplay ? `#${truckNumDisplay} · ` : ''}{truckTypeShort(truckType || sess.truck_type)}
+              </span>
+            </span>
+            <span style={{
+              fontFamily: F.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: 0.7,
+              textTransform: 'uppercase', padding: '4px 9px', borderRadius: R.pill, flexShrink: 0,
+              color: statusColor,
+              background: isEnded ? 'rgba(255,255,255,0.03)' : C.okSoft,
+              border: `1px solid ${isEnded ? C.rule : 'rgba(91,201,124,0.3)'}`,
+            }}>{isEnded ? 'Off Shift' : 'On Shift'}</span>
+            <span aria-hidden="true" style={{
+              color: C.inkFaint, flexShrink: 0, display: 'inline-flex',
+              transform: cardOpen ? 'rotate(180deg)' : 'none', transition: 'transform 200ms ease',
+            }}>▾</span>
+          </div>
+          <div style={{
+            fontSize: 12, color: C.inkDim, margin: '7px 0 0 19px',
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+          }}>
+            <span style={{ color: sess.company ? C.inkDim : C.inkFaint }}>{sess.company || 'Unassigned hauler'}</span>
+            <span style={{ color: C.inkFaint }}> · </span>
+            <span style={{ color: currentHaulLabel ? C.inkDim : C.inkFaint }}>{currentHaulLabel || 'No job'}</span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 2, margin: '12px 0 12px', padding: '0 5px' }}>
+            {kpis.map((k, i) => (
+              <div key={i} style={{
+                display: 'flex', flexDirection: 'column', gap: 2, padding: '6px 4px',
+                borderLeft: i === 0 ? 'none' : `1px solid ${C.rule}`,
+              }}>
+                <span style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 18, lineHeight: 1, color: k.accent ? C.accent : C.ink }}>{k.v}</span>
+                <span style={{ fontSize: 9.5, letterSpacing: 0.5, textTransform: 'uppercase', color: C.inkFaint }}>{k.l}</span>
+              </div>
+            ))}
+          </div>
+        </button>
+
+        {/* Accordion detail — route, assignment, single drawer link. */}
+        {cardOpen && (
+          <div style={{ padding: '4px 16px 16px', borderTop: `1px solid ${C.rule}` }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 9, margin: '14px 0' }}>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', marginTop: 3, flexShrink: 0, background: C.ok }} aria-hidden="true" />
+                <div>
+                  <div style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.4, textTransform: 'uppercase', color: C.inkFaint }}>Pickup</div>
+                  <div style={{ fontSize: 13, color: C.ink, marginTop: 1 }}>{pickupAddr}</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', marginTop: 3, flexShrink: 0, background: C.warn }} aria-hidden="true" />
+                <div>
+                  <div style={{ fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.4, textTransform: 'uppercase', color: C.inkFaint }}>Dropoff</div>
+                  <div style={{ fontSize: 13, color: C.ink, marginTop: 1 }}>{dropoffAddr}</div>
+                </div>
+              </div>
+            </div>
+
+            {/* Truck / rate context (was the inline Row 5). */}
+            <div style={{ ...T.caption, color: C.inkDim, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
+              <span>{truckTypeShort(truckType || sess.truck_type)}</span>
+              <span style={{ color: C.inkFaint }}>·</span>
+              <span>{cyPerLoad} CY/load</span>
+              <span style={{ color: C.inkFaint }}>·</span>
+              <span>${hourlyRate}/hr</span>
+            </div>
+
+            {/* Assignment — the one inline edit kept on the list. */}
+            <div className="jse-card-assign" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, margin: '14px 0' }}>
+              <div>
+                <label style={{ display: 'block', fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.5, textTransform: 'uppercase', color: C.inkFaint, marginBottom: 5 }}>Dispatch / Hauler</label>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                  <select value={sess.hauler_id || ''}
+                    onChange={(e) => saveHaulerFromCard(e.target.value || null)}
+                    title={sess.hauler_id ? `Assigned to: ${haulerDisplay}` : 'Assign contractor / dispatcher'}
+                    style={boxSel(!!sess.hauler_id)}>
+                    <option value="">Unassigned</option>
+                    {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
+                      <option key={h.id} value={h.id}>{h.name}</option>
+                    ))}
+                  </select>
+                  {flashColor && <span style={{ color: flashColor, flexShrink: 0 }}>{flashLabel}</span>}
+                </span>
+              </div>
+              <div>
+                <label style={{ display: 'block', fontFamily: F.mono, fontSize: 9.5, letterSpacing: 0.5, textTransform: 'uppercase', color: C.inkFaint, marginBottom: 5 }}>Job</label>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%' }}>
+                  <select value={sess.haul_id || ''}
+                    onChange={(e) => saveHaul(e.target.value || null)}
+                    title={currentHaulLabel ? `Assigned to job: ${currentHaulLabel}` : 'Assign to a job'}
+                    style={boxSel(!!sess.haul_id)}>
+                    <option value="">Unassigned</option>
+                    {pickableHaulsGrouped.forContractor.length > 0 && (
+                      <optgroup label={sess.hauler_id ? `Jobs for ${haulerDisplay}` : 'Jobs for contractor'}>
+                        {pickableHaulsGrouped.forContractor.map(r => (
+                          <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {pickableHaulsGrouped.unassigned.length > 0 && (
+                      <optgroup label="Unassigned jobs">
+                        {pickableHaulsGrouped.unassigned.map(r => (
+                          <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {pickableHaulsGrouped.otherContractors.length > 0 && (
+                      <optgroup label="All other jobs">
+                        {pickableHaulsGrouped.otherContractors.map(r => (
+                          <option key={r.id} value={r.id}>
+                            {r.projectLabel || r.id}{r.contractorName ? ` · ${r.contractorName}` : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                  </select>
+                  {haulFlash === 'saving' && <span style={{ color: C.inkDim, flexShrink: 0 }}>…</span>}
+                  {haulFlash === 'saved'  && <span style={{ color: C.ok,    flexShrink: 0 }}>✓</span>}
+                  {haulFlash === 'error'  && <span style={{ color: C.warn,  flexShrink: 0 }}>✗</span>}
+                </span>
+              </div>
+            </div>
+
+            {/* Condensed: one link to the full session drawer (owns map / history / edit / delete). */}
+            <div style={{ marginTop: 14, paddingTop: 13, borderTop: `1px solid ${C.rule}` }}>
+              <button type="button" onClick={() => onOpenDrawer()} style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                width: '100%', minHeight: 50, padding: '9px 16px',
+                background: C.surfaceHi, border: `1px solid ${C.ruleHi}`, borderRadius: R.md,
+                color: C.ink, cursor: 'pointer', textAlign: 'left',
+              }}>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  <span style={{ fontFamily: F.body, fontSize: 13.5, fontWeight: 700 }}>Open full session</span>
+                  <span style={{ fontFamily: F.mono, fontSize: 10, letterSpacing: 0.3, color: C.inkFaint, textTransform: 'uppercase' }}>Map · history · edit · delete</span>
+                </span>
+                <span aria-hidden="true" style={{ color: C.inkDim, fontSize: 16 }}>›</span>
+              </button>
+            </div>
+
+            <div style={{ color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2, marginTop: 11, textAlign: 'center', fontFamily: F.mono }}>{lastEvBlurb}</div>
           </div>
         )}
-
-        {/* Row 1: Driver / Dispatch / Job — label-prefixed inline tokens.
-            Driver = InlineEditableText. Dispatch + Job = inline <select>.
-            paddingRight reserves room for the absolute-positioned icons. */}
-        <div style={{
-          display: 'flex', alignItems: 'center', flexWrap: 'wrap',
-          gap: '4px 12px', fontSize: 13, paddingRight: 56, minWidth: 0,
-        }}>
-          <span onClick={(e) => e.stopPropagation()} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
-          }}>
-            <span style={labelStyle}>Driver:</span>
-            <InlineEditableText
-              value={sess.driver_name}
-              onSave={saveDriverName}
-              placeholder="— no name —"
-              ariaLabel="Edit driver name"
-              style={{ fontWeight: 700, color: C.ink, fontSize: 13 }}
-            />
-          </span>
-          <span onClick={(e) => e.stopPropagation()} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
-          }}>
-            <span style={labelStyle}>Dispatch:</span>
-            <select value={sess.hauler_id || ''}
-              onChange={(e) => saveHaulerFromCard(e.target.value || null)}
-              title={sess.hauler_id ? `Assigned to: ${haulerDisplay}` : 'Assign contractor / dispatcher'}
-              style={inlineSelectStyle(!!sess.hauler_id)}>
-              <option value="">Unassigned</option>
-              {(db.haulers || []).slice().sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''))).map(h => (
-                <option key={h.id} value={h.id}>{h.name}</option>
-              ))}
-            </select>
-            {flashColor && <span style={{ color: flashColor, marginLeft: 2, flexShrink: 0 }}>{flashLabel}</span>}
-          </span>
-          <span onClick={(e) => e.stopPropagation()} style={{
-            display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0,
-          }}>
-            <span style={labelStyle}>Job:</span>
-            <select value={sess.haul_id || ''}
-              onChange={(e) => saveHaul(e.target.value || null)}
-              title={currentHaulLabel ? `Assigned to job: ${currentHaulLabel}` : 'Assign to a job'}
-              style={inlineSelectStyle(!!sess.haul_id)}>
-              <option value="">Unassigned</option>
-              {pickableHaulsGrouped.forContractor.length > 0 && (
-                <optgroup label={sess.hauler_id ? `Jobs for ${haulerDisplay}` : 'Jobs for contractor'}>
-                  {pickableHaulsGrouped.forContractor.map(r => (
-                    <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
-                  ))}
-                </optgroup>
-              )}
-              {pickableHaulsGrouped.unassigned.length > 0 && (
-                <optgroup label="Unassigned jobs">
-                  {pickableHaulsGrouped.unassigned.map(r => (
-                    <option key={r.id} value={r.id}>{r.projectLabel || r.id}</option>
-                  ))}
-                </optgroup>
-              )}
-              {pickableHaulsGrouped.otherContractors.length > 0 && (
-                <optgroup label="All other jobs">
-                  {pickableHaulsGrouped.otherContractors.map(r => (
-                    <option key={r.id} value={r.id}>
-                      {r.projectLabel || r.id}{r.contractorName ? ` · ${r.contractorName}` : ''}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-            {haulFlash === 'saving' && <span style={{ color: C.inkDim, marginLeft: 2, flexShrink: 0 }}>…</span>}
-            {haulFlash === 'saved'  && <span style={{ color: C.ok,    marginLeft: 2, flexShrink: 0 }}>✓</span>}
-            {haulFlash === 'error'  && <span style={{ color: C.warn,  marginLeft: 2, flexShrink: 0 }}>✗</span>}
-          </span>
-        </div>
-
-        {/* Row 2: metrics — Loads · CY · Hours · $Revenue.
-            Revenue is the only $ amount on the card (rate on row 5 is /hr-qualified). */}
-        <div style={{
-          display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap',
-          fontFamily: F.mono, fontVariantNumeric: 'tabular-nums', color: C.ink,
-          fontSize: 13.5, fontWeight: 700, letterSpacing: -0.2,
-        }}>
-          <span>{loadLabel}</span>
-          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
-          <span>{cyCompleted} CY</span>
-          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
-          <span>{fmtElapsed(sess.started_at, sess.ended_at)}</span>
-          <span style={{ color: C.inkFaint, fontWeight: 400 }}>·</span>
-          <span style={{ color: C.accent }}>{fmtUsd0(dollarsToday)}</span>
-        </div>
-
-        {/* Row 3: ▲ Pickup address — green triangle, muted address. */}
-        <div style={{
-          color: C.inkDim, fontSize: 11.5, lineHeight: 1.25,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-        }}>
-          <span style={{ color: C.ok, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▲</span>
-          <span style={{ color: C.inkFaint }}>Pickup:</span>{' '}
-          <span>{pickupAddr}</span>
-        </div>
-
-        {/* Row 4: ▼ Dropoff address — red/orange triangle, muted address. */}
-        <div style={{
-          color: C.inkDim, fontSize: 11.5, lineHeight: 1.25,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
-        }}>
-          <span style={{ color: C.warn, fontWeight: 700, marginRight: 4 }} aria-hidden="true">▼</span>
-          <span style={{ color: C.inkFaint }}>Dropoff:</span>{' '}
-          <span>{dropoffAddr}</span>
-        </div>
-
-        {/* Row 5: #truck# truck-type · CY/load · $rate/hr.
-            Truck# prefix only renders when truck_number is non-blank. */}
-        <div style={{
-          ...T.caption, color: C.inkDim, fontSize: 11.5, lineHeight: 1.35,
-          display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap',
-        }}>
-          {truckNumDisplay && (
-            <span style={{ fontWeight: 700, color: C.ink, fontFamily: F.mono }}>#{truckNumDisplay}</span>
-          )}
-          <span>{truckTypeShort(truckType || sess.truck_type)}</span>
-          <span style={{ color: C.inkFaint }}>·</span>
-          <span>{cyPerLoad} CY/load</span>
-          <span style={{ color: C.inkFaint }}>·</span>
-          <span>${hourlyRate}/hr</span>
-        </div>
-
-        {/* Row 6: Last event — carries MM/DD/YYYY date per long-standing spec. */}
-        <div style={{
-          color: C.inkFaint, fontSize: 10.5, lineHeight: 1.2,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          minWidth: 0,
-        }}>{lastEvBlurb}</div>
       </div>
     );
   }
@@ -14771,6 +14885,7 @@ function dispatchExportRows(buckets, trucksById) {
   const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
                           : et === 'dropoff_load' ? 'Drop-off'
                           : et === 'end_shift' ? 'End shift'
+                          : et === 'start_shift' ? 'Start shift'
                           : et || '—';
 
   // Sort order (2026-05-31, two-level grouping pass):
@@ -15353,10 +15468,12 @@ function AdminActiveTrucks({ db, setDb, navigate }) {
   const eventLabel = (et) => et === 'pickup_load' ? 'Pickup'
                           : et === 'dropoff_load' ? 'Drop-off'
                           : et === 'end_shift' ? 'End shift'
+                          : et === 'start_shift' ? 'Start shift'
                           : et || '—';
   const eventColor = (et) => et === 'pickup_load' ? C.ok
                           : et === 'dropoff_load' ? C.warn
                           : et === 'end_shift' ? C.warnSoft
+                          : et === 'start_shift' ? C.info
                           : C.inkDim;
 
   return (
